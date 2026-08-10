@@ -93,7 +93,7 @@ class VoskBridge : FlutterPlugin, MethodChannel.MethodCallHandler {
         val bufferSize = AudioRecord.getMinBufferSize(
             SAMPLE_RATE, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT
         )
-        recognizer = Recognizer(model, SAMPLE_RATE)
+        recognizer = Recognizer(model, SAMPLE_RATE.toFloat())
         audioRecord = AudioRecord(
             MediaRecorder.AudioSource.MIC,
             SAMPLE_RATE,
