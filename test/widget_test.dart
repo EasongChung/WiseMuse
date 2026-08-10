@@ -1,3 +1,4 @@
+import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:wisemuse/main.dart';
@@ -11,5 +12,7 @@ void main() {
     expect(find.text('未初始化'), findsOneWidget);
     expect(find.text('导入模型文件'), findsOneWidget);
     expect(find.text('尝试在线下载'), findsOneWidget);
+    // 测试期日志入口
+    expect(find.byIcon(Icons.bug_report_outlined), findsOneWidget);
   });
 }

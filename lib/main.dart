@@ -1,11 +1,14 @@
 import 'package:flutter/material.dart';
 
+import 'core/debug/app_log.dart';
 import 'features/follow/asr_demo_page.dart';
 
 /// [v0.1.0] 智启陪读 WiseMuse 应用壳。
 ///
 /// 当前 home 为 Vosk 离线识别 PoC 验证页；后续 Phase 3+ 接入正式首页。
-void main() {
+Future<void> main() async {
+  // 测试期：先起日志（落盘），确保后续任何崩溃前的步骤都有记录。
+  await AppLog.init();
   runApp(const WiseMuseApp());
 }
 

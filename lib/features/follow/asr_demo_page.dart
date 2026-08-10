@@ -2,9 +2,11 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:permission_handler/permission_handler.dart';
 
+import '../../core/debug/app_log.dart';
 import '../../services/asr_service.dart';
 import '../../services/model_store.dart';
 import '../../services/vosk_asr_service.dart';
+import '../debug/log_page.dart';
 
 /// [v0.1.0] Vosk 离线识别 PoC 验证页。
 ///
@@ -18,6 +20,8 @@ class AsrDemoPage extends StatefulWidget {
 }
 
 class _AsrDemoPageState extends State<AsrDemoPage> {
+  static const _tag = 'asr_demo';
+
   final AsrService _asr = VoskAsrService();
   bool _busy = false;
   bool _listening = false;
@@ -25,11 +29,13 @@ class _AsrDemoPageState extends State<AsrDemoPage> {
   String _result = '';
 
   Future<void> _initModel() async {
+    AppLog.d(_tag, '点击「尝试在线下载」');
     setState(() {
       _busy = true;
       _status = '请求麦克风权限…';
     });
     final perm = await Permission.microphone.request();
+    AppLog.d(_tag, '麦克风权限: $perm');
     if (!perm.isGranted) {
       setState(() {
         _busy = false;
@@ -40,13 +46,16 @@ class _AsrDemoPageState extends State<AsrDemoPage> {
     setState(() => _status = '下载/解压模型（约42MB）…');
     try {
       final modelPath = await ModelStore.ensureVoskCnModel();
+      AppLog.d(_tag, '模型就绪，调用 init: $modelPath');
       final ok = await _asr.init(modelPath);
+      AppLog.d(_tag, 'init 返回: $ok');
       if (!mounted) return;
       setState(() {
         _busy = false;
         _status = ok ? '模型已加载 ✓' : '模型加载失败';
       });
-    } catch (e) {
+    } catch (e, s) {
+      AppLog.e(_tag, '在线下载失败: $e\n$s');
       if (!mounted) return;
       setState(() {
         _busy = false;
@@ -57,30 +66,37 @@ class _AsrDemoPageState extends State<AsrDemoPage> {
 
   /// 通过文件选择器导入本地模型 zip（离线方式）。
   Future<void> _importModel() async {
-    final result = await FilePicker.pickFiles(
-      type: FileType.custom,
-      allowedExtensions: ['zip'],
-      dialogTitle: '选择 Vosk 模型 zip 文件',
-    );
-    if (result == null ||
-        result.files.isEmpty ||
-        result.files.first.path == null) {
-      return; // 用户取消
-    }
-    final zipPath = result.files.first.path!;
-    setState(() {
-      _busy = true;
-      _status = '正在导入并解压模型…';
-    });
+    AppLog.d(_tag, '点击「导入模型文件」，打开文件选择器');
     try {
+      final result = await FilePicker.pickFiles(
+        type: FileType.custom,
+        allowedExtensions: ['zip'],
+        dialogTitle: '选择 Vosk 模型 zip 文件',
+      );
+      if (result == null ||
+          result.files.isEmpty ||
+          result.files.first.path == null) {
+        AppLog.d(_tag, '用户取消或未取得文件路径');
+        return; // 用户取消
+      }
+      final zipPath = result.files.first.path!;
+      AppLog.d(_tag, '已选文件: $zipPath');
+      setState(() {
+        _busy = true;
+        _status = '正在导入并解压模型…';
+      });
+
       final modelPath = await ModelStore.importFromZip(zipPath);
+      AppLog.d(_tag, '导入完成，调用 VoskBridge.init');
       final ok = await _asr.init(modelPath);
+      AppLog.d(_tag, 'init 返回: $ok');
       if (!mounted) return;
       setState(() {
         _busy = false;
         _status = ok ? '模型导入并加载成功 ✓' : '模型加载失败';
       });
-    } catch (e) {
+    } catch (e, s) {
+      AppLog.e(_tag, '导入失败: $e\n$s');
       if (!mounted) return;
       setState(() {
         _busy = false;
@@ -90,28 +106,56 @@ class _AsrDemoPageState extends State<AsrDemoPage> {
   }
 
   Future<void> _toggleListen() async {
-    if (_listening) {
-      final text = await _asr.stop();
+    try {
+      if (_listening) {
+        AppLog.d(_tag, '停止录音');
+        final text = await _asr.stop();
+        AppLog.d(_tag, '识别结果: "$text"');
+        if (!mounted) return;
+        setState(() {
+          _listening = false;
+          _result = text;
+          _status = '识别完成';
+        });
+      } else {
+        AppLog.d(_tag, '开始录音');
+        final ok = await _asr.start();
+        AppLog.d(_tag, 'start 返回: $ok');
+        if (!mounted) return;
+        setState(() {
+          _listening = ok;
+          _status = ok ? '录音中… 说一句话后点停止' : '启动录音失败';
+        });
+      }
+    } catch (e, s) {
+      AppLog.e(_tag, '录音/识别异常: $e\n$s');
       if (!mounted) return;
       setState(() {
         _listening = false;
-        _result = text;
-        _status = '识别完成';
-      });
-    } else {
-      final ok = await _asr.start();
-      if (!mounted) return;
-      setState(() {
-        _listening = ok;
-        _status = ok ? '录音中… 说一句话后点停止' : '启动录音失败';
+        _status = '录音失败: $e';
       });
     }
+  }
+
+  void _openLog() {
+    Navigator.of(
+      context,
+    ).push(MaterialPageRoute<void>(builder: (_) => const LogPage()));
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Vosk 离线识别 PoC')),
+      appBar: AppBar(
+        title: const Text('Vosk 离线识别 PoC'),
+        actions: [
+          IconButton(
+            tooltip: '运行日志',
+            icon: const Icon(Icons.bug_report_outlined),
+            onPressed: _openLog,
+          ),
+        ],
+      ),
       body: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(

@@ -3,10 +3,14 @@ package com.zqpd.wisemuse
 import android.media.AudioFormat
 import android.media.AudioRecord
 import android.media.MediaRecorder
+import android.util.Log
 import io.flutter.embedding.engine.plugins.FlutterPlugin
 import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
+import java.io.File
 import org.json.JSONObject
+import org.vosk.LibVosk
+import org.vosk.LogLevel
 import org.vosk.Model
 import org.vosk.Recognizer
 
@@ -23,6 +27,7 @@ import org.vosk.Recognizer
  */
 class VoskBridge : FlutterPlugin, MethodChannel.MethodCallHandler {
     companion object {
+        private const val TAG = "VoskBridge"
         private const val CHANNEL = "com.zqpd.wisemuse/vosk"
         private const val SAMPLE_RATE = 16000
     }
@@ -53,12 +58,24 @@ class VoskBridge : FlutterPlugin, MethodChannel.MethodCallHandler {
                     result.error("bad_arg", "modelPath 不能为空", null)
                     return
                 }
+                // 捕获 Throwable：native 库缺失抛的是 UnsatisfiedLinkError（Error 非 Exception），
+                // 只 catch Exception 会漏网并让进程直接挂掉。
                 try {
                     dispose()
+                    logModelDir(path)
+                    LibVosk.setLogLevel(LogLevel.INFO) // native 日志输出到 logcat
+                    Log.i(TAG, "Model() 加载开始: $path")
+                    val t0 = System.currentTimeMillis()
                     model = Model(path)
+                    Log.i(TAG, "Model() 加载成功，耗时 ${System.currentTimeMillis() - t0}ms")
                     result.success(true)
-                } catch (e: Exception) {
-                    result.error("init_failed", "模型加载失败: ${e.message}", null)
+                } catch (t: Throwable) {
+                    Log.e(TAG, "模型加载失败", t)
+                    result.error(
+                        "init_failed",
+                        "模型加载失败: ${t.javaClass.simpleName}: ${t.message}",
+                        null
+                    )
                 }
             }
             "isLoaded" -> result.success(model != null)
@@ -70,15 +87,17 @@ class VoskBridge : FlutterPlugin, MethodChannel.MethodCallHandler {
                 try {
                     startRecording()
                     result.success(true)
-                } catch (e: Exception) {
-                    result.error("start_failed", "启动录音失败: ${e.message}", null)
+                } catch (t: Throwable) {
+                    Log.e(TAG, "启动录音失败", t)
+                    result.error("start_failed", "启动录音失败: ${t.message}", null)
                 }
             }
             "stop" -> {
                 try {
                     result.success(stopRecording())
-                } catch (e: Exception) {
-                    result.error("stop_failed", "停止录音失败: ${e.message}", null)
+                } catch (t: Throwable) {
+                    Log.e(TAG, "停止录音失败", t)
+                    result.error("stop_failed", "停止录音失败: ${t.message}", null)
                 }
             }
             "dispose" -> {
@@ -86,6 +105,27 @@ class VoskBridge : FlutterPlugin, MethodChannel.MethodCallHandler {
                 result.success(true)
             }
             else -> result.notImplemented()
+        }
+    }
+
+    /**
+     * 打印模型目录清单（定位「解压完整但层级不对」这类问题）。
+     * Vosk 要求目录下含 am / conf / graph 等子目录。
+     */
+    private fun logModelDir(path: String) {
+        try {
+            val dir = File(path)
+            Log.i(TAG, "模型目录 exists=${dir.exists()} isDir=${dir.isDirectory}")
+            val children = dir.listFiles()
+            if (children == null) {
+                Log.w(TAG, "模型目录不可列举（权限或不存在）")
+                return
+            }
+            for (c in children) {
+                Log.i(TAG, "  - ${c.name} ${if (c.isDirectory) "[dir]" else "${c.length()}B"}")
+            }
+        } catch (t: Throwable) {
+            Log.w(TAG, "列举模型目录失败: ${t.message}")
         }
     }
 
