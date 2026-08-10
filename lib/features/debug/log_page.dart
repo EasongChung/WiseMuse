@@ -1,3 +1,6 @@
+import 'dart:convert';
+
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -29,12 +32,42 @@ class _LogPageState extends State<LogPage> {
   }
 
   Future<void> _copy() async {
+    // Android 剪贴板有字数上限，长日志优先用导出（_export）。
     final text = _showFile ? _fileText : AppLog.toText();
-    await Clipboard.setData(ClipboardData(text: text));
+    final truncated = text.length > 8000;
+    await Clipboard.setData(
+      ClipboardData(text: truncated ? text.substring(0, 8000) : text),
+    );
     if (!mounted) return;
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(SnackBar(content: Text('已复制 ${text.length} 字符到剪贴板')));
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          truncated ? '已截断复制前 8000 字（日志过长，请用导出）' : '已复制 ${text.length} 字符到剪贴板',
+        ),
+      ),
+    );
+  }
+
+  /// 导出日志为文件（走系统 SAF 保存对话框，可存到 Downloads 等位置）。
+  Future<void> _export() async {
+    final text = await AppLog.readFile();
+    try {
+      final saved = await FilePicker.saveFile(
+        dialogTitle: '导出日志文件',
+        fileName: 'wisemuse-log-${DateTime.now().millisecondsSinceEpoch}.txt',
+        bytes: utf8.encode(text.isEmpty ? '（无日志）' : text),
+      );
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(saved == null ? '导出已取消' : '已导出: $saved')),
+      );
+    } catch (e, s) {
+      AppLog.e('log_page', '导出失败: $e\n$s');
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('导出失败: $e')));
+    }
   }
 
   Future<void> _clear() async {
@@ -56,6 +89,11 @@ class _LogPageState extends State<LogPage> {
             tooltip: '复制全部',
             icon: const Icon(Icons.copy),
             onPressed: _copy,
+          ),
+          IconButton(
+            tooltip: '导出日志文件',
+            icon: const Icon(Icons.file_download_outlined),
+            onPressed: _export,
           ),
           IconButton(
             tooltip: '清空',
