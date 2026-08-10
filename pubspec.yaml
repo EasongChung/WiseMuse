@@ -20,6 +20,8 @@ dependencies:
   path: 1.9.1
   # 录音权限（跟读/听写）
   permission_handler: 13.0.0
+  # 文件选择（模型导入）
+  file_picker: 11.0.3
   # 模型下载与解压
   http: 1.6.0
   archive: 4.0.9

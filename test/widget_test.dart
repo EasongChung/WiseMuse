@@ -9,6 +9,7 @@ void main() {
     // 验证页标题与初始状态
     expect(find.text('Vosk 离线识别 PoC'), findsOneWidget);
     expect(find.text('未初始化'), findsOneWidget);
-    expect(find.text('初始化'), findsOneWidget);
+    expect(find.text('导入模型文件'), findsOneWidget);
+    expect(find.text('尝试在线下载'), findsOneWidget);
   });
 }

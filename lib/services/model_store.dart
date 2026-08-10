@@ -57,6 +57,29 @@ class ModelStore {
     return modelDir.path;
   }
 
+  /// 从外部 zip 文件导入模型，复制到私有目录并解压，返回模型目录路径。
+  ///
+  /// 用于网络不可达时的离线导入：用户下载镜像 zip 后通过文件选择器导入。
+  static Future<String> importFromZip(String zipPath) async {
+    final root = await modelsDir();
+    final modelDir = Directory(p.join(root.path, voskCnModelDir));
+
+    // 已有模型先清理
+    if (await modelDir.exists()) {
+      await modelDir.delete(recursive: true);
+    }
+
+    final destZip = p.join(root.path, '$voskCnModelDir.zip');
+    await File(zipPath).copy(destZip);
+    await _extractZip(destZip, root.path);
+    await File(destZip).delete();
+
+    if (!await modelDir.exists()) {
+      throw Exception('导入的 zip 中未找到模型目录: $voskCnModelDir');
+    }
+    return modelDir.path;
+  }
+
   static Future<void> _download(String url, String savePath) async {
     final resp = await http.get(Uri.parse(url));
     if (resp.statusCode != 200) {

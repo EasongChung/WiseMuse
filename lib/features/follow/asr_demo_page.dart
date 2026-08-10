@@ -1,3 +1,4 @@
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:permission_handler/permission_handler.dart';
 
@@ -49,7 +50,41 @@ class _AsrDemoPageState extends State<AsrDemoPage> {
       if (!mounted) return;
       setState(() {
         _busy = false;
-        _status = '初始化失败: $e';
+        _status = '网络下载失败，请改用「导入模型文件」: $e';
+      });
+    }
+  }
+
+  /// 通过文件选择器导入本地模型 zip（离线方式）。
+  Future<void> _importModel() async {
+    final result = await FilePicker.pickFiles(
+      type: FileType.custom,
+      allowedExtensions: ['zip'],
+      dialogTitle: '选择 Vosk 模型 zip 文件',
+    );
+    if (result == null ||
+        result.files.isEmpty ||
+        result.files.first.path == null) {
+      return; // 用户取消
+    }
+    final zipPath = result.files.first.path!;
+    setState(() {
+      _busy = true;
+      _status = '正在导入并解压模型…';
+    });
+    try {
+      final modelPath = await ModelStore.importFromZip(zipPath);
+      final ok = await _asr.init(modelPath);
+      if (!mounted) return;
+      setState(() {
+        _busy = false;
+        _status = ok ? '模型导入并加载成功 ✓' : '模型加载失败';
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _busy = false;
+        _status = '导入失败: $e';
       });
     }
   }
@@ -83,24 +118,65 @@ class _AsrDemoPageState extends State<AsrDemoPage> {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             Card(
-              child: ListTile(
-                leading: Icon(
-                  _asr.isLoaded ? Icons.check_circle : Icons.download,
-                  color: _asr.isLoaded ? Colors.green : null,
-                ),
-                title: const Text('Vosk 中文小模型'),
-                subtitle: Text(_status),
-                trailing:
-                    _busy
-                        ? const SizedBox(
-                          width: 20,
-                          height: 20,
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        )
-                        : FilledButton(
-                          onPressed: _asr.isLoaded ? null : _initModel,
-                          child: const Text('初始化'),
+              child: Padding(
+                padding: const EdgeInsets.all(12),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Row(
+                      children: [
+                        Icon(
+                          _asr.isLoaded ? Icons.check_circle : Icons.download,
+                          color: _asr.isLoaded ? Colors.green : null,
+                          size: 28,
                         ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const Text(
+                                'Vosk 中文小模型',
+                                style: TextStyle(fontWeight: FontWeight.bold),
+                              ),
+                              Text(
+                                _status,
+                                style: const TextStyle(fontSize: 12),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                    if (!_asr.isLoaded && !_busy) ...[
+                      const SizedBox(height: 8),
+                      FilledButton.icon(
+                        icon: const Icon(Icons.folder_open, size: 18),
+                        onPressed: _importModel,
+                        label: const Text('导入模型文件'),
+                      ),
+                      const SizedBox(height: 4),
+                      TextButton(
+                        onPressed: _initModel,
+                        child: const Text(
+                          '尝试在线下载',
+                          style: TextStyle(fontSize: 12),
+                        ),
+                      ),
+                    ],
+                    if (_busy)
+                      const Padding(
+                        padding: EdgeInsets.only(top: 8),
+                        child: Center(
+                          child: SizedBox(
+                            width: 20,
+                            height: 20,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
               ),
             ),
             const SizedBox(height: 16),
