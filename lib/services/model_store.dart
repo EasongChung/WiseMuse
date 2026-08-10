@@ -13,7 +13,11 @@ class ModelStore {
   ModelStore._();
 
   /// Vosk 中文小模型（短句跟读够用）。
+  /// 主源为 GitHub 镜像（alphacephei.com 在国内网络常 DNS 解析失败），
+  /// 失败时回退官方源。
   static const String voskCnModelUrl =
+      'https://github.com/kercre123/vosk-models/raw/main/vosk-model-small-cn-0.22.zip';
+  static const String voskCnModelUrlFallback =
       'https://alphacephei.com/vosk/models/vosk-model-small-cn-0.22.zip';
   static const String voskCnModelDir = 'vosk-model-small-cn-0.22';
 
@@ -38,7 +42,12 @@ class ModelStore {
     }
 
     final zipPath = p.join(root.path, '$voskCnModelDir.zip');
-    await _download(voskCnModelUrl, zipPath);
+    try {
+      await _download(voskCnModelUrl, zipPath);
+    } catch (e) {
+      // 主源失败回退官方源
+      await _download(voskCnModelUrlFallback, zipPath);
+    }
     await _extractZip(zipPath, root.path);
     await File(zipPath).delete();
 
