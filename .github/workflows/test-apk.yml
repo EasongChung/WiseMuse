@@ -33,10 +33,10 @@ jobs:
           java-version: '17'
           cache: gradle
 
-      - name: 安装 Flutter 3.29.3
+      - name: 安装 Flutter 3.44.9
         uses: subosito/flutter-action@v2
         with:
-          flutter-version: '3.29.3'
+          flutter-version: '3.44.9'
           channel: stable
           cache: true
 
