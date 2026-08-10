@@ -12,11 +12,19 @@ dependencies:
   flutter:
     sdk: flutter
   cupertino_icons: 1.0.8
+  # 数据层（精确锁定兼容 Flutter 3.29.3 / Dart 3.7.2）
+  sqflite: 2.4.2
+  shared_preferences: 2.5.3
+  path_provider: 2.1.5
+  path_provider_android: 2.2.16
+  path: 1.9.1
 
 dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: 5.0.0
+  # 单测内存库（桌面/测试环境跑 sqflite）
+  sqflite_common_ffi: 2.3.6
 
 flutter:
   uses-material-design: true
