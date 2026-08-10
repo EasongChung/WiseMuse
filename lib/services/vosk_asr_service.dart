@@ -9,7 +9,9 @@ class VoskAsrService implements AsrService {
 
   @override
   Future<bool> init(String modelPath) async {
-    final ok = await _channel.invokeMethod<bool>('init', {'modelPath': modelPath});
+    final ok = await _channel.invokeMethod<bool>('init', {
+      'modelPath': modelPath,
+    });
     _loaded = ok ?? false;
     return _loaded;
   }

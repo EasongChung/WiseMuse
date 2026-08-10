@@ -90,16 +90,17 @@ class _AsrDemoPageState extends State<AsrDemoPage> {
                 ),
                 title: const Text('Vosk 中文小模型'),
                 subtitle: Text(_status),
-                trailing: _busy
-                    ? const SizedBox(
-                        width: 20,
-                        height: 20,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      )
-                    : FilledButton(
-                        onPressed: _asr.isLoaded ? null : _initModel,
-                        child: const Text('初始化'),
-                      ),
+                trailing:
+                    _busy
+                        ? const SizedBox(
+                          width: 20,
+                          height: 20,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                        : FilledButton(
+                          onPressed: _asr.isLoaded ? null : _initModel,
+                          child: const Text('初始化'),
+                        ),
               ),
             ),
             const SizedBox(height: 16),
@@ -120,9 +121,7 @@ class _AsrDemoPageState extends State<AsrDemoPage> {
                   borderRadius: BorderRadius.circular(8),
                 ),
                 child: SingleChildScrollView(
-                  child: Text(
-                    _result.isEmpty ? '（点击开始录音，说一句话后停止）' : _result,
-                  ),
+                  child: Text(_result.isEmpty ? '（点击开始录音，说一句话后停止）' : _result),
                 ),
               ),
             ),

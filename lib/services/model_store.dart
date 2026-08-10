@@ -64,7 +64,12 @@ class ModelStore {
       if (file.isFile) {
         await File(outPath)
             .create(recursive: true)
-            .then((f) => f.writeAsBytes(List<int>.from(file.content as List<int>), flush: true));
+            .then(
+              (f) => f.writeAsBytes(
+                List<int>.from(file.content as List<int>),
+                flush: true,
+              ),
+            );
       }
     }
   }
