@@ -1,8 +1,7 @@
-gradle-wrapper.jar
+# 可复现构建：gradlew/gradle-wrapper.jar 必须入库（speak_reader 同款处理）
+# 否则 CI 检出后无 gradlew，`./android/gradlew` 报 command not found (127)。
 /.gradle
 /captures/
-/gradlew
-/gradlew.bat
 /local.properties
 GeneratedPluginRegistrant.java
 .cxx/
