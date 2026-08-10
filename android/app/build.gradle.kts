@@ -44,3 +44,8 @@ kotlin {
 flutter {
     source = "../.."
 }
+
+dependencies {
+    // Vosk 离线语音识别（Apache-2.0，自带 .so + Java API）
+    implementation("com.alphacephei:vosk-android:0.3.75")
+}

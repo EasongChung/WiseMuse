@@ -18,6 +18,11 @@ dependencies:
   path_provider: 2.1.5
   path_provider_android: 2.2.16
   path: 1.9.1
+  # 录音权限（跟读/听写）
+  permission_handler: 13.0.0
+  # 模型下载与解压
+  http: 1.6.0
+  archive: 4.0.9
 
 dev_dependencies:
   flutter_test:

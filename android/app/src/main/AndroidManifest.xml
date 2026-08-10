@@ -1,6 +1,8 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- 跟读/听写：麦克风录音 -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO"/>
     <application
-        android:label="wisemuse"
+        android:label="智启陪读"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
         <activity
