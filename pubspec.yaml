@@ -1,0 +1,22 @@
+name: wisemuse
+description: "智启陪读 WiseMuse：儿童学习助手 —— 教材识别、朗读、跟读验证、听写与生词复习。"
+publish_to: 'none'
+
+# 版本号由 CI 注入（--build-name/--build-number），此处为开发基线。
+version: 0.1.0+1
+
+environment:
+  sdk: ^3.7.2
+
+dependencies:
+  flutter:
+    sdk: flutter
+  cupertino_icons: 1.0.8
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: 5.0.0
+
+flutter:
+  uses-material-design: true
