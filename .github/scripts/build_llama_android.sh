@@ -87,10 +87,13 @@ cmake --build "$OPENCL_BUILD" -j"$NJOBS"
 test -f "$OPENCL_BUILD/libOpenCL.so" || {
   echo "FATAL: libOpenCL.so 编译失败" >&2; exit 1
 }
-# 装进 sysroot（find_package(OpenCL) 从 sysroot 找头/库）
-mkdir -p "$SYSROOT/usr/include" "$SYSROOT/usr/lib/aarch64-linux-android"
-cp -r "$OPENCL_HEADERS/CL" "$SYSROOT/usr/include/"
-cp "$OPENCL_BUILD/libOpenCL.so" "$SYSROOT/usr/lib/aarch64-linux-android/"
+# 装进 sysroot（find_package(OpenCL) 从 sysroot 找头/库）。
+# 注意：CI 的 NDK 装在 /opt/android-ndk 且 chmod 只给了 a+rX（无写权限），
+# 非 root runner 用户直接 cp 会 Permission denied（实测失败点）→ 用 sudo。
+# 首次建目录时 sudo 保证属主权限，后续非 sudo 也能读。
+sudo mkdir -p "$SYSROOT/usr/include" "$SYSROOT/usr/lib/aarch64-linux-android"
+sudo cp -r "$OPENCL_HEADERS/CL" "$SYSROOT/usr/include/"
+sudo cp "$OPENCL_BUILD/libOpenCL.so" "$SYSROOT/usr/lib/aarch64-linux-android/"
 
 # patch ai_chat.cpp：开 GPU offload（默认 n_gpu_layers=0 只会用 CPU）。
 # llama.cpp 在 GPU backend 不可用时自动回落 CPU（offloaded 0/M layers），无风险。
