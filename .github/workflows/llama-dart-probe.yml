@@ -1,0 +1,96 @@
+name: llama-cpp-dart Probe
+
+# [v0.1.0] llama_cpp_dart 0.9.0-dev.12 探底（手动触发，测试性质）。
+#
+# 目的：验证 llama_cpp_dart 的 Native Assets 构建在 WiseMuse 真实栈
+# （AGP 9.0.1 / Gradle 9.1.0 / Built-in Kotlin / minSdk 26 / arm64）上能否通过，
+# 且 .so 真能打进 APK —— 通过才迁移（扫描 Download 直接加载 + 多模态），
+# 不通过则官方桥 blueprint 保留兜底。
+#
+# 注意：探底临时注入依赖（sed 改工作副本的 pubspec，不进 git），
+# 验证模型/mmproj 的多模态实测放到真机环节（本 workflow 只验构建）。
+on:
+  workflow_dispatch:
+
+jobs:
+  probe-native-assets:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 安装 Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: gradle
+
+      - name: 安装 Flutter 3.44.9
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.44.9'
+          channel: stable
+          cache: true
+
+      # 临时注入 llama_cpp_dart 依赖（仅本次 CI 工作副本，不进 git）。
+      # 探底的目的就是验证 build.dart hook 在 AGP9/Built-in Kotlin 上跑通。
+      - name: 临时注入 llama_cpp_dart 依赖
+        shell: bash
+        run: |
+          set -euo pipefail
+          # 在 dependencies 块（第一个 "flutter:\n    sdk: flutter" 后）追加
+          python3 - <<'EOF'
+          import re
+          p = 'pubspec.yaml'
+          s = open(p, encoding='utf-8').read()
+          if 'llama_cpp_dart' in s:
+              print('llama_cpp_dart 已存在，跳过注入')
+              raise SystemExit(0)
+          marker = '  cupertino_icons: 1.0.8\n'
+          assert marker in s, '未找到 dependencies 注入点'
+          s = s.replace(marker, marker + '  # llama_cpp_dart 探底（Native Assets，多模态）注：最终版会精确锁定\n  llama_cpp_dart: 0.9.0-dev.12\n')
+          open(p, 'w', encoding='utf-8').write(s)
+          print('已注入 llama_cpp_dart: 0.9.0-dev.12')
+          EOF
+          grep -A2 "llama_cpp_dart" pubspec.yaml
+
+      - name: 获取依赖
+        run: flutter pub get
+
+      # Minimal 静态探底：仅验证 Native Assets hook 是否在构建期执行。
+      # 探底不加载真模型（真机环节才验），build 能过 + .so 进 APK 即达标。
+      - name: 构建 arm64 Release APK（keyless 自动回退 debug 签名）
+        run: flutter build apk --debug --target-platform android-arm64
+
+      # 门禁打到产物本身：确认 Native Assets 确实把 .so 打进了 APK。
+      - name: 门禁校验（APK 内 must contain llama .so）
+        shell: bash
+        run: |
+          set -euo pipefail
+          APK=$(ls build/app/outputs/flutter-apk/app-debug.apk 2>/dev/null || true)
+          if [ -z "$APK" ]; then
+            echo "::error::未找到 APK 构建产物"; exit 1
+          fi
+          ls -lh "$APK"
+          echo "=== lib/arm64-v8a 内容 ==="
+          unzip -l "$APK" | grep -E "lib/arm64-v8a/.*\.so" || true
+          # 核心断言：llama + mtmd 必须存在（Native Assets 生效的硬证据）
+          for so in libllama.so libmtmd.so libggml.so; do
+            if unzip -l "$APK" | grep -q "lib/arm64-v8a/$so"; then
+              echo "  OK  $so 已进 APK"
+            else
+              echo "::error::APK 缺少 $so —— Native Assets 未生效"
+              exit 1
+            fi
+          done
+          echo "===> PROBE PASS: llama_cpp_dart Native Assets 在 WiseMuse 栈可构建且 .so 进 APK"
+
+      - name: 上传探底 APK（30 天，供核对）
+        uses: actions/upload-artifact@v4
+        with:
+          name: llama-dart-probe-apk
+          path: build/app/outputs/flutter-apk/app-debug.apk
+          if-no-files-found: error
+          retention-days: 30
