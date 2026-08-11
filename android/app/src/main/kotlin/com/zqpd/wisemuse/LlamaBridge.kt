@@ -100,6 +100,14 @@ class LlamaBridge : FlutterPlugin, MethodChannel.MethodCallHandler {
             try {
                 val ctx = appContext ?: throw IllegalStateException("appContext 缺失")
                 val eng = engine ?: AiChat.getInferenceEngine(ctx).also { engine = it }
+                // 引擎是单例（AiChat.getInferenceEngine 缓存 instance）：
+                // 上一次 loadModel 失败后 state 会永久落在 Error，导致后续任何 init
+                // 立即短路（"state=Error" 假失败，换模型也没用）。Error 状态必须先
+                // cleanUp() 复位为 Initialized 才能重试（官方实现支持此分支）。
+                if (eng.state.value is InferenceEngine.State.Error) {
+                    Log.w(TAG, "引擎处于 Error 状态，cleanUp() 复位后重试")
+                    eng.cleanUp()
+                }
                 // 等待原生库初始化完成（System.loadLibrary("ai-chat") 在内部协程）。
                 // 若 loadLibrary 失败（.so 缺失/ABI 不符），状态会落到 Error 或卡在
                 // Initializing，用超时兜底避免 UI 永久挂起。

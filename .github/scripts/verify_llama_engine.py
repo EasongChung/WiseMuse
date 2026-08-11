@@ -161,14 +161,27 @@ def main():
     for n in sorted(necessary):
         if n not in base_names:
             missing_necessary.append(f"缺少 {n}")
-    cpu = sorted(b for b in base_names if b.startswith("libggml-cpu-"))
-    if not cpu:
-        missing_necessary.append("缺少 libggml-cpu-* 变体（GGML_CPU_ALL_VARIANTS 未生效）")
+
+    # CPU 后端布局校验（GGML_BACKED_DL=OFF 静态注册方案）：
+    #   - 必须存在 libggml-cpu.so（非 GGML_CPU_ALL_VARIANTS 的单一 CPU 后端载体）
+    #   - 必须导出 CPU 后端注册/接口符号（ggml_backend_cpu_reg 或 ggml_cpu_init），
+    #     否则运行时 ggml_backend_reg_count()==0 → llama_model_load_from_file 秒返
+    #     nullptr（真机曾整个引擎 Release 全部变体缺符号导致任何模型都加载失败）
+    CPU_EXPORTS_REQUIRED = {"ggml_backend_cpu_reg", "ggml_cpu_init"}
+    cpu_lib = "libggml-cpu.so"
+    if cpu_lib not in base_names:
+        missing_necessary.append(f"缺少 {cpu_lib}（CPU 后端静态注册载体）")
+    else:
+        cpu_info = parse_elf(os.path.join(engine_dir, cpu_lib))
+        cpu_hits = CPU_EXPORTS_REQUIRED & cpu_info["dynsyms"]
+        print(f"  OK  {cpu_lib} CPU 后端导出: {sorted(cpu_hits) or '（空）'}")
+        if not cpu_hits:
+            missing_necessary.append(f"{cpu_lib} 无 CPU 后端导出符号（静态注册未生效）")
 
     if missing_necessary:
         print("FAIL: " + "; ".join(missing_necessary)); sys.exit(1)
 
-    print(f"PASS: 引擎门禁全绿（{len(sos)} 个 .so，CPU 变体 {len(cpu)} 个, 架构 aarch64/64 位）")
+    print(f"PASS: 引擎门禁全绿（{len(sos)} 个 .so，CPU 后端 {cpu_lib} 已确认, 架构 aarch64/64 位）")
     sys.exit(0)
 
 if __name__ == "__main__":
