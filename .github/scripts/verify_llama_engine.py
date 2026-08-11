@@ -113,8 +113,12 @@ def main():
     print(f"校验 {len(sos)} 个 .so：")
     ai_chat = os.path.join(engine_dir, "libai-chat.so")
     base_names = {os.path.basename(p) for p in sos}
+    # 系统库（Android 运行时就绪，无需随包）：libc/libm/libdl/liblog/libandroid
+    # 其余 NEEDED 必须在本包内闭环（如 libomp.so 曾被漏收 → dlopen 失败）
+    SYSTEM_LIBS = {"libc.so", "libm.so", "libdl.so", "liblog.so", "libandroid.so"}
     all_syms = set()
     missing_necessary = []
+    missing_deps = set()
     for p in sos:
         try:
             info = parse_elf(p)
@@ -125,11 +129,22 @@ def main():
         if info["machine"] != EM_AARCH64:
             missing_necessary.append(f"{base}: machine={info['machine']}（非 aarch64）")
         all_syms |= info["dynsyms"]
+        # NEEDED 闭环：非系统库依赖必须都在本包内
+        for dep in info["needed"]:
+            if dep in SYSTEM_LIBS:
+                continue
+            if dep not in base_names:
+                missing_deps.add(f"{base} -> {dep}（包内缺失）")
         # 每个 .so 的 NEEDED 里不允许 libc++_shared
         if "libc++_shared.so" in info["needed"]:
             print(f"  FAIL {base}: 依赖 libc++_shared.so（必须全静态链）")
             sys.exit(1)
         print(f"  OK  {base}  (machine={info['machine']} needed={sorted(info['needed'])})")
+
+    if missing_deps:
+        for d in sorted(missing_deps):
+            print(f"  FAIL 依赖闭环: {d}")
+        sys.exit(1)
 
     # libai-chat.so 必须存在且 JNI 符号齐全
     if not os.path.exists(ai_chat):

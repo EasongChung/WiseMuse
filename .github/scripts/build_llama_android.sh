@@ -91,6 +91,17 @@ if [ "$FOUND" = "0" ]; then
   echo "FATAL: 未收集到任何目标 .so" >&2; exit 1
 fi
 
+# libomp.so：官方 arm64 默认 GGML_OPENMP=ON，各 .so NEEDED 依赖 libomp，
+# 但 Android 系统库不提供它（NDK 自带），必须随引擎打包，否则真机
+# dlopen 报 library "libomp.so" not found。从 NDK sysroot 的 aarch64 档取。
+OMP_SRC="$(find "$NDK_ROOT" -path '*aarch64-linux-android*' -name 'libomp.so' | head -1)"
+if [ -z "$OMP_SRC" ]; then
+  echo "FATAL: NDK 未找到 aarch64 libomp.so（GGML_OPENMP=ON 的运行时依赖）" >&2
+  exit 1
+fi
+"$STRIP" --strip-debug --strip-unneeded -o "$OUT_DIR/engine/libomp.so" "$OMP_SRC"
+echo "    strip -> libomp.so ($(du -h "$OUT_DIR/engine/libomp.so" | cut -f1))"
+
 echo "    tar 打包..."
 TARBALL="$OUT_DIR/llama-engine-${LLAMA_RELEASE}-${ARCH}.tar.gz"
 tar -czf "$TARBALL" -C "$OUT_DIR" engine
