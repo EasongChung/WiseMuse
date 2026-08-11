@@ -50,9 +50,7 @@ class TtsBridge : FlutterPlugin, MethodChannel.MethodCallHandler,
 
     override fun onInit(status: Int) {
         if (status == TextToSpeech.SUCCESS) {
-            val result = tts?.setLanguage(Locale.CHINESE)
-            ready = result != TextToSpeech.LANG_MISSING_DATA &&
-                result != TextToSpeech.LANG_NOT_SUPPORTED
+            ready = setupChinese()
             if (ready) {
                 tts?.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
                     override fun onStart(utteranceId: String?) {}
@@ -61,12 +59,42 @@ class TtsBridge : FlutterPlugin, MethodChannel.MethodCallHandler,
                     override fun onError(utteranceId: String?) {}
                 })
             } else {
-                Log.w(TAG, "中文 TTS 语音包缺失/不支持 (setLanguage=$result)")
+                Log.w(TAG, "所有中文 locale / voice 均不可用，TTS 将不可用")
             }
         } else {
             Log.w(TAG, "TTS 初始化失败 status=$status")
         }
         initLatch.countDown()
+    }
+
+    /**
+     * 尝试将 TTS 设置为中文。国产 ROM 引擎对裸 `Locale.CHINESE`（zh 无地区）常返回
+     * LANG_NOT_SUPPORTED，故逐个尝试带地区的简体中文 locale，再兜底系统 zh voice。
+     */
+    private fun setupChinese(): Boolean {
+        val candidates = listOf(
+            Locale.SIMPLIFIED_CHINESE, // zh-Hans-CN（Android 8+ 推荐写法）
+            Locale.CHINA,              // zh-CN
+            Locale.CHINESE,            // zh（兜底）
+        )
+        for (loc in candidates) {
+            val code = tts?.setLanguage(loc) ?: TextToSpeech.LANG_NOT_SUPPORTED
+            Log.i(TAG, "setLanguage($loc) -> code=$code")
+            if (code == TextToSpeech.LANG_MISSING_DATA ||
+                code == TextToSpeech.LANG_NOT_SUPPORTED
+            ) {
+                continue
+            }
+            return true
+        }
+        // 兜底：从系统 voice 列表找中文音色（部分引擎语言码不匹配但 voice 可用）
+        val zhVoice = tts?.voices?.firstOrNull { it.locale.language == "zh" }
+        if (zhVoice != null) {
+            tts?.voice = zhVoice
+            Log.i(TAG, "经 voices 兜底选中中文 voice: ${zhVoice.name} / ${zhVoice.locale}")
+            return true
+        }
+        return false
     }
 
     override fun onMethodCall(call: MethodCall, result: MethodChannel.Result) {
