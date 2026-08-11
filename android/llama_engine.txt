@@ -2,7 +2,8 @@
 # 构建流水线(test-apk/build-apk)读此文件，用 `gh release download <值>` 拉取引擎 .so。
 # 值行为空或缺失 = 引擎未配置，构建时跳过引擎装配（普通 APK 不受影响）。
 # 值必须形如 llama-engine-<...>，否则视为未配置。
-# 当前引擎：llama.cpp b10355，android-30 档，含 libomp，门禁 PASS（run 31491970099）。
-# 变更（19e56f3）：CPU 后端撤 GGML_CPU_ALL_VARIANTS/BACKEND_DL 改静态注册——
-# 旧变体布局缺 ggml_backend_init 导出导致真机任何模型加载失败（reg_count==0）。
-llama-engine-b10355-6
+# 当前引擎：llama.cpp b10355，android-30 档，含 libomp + OpenCL(Adreno GPU)，门禁 PASS（run 31503254919）。
+# 变更（761a977）：叠加 OpenCL GPU 后端（GGML_OPENCL=ON + Adreno kernels，
+#   ai_chat.cpp n_gpu_layers=99 offload，GPU 不可用自动回落 CPU）；产物新增
+#   libggml-opencl.so + libOpenCL.so（随引擎打包）。真机预期 tg 20-40 t/s。
+llama-engine-b10355-8
