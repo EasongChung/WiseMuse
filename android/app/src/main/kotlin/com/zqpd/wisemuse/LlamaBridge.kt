@@ -59,6 +59,7 @@ class LlamaBridge : FlutterPlugin, MethodChannel.MethodCallHandler {
 
     override fun onMethodCall(call: MethodCall, result: MethodChannel.Result) {
         when (call.method) {
+            "isAvailable" -> result.success(isAvailable())
             "init" -> initModel(call.argument<String>("modelPath"), result)
             "isLoaded" -> result.success(isLoaded())
             "send" -> sendPrompt(
@@ -77,6 +78,17 @@ class LlamaBridge : FlutterPlugin, MethodChannel.MethodCallHandler {
             "destroy" -> destroy(result)
             else -> result.notImplemented()
         }
+    }
+
+    /**
+     * 引擎是否在当前设备可用。判定放 Kotlin 侧（与 System.loadLibrary 同址，
+     * 避免 Dart 侧版本判断漂移）。docs/16 方案 A：编译档 = API 30，<30 机型回落云端。
+     *
+     * **不能只信版本号**：`loadLibrary` 仍可能因 ABI 不符、.so 被裁剪等失败，
+     * 但 UI 入口用此方法即可（实际加载失败会在 init 阶段抛错）。
+     */
+    private fun isAvailable(): Boolean {
+        return android.os.Build.VERSION.SDK_INT >= 30
     }
 
     private fun initModel(modelPath: String?, result: MethodChannel.Result) {

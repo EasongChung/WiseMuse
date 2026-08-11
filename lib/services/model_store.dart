@@ -155,6 +155,74 @@ class ModelStore {
     }
   }
 
+  // ===== llama 本地 LLM 模型（Qwen3 GGUF 单文件，~500MB）=====
+
+  /// 默认 GGUF 模型文件名（Qwen3-0.6B q4_K_M，儿童中文问答首选）。
+  static const String llmGgufFileName = 'qwen3-0.6b-instruct-q4_k_m.gguf';
+
+  /// GGUF 模型存放目录（`{documents}/models/llm`）。
+  static Future<Directory> llmModelsDir() async {
+    final root = await modelsDir();
+    final dir = Directory(p.join(root.path, 'llm'));
+    if (!await dir.exists()) {
+      await dir.create(recursive: true);
+    }
+    return dir;
+  }
+
+  /// LLM 模型文件路径（已有则直接返回，否则需导入/下载）。
+  static Future<String> llmGgufPath() async {
+    final dir = await llmModelsDir();
+    return p.join(dir.path, llmGgufFileName);
+  }
+
+  /// LLM 模型是否已就绪。
+  static Future<bool> isLlmModelReady() async {
+    final path = await llmGgufPath();
+    return File(path).existsSync() && File(path).lengthSync() > 0;
+  }
+
+  /// 从外部 .gguf 文件导入 LLM 模型（流式复制到私有目录，避免整包读入内存）。
+  ///
+  /// GGUF 模型 ~500MB，绝不能 `readAsBytes`（与 zip 解压 OOM 教训同源）——
+  /// 用 `openWrite` 逐块写入，内存占用恒定。
+  static Future<String> importGguf(String srcPath) async {
+    AppLog.d(_tag, '=== 开始导入 GGUF: $srcPath ===');
+    final src = File(srcPath);
+    if (!await src.exists()) {
+      throw Exception('源文件不存在: $srcPath');
+    }
+    final srcSize = await src.length();
+    AppLog.d(_tag, '源文件大小: ${_mb(srcSize)}');
+
+    final destPath = await llmGgufPath();
+    final dest = File(destPath);
+    // 已有模型先清理，避免新旧混杂
+    if (await dest.exists()) {
+      AppLog.d(_tag, '清理旧模型: $destPath');
+      await dest.delete();
+    }
+
+    AppLog.d(_tag, '流式复制 → $destPath');
+    // 流式复制：OpenRead → chunk → addStream（内存恒定）
+    final out = dest.openWrite();
+    try {
+      await out.addStream(src.openRead());
+      await out.flush();
+    } catch (e) {
+      AppLog.e(_tag, '复制失败: $e');
+      rethrow;
+    } finally {
+      await out.close();
+    }
+    final destSize = await dest.length();
+    if (destSize == 0) {
+      throw Exception('GGUF 复制后为空文件');
+    }
+    AppLog.d(_tag, '=== GGUF 导入完成: $destPath ($_mb(destSize)) ===');
+    return destPath;
+  }
+
   static String _mb(int bytes) =>
       '${(bytes / 1024 / 1024).toStringAsFixed(1)}MB';
 }
