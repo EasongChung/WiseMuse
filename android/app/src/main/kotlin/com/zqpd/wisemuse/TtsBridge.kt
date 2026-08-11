@@ -1,147 +1,111 @@
 package com.zqpd.wisemuse
 
-import android.app.Activity
+import android.content.Context
+import android.os.Handler
+import android.os.Looper
 import android.speech.tts.TextToSpeech
 import android.speech.tts.UtteranceProgressListener
 import android.util.Log
 import io.flutter.embedding.engine.plugins.FlutterPlugin
-import io.flutter.embedding.engine.plugins.activity.ActivityAware
-import io.flutter.embedding.engine.plugins.activity.ActivityPluginBinding
 import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
+import java.lang.reflect.Field
 import java.util.Locale
+import java.util.UUID
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 
 /**
- * [v0.2.0] 系统 TextToSpeech 朗读桥（MethodChannel）。
+ * [v0.3.0] 系统 TextToSpeech 朗读桥（MethodChannel）。
  *
- * 修复（v0.2.0，真机「TTS 依旧不可用」）：
- * 1. **改用 Activity context 构造引擎**——v0.1.0 用 applicationContext，部分 ROM
- *    （国产）上 onInit 回调失败或超时，导致 `ready` 恒 false 误报不可用。
- *    对齐 speak_reader 的 flutter_tts（其 Android 端用 activity context）。
- * 2. **init 自愈重试**：onInit 未成功时销毁重建引擎（最多 [MAX_INIT_ATTEMPTS] 次），
- *    每次重新等待 onInit，解决引擎慢热/首启一次失败。
- * 3. **可用性只信 onInit SUCCESS**（引擎实体在线即可用），语言匹配 best-effort 不降级。
- *    setupChinese 全包 try/catch，异常不影响 ready 赋值。
+ * 语义完整对齐 speak_reader 的 flutter_tts（用户授权直接复用其代码；本桥为
+ * AGP9 Built-in Kotlin 约束下的等价移植）：
+ * 1. **onInit 失败不判死**：status≠SUCCESS 只打日志，不把引擎标为不可用。
+ *    可用性由「TextToSpeech service 连接是否绑定」决定（反射读
+ *    mServiceConnection），而非 onInit 返回值——真机实测 onInit 可能返回
+ *    非 SUCCESS 但连接实际可用，这正是旧实现误报「语音引擎不可用」的根因。
+ * 2. **speak 时连接未绑定则自动重建 TextToSpeech 并等待就绪**（flutter_tts
+ *    speak():627-630 同款逻辑），永不因 init 状态拒绝朗读。
+ * 3. **用 applicationContext 构造引擎**（flutter_tts onAttachedToEngine 同款，
+ *    非 Activity context）。
  *
  * 阻塞播放完成通过后台线程 + CountDownLatch 实现，不卡 UI 线程。
  */
-class TtsBridge : FlutterPlugin, ActivityAware, MethodChannel.MethodCallHandler,
+class TtsBridge : FlutterPlugin, MethodChannel.MethodCallHandler,
     TextToSpeech.OnInitListener {
     companion object {
         private const val CHANNEL = "com.zqpd.wisemuse/tts"
         private const val TAG = "TtsBridge"
         private const val TIMEOUT_MS = 30000L
-        private const val MAX_INIT_ATTEMPTS = 3
+        private const val READY_WAIT_MS = 10000L
     }
 
     private var channel: MethodChannel? = null
-    private var activityContext: Activity? = null
+    private var context: Context? = null
     private var tts: TextToSpeech? = null
+    private val handler = Handler(Looper.getMainLooper())
 
+    // 引擎是否已创建实例（是否至少发起过初始化）
     @Volatile
-    private var ready = false
+    private var engineCreated = false
 
+    // 等待引擎 service 连接就绪（onInit 回调后打开）
     @Volatile
-    private var initLatch = CountDownLatch(0)
+    private var readyLatch = CountDownLatch(1)
 
-    // ---- FlutterPlugin ----
     override fun onAttachedToEngine(binding: FlutterPlugin.FlutterPluginBinding) {
+        context = binding.applicationContext
         channel = MethodChannel(binding.binaryMessenger, CHANNEL)
         channel?.setMethodCallHandler(this)
+        // 预初始化：进入页面即建引擎，点播放时大概率已就绪（flutter_tts 同款懒加载
+        // 也在首次方法调用时创建，此处提前以加速首播）
+        createEngine()
     }
 
     override fun onDetachedFromEngine(binding: FlutterPlugin.FlutterPluginBinding) {
         channel?.setMethodCallHandler(null)
         channel = null
-        shutdownTts()
+        context = null
+        tts?.stop()
+        tts?.shutdown()
+        tts = null
     }
 
-    // ---- ActivityAware：用 Activity context 初始化 TTS ----
-    override fun onAttachedToActivity(binding: ActivityPluginBinding) {
-        activityContext = binding.activity
-        // 预初始化：进入页面即建引擎，点播放时大概率已就绪
-        startInit()
-    }
-
-    override fun onDetachedFromActivity() {
-        activityContext = null
-    }
-
-    override fun onReattachedToActivityForConfigChanges(binding: ActivityPluginBinding) {
-        activityContext = binding.activity
-        startInit()
-    }
-
-    override fun onDetachedFromActivityForConfigChanges() {
-        activityContext = null
-    }
-
-    /** 在调用线程（主线程）启动一次引擎初始化；onInit 异步回调后 latch 打开。 */
-    private fun startInit() {
-        val ctx = activityContext ?: return
-        ready = false
-        initLatch = CountDownLatch(1)
+    /** 创建/重建 TextToSpeech 引擎（主线程调用）。 */
+    private fun createEngine() {
+        val ctx = context ?: return
+        engineCreated = true
+        readyLatch = CountDownLatch(1)
         try {
             tts?.shutdown()
         } catch (_: Throwable) {
         }
         tts = null
         try {
-            Log.i(TAG, "创建 TextToSpeech（activity context）")
+            Log.i(TAG, "创建 TextToSpeech（applicationContext）")
             tts = TextToSpeech(ctx, this)
         } catch (t: Throwable) {
             Log.e(TAG, "TextToSpeech 构造异常", t)
-            initLatch.countDown()
+            readyLatch.countDown()
         }
-    }
-
-    private fun shutdownTts() {
-        try {
-            tts?.stop()
-        } catch (_: Throwable) {
-        }
-        try {
-            tts?.shutdown()
-        } catch (_: Throwable) {
-        }
-        tts = null
-        ready = false
     }
 
     override fun onInit(status: Int) {
-        try {
-            if (status == TextToSpeech.SUCCESS) {
-                Log.i(TAG, "TTS 引擎初始化 SUCCESS")
-                // 引擎实体在线即可用——语言匹配只是「尽力而为」，不因匹配失败而降级为
-                // 不可用。语义对齐 speak_reader（flutter_tts）：引擎可用性只取决于
-                // onInit 是否 SUCCESS，语言交由系统引擎按文本自动处理。
-                setupChinese()
-                ready = true
-                tts?.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
-                    override fun onStart(utteranceId: String?) {}
-                    override fun onDone(utteranceId: String?) {}
-                    @Deprecated("Deprecated in Java")
-                    override fun onError(utteranceId: String?) {}
-                    override fun onError(utteranceId: String?, errorCode: Int) {}
-                })
-            } else {
-                Log.w(TAG, "TTS 引擎初始化失败 status=$status（init 将自愈重试）")
-            }
-        } catch (t: Throwable) {
-            Log.e(TAG, "onInit 异常", t)
-        } finally {
-            initLatch.countDown()
+        // flutter_tts 语义：onInit 失败不判死，只打日志。连接可用性由
+        // isServiceConnectionUsable() 判定，而非 status。
+        if (status == TextToSpeech.SUCCESS) {
+            Log.i(TAG, "TTS onInit SUCCESS")
+            setupChinese()
+            tts?.setOnUtteranceProgressListener(utteranceProgressListener)
+        } else {
+            Log.w(TAG, "TTS onInit status=$status（不判死，连接可用即朗读）")
         }
+        readyLatch.countDown()
     }
 
     /**
      * 尽力将 TTS 语言设为中文（best-effort，只打日志不判成败）。
-     *
-     * 国产 ROM 引擎对裸 `Locale.CHINESE`（zh 无地区）常返回 LANG_NOT_SUPPORTED，
-     * 故逐个尝试带地区的简体中文 locale，再兜底系统 zh voice；全部失败也不影响
-     * [ready]——系统默认引擎/语言仍能按文本合成（与 speak_reader 一致）。
+     * 全部失败也不影响朗读——系统默认引擎/语言仍能按文本合成（与 speak_reader 一致）。
      */
     private fun setupChinese() {
         try {
@@ -159,7 +123,6 @@ class TtsBridge : FlutterPlugin, ActivityAware, MethodChannel.MethodCallHandler,
                     return
                 }
             }
-            // 兜底：从系统 voice 列表找中文音色（部分引擎语言码不匹配但 voice 可用）
             val zhVoice = tts?.voices?.firstOrNull { it.locale.language == "zh" }
             if (zhVoice != null) {
                 tts?.voice = zhVoice
@@ -172,23 +135,21 @@ class TtsBridge : FlutterPlugin, ActivityAware, MethodChannel.MethodCallHandler,
         }
     }
 
+    private val utteranceProgressListener = object : UtteranceProgressListener() {
+        override fun onStart(utteranceId: String?) {}
+        override fun onDone(utteranceId: String?) {}
+        @Deprecated("Deprecated in Java")
+        override fun onError(utteranceId: String?) {}
+        override fun onError(utteranceId: String?, errorCode: Int) {}
+    }
+
     override fun onMethodCall(call: MethodCall, result: MethodChannel.Result) {
         when (call.method) {
             "init" -> {
-                // 引擎未就绪：自愈重试（引擎慢热/首启失败场景）。
-                // onInit 快速失败时 3 轮重试约 1s；慢热时每轮等 onInit 最多 10s。
-                var attempt = 0
-                while (!ready && attempt < MAX_INIT_ATTEMPTS) {
-                    attempt++
-                    Log.i(TAG, "init 重试 #$attempt")
-                    startInit()
-                    try {
-                        initLatch.await(10, TimeUnit.SECONDS)
-                    } catch (_: InterruptedException) {
-                        break
-                    }
-                }
-                result.success(ready)
+                // 引擎实体已创建即返回可用；service 连接未就绪时不判死。
+                // 若尚未创建（理论上 attach 时已创建），补建一次。
+                if (!engineCreated) createEngine()
+                result.success(engineCreated)
             }
             "speak" -> {
                 val text = call.argument<String>("text")
@@ -199,10 +160,6 @@ class TtsBridge : FlutterPlugin, ActivityAware, MethodChannel.MethodCallHandler,
                 // 阻塞等待播放完成，放后台线程避免卡 UI 线程。
                 Thread {
                     try {
-                        if (!ready) {
-                            result.error("tts_not_ready", "语音引擎未就绪", null)
-                            return@Thread
-                        }
                         if (speakBlocking(text)) {
                             result.success(true)
                         } else {
@@ -222,7 +179,29 @@ class TtsBridge : FlutterPlugin, ActivityAware, MethodChannel.MethodCallHandler,
         }
     }
 
+    /**
+     * 阻塞播放 [text]，返回是否完成。
+     *
+     * flutter_tts 语义：连接不可用时自动重建 TextToSpeech 再试；永不因
+     * init 状态拒绝朗读。超时由 [TIMEOUT_MS] 兜底。
+     */
     private fun speakBlocking(text: String): Boolean {
+        var ttsEngine = tts
+        if (!isServiceConnectionUsable(ttsEngine)) {
+            Log.w(TAG, "TTS service 连接未就绪，重建引擎后重试")
+            handler.post { createEngine() }
+            try {
+                readyLatch.await(READY_WAIT_MS, TimeUnit.MILLISECONDS)
+            } catch (_: InterruptedException) {
+                return false
+            }
+            ttsEngine = tts
+        }
+        if (ttsEngine == null) {
+            Log.e(TAG, "TTS 引擎为空，无法朗读")
+            return false
+        }
+
         val done = CountDownLatch(1)
         var finishedOk = false
         val listener = object : UtteranceProgressListener() {
@@ -239,10 +218,11 @@ class TtsBridge : FlutterPlugin, ActivityAware, MethodChannel.MethodCallHandler,
                 done.countDown()
             }
         }
-        tts?.setOnUtteranceProgressListener(listener)
-        val utteranceId = "wm_${System.currentTimeMillis()}"
-        val code = tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, utteranceId)
+        ttsEngine.setOnUtteranceProgressListener(listener)
+        val utteranceId = "wm_${UUID.randomUUID()}"
+        val code = ttsEngine.speak(text, TextToSpeech.QUEUE_FLUSH, null, utteranceId)
         if (code != TextToSpeech.SUCCESS) {
+            Log.w(TAG, "tts.speak 返回 $code")
             return false
         }
         try {
@@ -251,5 +231,37 @@ class TtsBridge : FlutterPlugin, ActivityAware, MethodChannel.MethodCallHandler,
             return false
         }
         return finishedOk
+    }
+
+    /**
+     * 判定 TextToSpeech service 连接是否绑定（flutter_tts
+     * ismServiceConnectionUsable 同款反射）。
+     *
+     * 这是「引擎是否真可用」的权威判定：onInit 返回非 SUCCESS 不代表连接失败，
+     * 反之连接未绑定则 speak 必然失败。反射读私有字段 mServiceConnection，
+     * 类型为 android.speech.tts.TextToSpeech$Connection。
+     */
+    private fun isServiceConnectionUsable(tts: TextToSpeech?): Boolean {
+        if (tts == null) return false
+        return try {
+            val fields: Array<Field> = tts.javaClass.declaredFields
+            var bound = true
+            for (f in fields) {
+                if (f.name == "mServiceConnection" &&
+                    f.type.name == "android.speech.tts.TextToSpeech\$Connection"
+                ) {
+                    f.isAccessible = true
+                    if (f.get(tts) == null) {
+                        Log.w(TAG, "TTS mServiceConnection == null（未绑定）")
+                        bound = false
+                    }
+                }
+            }
+            bound
+        } catch (t: Throwable) {
+            // 反射失败（ROM 字段名变化）时保守放行——交给 speak 返回值判定
+            Log.w(TAG, "mServiceConnection 反射失败，保守放行: ${t.message}")
+            true
+        }
     }
 }
