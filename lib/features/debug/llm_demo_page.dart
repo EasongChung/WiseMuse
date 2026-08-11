@@ -126,7 +126,15 @@ class _LlmDemoPageState extends State<LlmDemoPage> {
       if (!mounted) return;
       setState(() {
         _busy = false;
-        _response = text;
+        // 剥离 thinking 后为空：模型把预算全花在思考上（Qwen3 系 hybrid reasoning
+        // 常见），提示换非思考模型或再问一次。
+        _response =
+            text.isEmpty
+                ? '⚠️ 模型仅输出了思考过程、未产出正式回答。\n'
+                    '这是 Qwen3.5 等「思考模型」的特性：它把生成的 token 都花在'
+                    '内部推理上了。\n建议换用非思考模型（如 gemma-2-2b / Hy-MT2）'
+                    '，或加大生成长度后重试。'
+                : text;
         _status = '回答完成';
       });
     } catch (e, s) {
