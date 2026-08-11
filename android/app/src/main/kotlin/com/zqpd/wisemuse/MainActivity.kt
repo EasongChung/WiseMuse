@@ -10,5 +10,7 @@ class MainActivity : FlutterActivity() {
         flutterEngine.plugins.add(VoskBridge())
         // [v0.1.0] 注册系统 TextToSpeech 朗读桥
         flutterEngine.plugins.add(TtsBridge())
+        // [v0.1.0] 注册 llama.android 本地 LLM 推理桥（AiChat 单例懒加载，init 才初始化）
+        flutterEngine.plugins.add(LlamaBridge())
     }
 }

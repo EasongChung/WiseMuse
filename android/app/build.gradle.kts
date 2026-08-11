@@ -64,4 +64,6 @@ flutter {
 dependencies {
     // Vosk 离线语音识别（Apache-2.0，自带 .so + Java API）
     implementation("com.alphacephei:vosk-android:0.3.75")
+    // llama.android 官方 Java 桥（com.arm.aichat，vendored）依赖协程 Flow/StateFlow
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2")
 }
