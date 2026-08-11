@@ -93,14 +93,21 @@ fi
 
 # libomp.so：官方 arm64 默认 GGML_OPENMP=ON，各 .so NEEDED 依赖 libomp，
 # 但 Android 系统库不提供它（NDK 自带），必须随引擎打包，否则真机
-# dlopen 报 library "libomp.so" not found。从 NDK sysroot 的 aarch64 档取。
-OMP_SRC="$(find "$NDK_ROOT" -path '*aarch64-linux-android*' -name 'libomp.so' | head -1)"
+# dlopen 报 library "libomp.so" not found。
+# 实测 NDK r29 的 aarch64 libomp 位于 LLVM 工具链内：
+#   .../lib/clang/<ver>/lib/linux/aarch64/libomp.so
+# NOT sysroot/usr/lib/aarch64-linux-android/（社区资料多写这里，易误判）。
+# 用可移植 find：优先含 /linux/aarch64/ 的路径，否则全局兜底并校验 ELF aarch64。
+OMP_SRC="$(find "$NDK_ROOT" -name 'libomp.so' 2>/dev/null | grep '/linux/aarch64/' | head -1)"
 if [ -z "$OMP_SRC" ]; then
-  echo "FATAL: NDK 未找到 aarch64 libomp.so（GGML_OPENMP=ON 的运行时依赖）" >&2
+  OMP_SRC="$(find "$NDK_ROOT" -name 'libomp.so' 2>/dev/null | head -1)"
+fi
+if [ -z "$OMP_SRC" ]; then
+  echo "FATAL: NDK 未找到 libomp.so（GGML_OPENMP=ON 的运行时依赖）" >&2
   exit 1
 fi
 "$STRIP" --strip-debug --strip-unneeded -o "$OUT_DIR/engine/libomp.so" "$OMP_SRC"
-echo "    strip -> libomp.so ($(du -h "$OUT_DIR/engine/libomp.so" | cut -f1))"
+echo "    strip -> libomp.so from $OMP_SRC ($(du -h "$OUT_DIR/engine/libomp.so" | cut -f1))"
 
 echo "    tar 打包..."
 TARBALL="$OUT_DIR/llama-engine-${LLAMA_RELEASE}-${ARCH}.tar.gz"
