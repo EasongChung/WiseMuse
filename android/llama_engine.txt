@@ -2,5 +2,7 @@
 # 构建流水线(test-apk/build-apk)读此文件，用 `gh release download <值>` 拉取引擎 .so。
 # 值行为空或缺失 = 引擎未配置，构建时跳过引擎装配（普通 APK 不受影响）。
 # 值必须形如 llama-engine-<...>，否则视为未配置。
-# 当前引擎：llama.cpp b10355，android-30 档，含 libomp，门禁 PASS（run 31463226222）。
-llama-engine-b10355-5
+# 当前引擎：llama.cpp b10355，android-30 档，含 libomp，门禁 PASS（run 31491970099）。
+# 变更（19e56f3）：CPU 后端撤 GGML_CPU_ALL_VARIANTS/BACKEND_DL 改静态注册——
+# 旧变体布局缺 ggml_backend_init 导出导致真机任何模型加载失败（reg_count==0）。
+llama-engine-b10355-6
