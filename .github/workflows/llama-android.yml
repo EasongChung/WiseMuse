@@ -33,7 +33,9 @@ jobs:
       - name: 安装依赖（编译器/工具）
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y -qq ninja-build zip unzip
+          # python3：OpenCL 后端 GGML_OPENCL_EMBED_KERNELS=ON 需用 embed_kernel.py
+          # 生成 .cl.h（find_package(Python3 REQUIRED)）；ubuntu-latest 自带但显式装更稳。
+          sudo apt-get install -y -qq ninja-build zip unzip python3
 
       - name: 下载并安装 NDK ${{ env.NDK_VERSION }}
         shell: bash

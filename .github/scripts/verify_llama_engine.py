@@ -178,10 +178,28 @@ def main():
         if not cpu_hits:
             missing_necessary.append(f"{cpu_lib} 无 CPU 后端导出符号（静态注册未生效）")
 
+    # OpenCL GPU 后端布局校验（GGML_OPENCL=ON，Adreno 加速）：
+    #   - 必须存在 libggml-opencl.so（OpenCL 后端独立共享库）
+    #   - 必须导出 ggml_backend_opencl_reg（否则运行时 register_backend 无效，
+    #     n_gpu_layers 设了也全回落 CPU，等于没加速）
+    #   - 必须存在 libOpenCL.so（ICD loader，libggml-opencl.so 的 NEEDED 依赖；
+    #     已在依赖闭环处校验，此处显式确认在包内）
+    opencl_lib = "libggml-opencl.so"
+    if "libggml-opencl.so" not in base_names:
+        missing_necessary.append("缺少 libggml-opencl.so（OpenCL GPU 后端）")
+    else:
+        opencl_info = parse_elf(os.path.join(engine_dir, opencl_lib))
+        opencl_hits = {"ggml_backend_opencl_reg"} & opencl_info["dynsyms"]
+        print(f"  OK  {opencl_lib} OpenCL 后端导出: {sorted(opencl_hits) or '（空）'}")
+        if not opencl_hits:
+            missing_necessary.append(f"{opencl_lib} 无 ggml_backend_opencl_reg 导出（静态注册未生效）")
+    if "libOpenCL.so" not in base_names:
+        missing_necessary.append("缺少 libOpenCL.so（OpenCL ICD loader 运行时依赖）")
+
     if missing_necessary:
         print("FAIL: " + "; ".join(missing_necessary)); sys.exit(1)
 
-    print(f"PASS: 引擎门禁全绿（{len(sos)} 个 .so，CPU 后端 {cpu_lib} 已确认, 架构 aarch64/64 位）")
+    print(f"PASS: 引擎门禁全绿（{len(sos)} 个 .so，CPU+OpenCL 后端已确认, 架构 aarch64/64 位）")
     sys.exit(0)
 
 if __name__ == "__main__":

@@ -5,6 +5,12 @@
         android:label="智启陪读"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
+        <!-- llama OpenCL GPU 加速：声明加载系统 vendor 的 OpenCL 驱动（Adreno）。
+             required=false —— 设备无 OpenCL 驱动时 app 照常运行（引擎回落 CPU）。
+             API 26+ 支持；minSdk 26 匹配。 -->
+        <uses-native-library
+            android:name="libOpenCL.so"
+            android:required="false" />
         <activity
             android:name=".MainActivity"
             android:exported="true"
