@@ -17,6 +17,7 @@ import '../../widgets/model_panel.dart';
 import '../debug/log_page.dart';
 import 'asr_demo_page.dart';
 import 'scoring.dart';
+import '../debug/llm_demo_page.dart';
 
 /// [v0.1.0] 跟读练习页（核心链路：放音 → 录音 → 识别 → 评分 → 生词落库）。
 ///
@@ -185,6 +186,12 @@ class _FollowPageState extends State<FollowPage> {
     ).push(MaterialPageRoute<void>(builder: (_) => const AsrDemoPage()));
   }
 
+  void _openLlmDemo() {
+    Navigator.of(
+      context,
+    ).push(MaterialPageRoute<void>(builder: (_) => const LlmDemoPage()));
+  }
+
   @override
   Widget build(BuildContext context) {
     final canPractice = _panelKey.currentState?.isReady ?? false;
@@ -196,6 +203,11 @@ class _FollowPageState extends State<FollowPage> {
             tooltip: 'Vosk PoC 调试页',
             icon: const Icon(Icons.science_outlined),
             onPressed: _openDemo,
+          ),
+          IconButton(
+            tooltip: '本地 AI 引擎 PoC',
+            icon: const Icon(Icons.psychology_outlined),
+            onPressed: _openLlmDemo,
           ),
           IconButton(
             tooltip: '运行日志',
