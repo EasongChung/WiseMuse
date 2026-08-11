@@ -18,7 +18,7 @@ import java.util.concurrent.TimeUnit
 /**
  * [v0.3.0] 系统 TextToSpeech 朗读桥（MethodChannel）。
  *
- * 语义完整对齐 speak_reader 的 flutter_tts（用户授权直接复用其代码；本桥为
+ * 语义完整对齐开源 flutter_tts 插件（用户授权直接复用其语义；本桥为
  * AGP9 Built-in Kotlin 约束下的等价移植）：
  * 1. **onInit 失败不判死**：status≠SUCCESS 只打日志，不把引擎标为不可用。
  *    可用性由「TextToSpeech service 连接是否绑定」决定（反射读
@@ -105,7 +105,7 @@ class TtsBridge : FlutterPlugin, MethodChannel.MethodCallHandler,
 
     /**
      * 尽力将 TTS 语言设为中文（best-effort，只打日志不判成败）。
-     * 全部失败也不影响朗读——系统默认引擎/语言仍能按文本合成（与 speak_reader 一致）。
+     * 全部失败也不影响朗读——系统默认引擎/语言仍能按文本合成（与 flutter_tts 一致）。
      */
     private fun setupChinese() {
         try {

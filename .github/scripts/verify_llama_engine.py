@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # v0.1.0 ｜ llama.android 引擎 .so 门禁校验（打到产物本身）
 #
-# 复用 speak_reader G4 血泪教训：「日志绿」≠「二进制对」。CI 校验必须解析 ELF 实体：
+# 复用历史项目 G4 血泪教训：「日志绿」≠「二进制对」。CI 校验必须解析 ELF 实体：
 #   1. 架构 = aarch64 (ELFMACHINE 183) / 64 位（ELFDATA 64 位）
 #   2. libai-chat.so 导出 JNI 符号（dynsym）—— Java_com_arm_aichat_internal_* 全命中
 #   3. 关键库下落：libllama / libllama-common / ggml 家族必须齐备

@@ -10,7 +10,7 @@ import '../debug/log_page.dart';
 ///
 /// 链路：导入 GGUF 模型 → 加载 → 问/答 → 基准测试。
 /// 设计基调走 WiseMuse 儿童向（圆角、色彩、友好文案），
-/// 避免 speak_reader 灰调开发者风（docs/17）。
+/// 避免灰调开发者风（docs/17）。
 class LlmDemoPage extends StatefulWidget {
   const LlmDemoPage({super.key});
 

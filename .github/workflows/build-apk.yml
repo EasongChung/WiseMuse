@@ -100,7 +100,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
 
-      # ===== 签名配置（与 speak_reader 同款方案）=====
+      # ===== 签名配置（与本项目此前工程同款方案）=====
       # 如果 Secrets 已配置 KEYSTORE_BASE64，直接解码还原 keystore 复用签名；
       # 否则首次运行自动生成 keystore，并将 keystore+密码打包为 artifact 供下载，
       # 下载后填入仓库 Secrets 即可实现后续构建复用同一签名（可覆盖安装）。
