@@ -18,7 +18,12 @@ OUT_DIR="${1:-$PWD/engine-out}"
 LLAMA_SRC_DIR="${LLAMA_CPP_SRC:-$PWD/llama.cpp}"
 
 ARCH="arm64-v8a"
-PLATFORM="26"          # 对齐 WiseMuse minSdk 26；CPU 后端只用 posix_memalign(API17+)，无需 28
+# 编译档 = 30（Android 11）。原因：官方 bridge logging.h 调用
+# __android_log_is_loggable（API 30 才引入），CPU 内核虽只用 posix_memalign(17+)，
+# 但 JNI 壳日志头卡死在 API 30 → 编档必须 ≥30。
+# app 侧 minSdk 仍为 26，运行时用 SDK_INT>=30 特性开关（Android 11+ 本地引擎，
+# 老机型静默回落云端），与 docs/15 双引擎架构一致。
+PLATFORM="30"
 NJOBS="${NJOBS:-$(nproc 2>/dev/null || echo 4)}"
 
 echo "==> [1/4] 检出 llama.cpp @ ${LLAMA_RELEASE}"
