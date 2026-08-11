@@ -67,6 +67,39 @@ jobs:
       - name: 运行测试
         run: flutter test
 
+      # ===== llama 本地 LLM 引擎装配（Release + 版本引用小文件）=====
+      # 与 test-apk.yml 同款：android/llama_engine.txt 记录引擎 Release tag，
+      # 构建前下载引擎 tarball 塞 jniLibs 随 APK 打包；未配置则跳过。
+      - name: 装配 llama 引擎 .so
+        shell: bash
+        run: |
+          set -euo pipefail
+          REF="android/llama_engine.txt"
+          if [ -f "$REF" ]; then
+            TAG="$(grep -v '^[[:space:]]*#' "$REF" | tail -1 | tr -d '[:space:]')"
+          else
+            TAG=""
+          fi
+          if [ -z "$TAG" ] || [[ "$TAG" != llama-engine-* ]]; then
+            echo "::warning::未配置有效的引擎 tag（android/llama_engine.txt），本次构建不带本地 LLM 引擎"
+            exit 0
+          fi
+          echo "==> 下载引擎 Release: $TAG"
+          gh release download "$TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --pattern 'llama-engine-*.tar.gz' \
+            --dir /tmp/llama-engine || {
+              echo "::error::引擎 Release $TAG 下载失败"
+              exit 1
+            }
+          mkdir -p android/app/src/main/jniLibs/arm64-v8a
+          tar -xzf /tmp/llama-engine/llama-engine-*.tar.gz -C /tmp/llama-engine
+          cp /tmp/llama-engine/engine/*.so android/app/src/main/jniLibs/arm64-v8a/
+          echo "==> 引擎 .so 装配完成："
+          ls -lh android/app/src/main/jniLibs/arm64-v8a/
+        env:
+          GH_TOKEN: ${{ github.token }}
+
       # ===== 签名配置（与 speak_reader 同款方案）=====
       # 如果 Secrets 已配置 KEYSTORE_BASE64，直接解码还原 keystore 复用签名；
       # 否则首次运行自动生成 keystore，并将 keystore+密码打包为 artifact 供下载，

@@ -1,0 +1,107 @@
+name: Build llama Engine (.so)
+
+# [v0.1.0] llama.android 本地 LLM 引擎编译流水线（手动触发）。
+#
+# 全源码自编 libai-chat.so 全家 + 门禁校验 + 打包 Release。
+# 产物按「Release + 版本引用小文件」落地：引擎 .so 不进 git，
+# test-apk / build-apk 构建前读 android/llama_engine.txt 指定的
+# Release tag，用 gh release download 拉取并塞进 jniLibs。
+#
+# 决策（2026-08-10 用户确认）：
+#   - .so 体量 ~15-20MB（strip 后），<50MB，直接打包进 APK；
+#   - 引擎 .so 放 Release 不进仓库（避免 git 历史膨胀）；
+#   - 本机禁编译，一切走 CI。
+on:
+  workflow_dispatch:
+
+jobs:
+  build-engine:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    env:
+      LLAMA_RELEASE: b10355          # llama.cpp 固定版本（与调研锁定一致）
+      NDK_VERSION: 29.0.14206865     # stable NDK r29（android-ndk-r29-linux.zip 对应 build）
+      CMAKE_VERSION: 3.31.6          # 官方 lib CMakeLists 要求 cmake_minimum_required
+      OUTPUT_DIR: ${{ github.workspace }}/engine-out
+
+    steps:
+      - name: 检出（获取 .github/scripts 编译脚本）
+        uses: actions/checkout@v4
+
+      - name: 安装依赖（编译器/工具）
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ninja-build zip unzip
+
+      - name: 下载并安装 NDK ${{ env.NDK_VERSION }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "==> 下载 NDK ${NDK_VERSION} ..."
+          curl -fsSL -o /tmp/android-ndk.zip \
+            "https://dl.google.com/android/repository/android-ndk-r29-linux.zip"
+          sudo mkdir -p /opt/android-ndk
+          sudo unzip -q /tmp/android-ndk.zip -d /opt/android-ndk
+          sudo chmod -R a+rX /opt/android-ndk
+          echo "ANDROID_NDK_ROOT=$(ls -d /opt/android-ndk/android-ndk-*)" >> "$GITHUB_ENV"
+
+      - name: 下载并安装 CMake ${{ env.CMAKE_VERSION }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsSL -o /tmp/cmake.tar.gz \
+            "https://cmake.org/files/v3.31/cmake-3.31.6-linux-x86_64.tar.gz"
+          sudo tar -xzf /tmp/cmake.tar.gz -C /opt
+          echo "/opt/cmake-3.31.6-linux-x86_64/bin" >> "$GITHUB_PATH"
+
+      - name: 校验环境
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "ANDROID_NDK_ROOT=$ANDROID_NDK_ROOT"
+          test -n "$ANDROID_NDK_ROOT" && echo "NDK OK"
+          cmake --version | head -1
+          ninja --version
+
+      - name: 编译 llama 引擎（全源码自编）
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "==> 编译输出目录: $OUTPUT_DIR"
+          echo "==> llama.cpp: $LLAMA_RELEASE"
+          "${{ github.workspace }}/.github/scripts/build_llama_android.sh" "$OUTPUT_DIR"
+        env:
+          LLAMA_RELEASE: ${{ env.LLAMA_RELEASE }}
+          ANDROID_NDK_ROOT: ${{ env.ANDROID_NDK_ROOT }}
+
+      - name: 门禁校验（打到 .so 产物本身）
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -d "$OUTPUT_DIR/engine" || { echo "engine 目录缺失"; exit 1; }
+          python3 "${{ github.workspace }}/.github/scripts/verify_llama_engine.py" "$OUTPUT_DIR/engine"
+
+      - name: 上传引擎 tarball（artifact，30 天）
+        uses: actions/upload-artifact@v4
+        with:
+          name: llama-engine-${{ env.LLAMA_RELEASE }}
+          path: |
+            ${{ env.OUTPUT_DIR }}/llama-engine-*.tar.gz
+          if-no-files-found: error
+          retention-days: 30
+
+      # 引擎 Release 固定命名：llama-engine-<release>-<时间戳>。
+      # test-apk/build-apk 用 android/llama_engine.txt 记录的值下载。
+      - name: 发布引擎 Release（prerelease）
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: llama-engine-${{ env.LLAMA_RELEASE }}-${{ github.run_number }}
+          name: "llama engine ${{ env.LLAMA_RELEASE }}"
+          body: |
+            llama.cpp ${{ env.LLAMA_RELEASE }} 全源码自编 Android arm64 引擎。
+            用法：将 android/llama_engine.txt 指向本 Release tag。
+          files: ${{ env.OUTPUT_DIR }}/llama-engine-*.tar.gz
+          draft: false
+          prerelease: true

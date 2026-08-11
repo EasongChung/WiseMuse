@@ -1,0 +1,7 @@
+# llama.android 本地 LLM 引擎版本引用（Release tag）
+# 构建流水线(test-apk/build-apk)读此文件，用 `gh release download <值>` 拉取引擎 .so。
+# 首次运行 .github/workflows/llama-android.yml 编译并发布引擎后，把「值」行替换为
+# 对应 Release 的 tag，例如：
+#   llama-engine-b10355-1
+# 值行为空或缺失 = 引擎未配置，构建时跳过引擎装配（普通 APK 不受影响）。
+# 值必须形如 llama-engine-<...>，否则视为未配置。
