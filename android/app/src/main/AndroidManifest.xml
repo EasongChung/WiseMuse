@@ -1,6 +1,10 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <!-- 跟读/听写：麦克风录音 -->
     <uses-permission android:name="android.permission.RECORD_AUDIO"/>
+    <!-- 联网下载模型（Vosk zip / 在线源）。debug/profile 由 Flutter 模板自动加，
+         但 release 主 manifest 必须显式声明，否则 DNS 解析直接被拒
+         （真机表现 SocketException: Failed host lookup，易误判为网络问题）。 -->
+    <uses-permission android:name="android.permission.INTERNET"/>
     <application
         android:label="智启陪读"
         android:name="${applicationName}"

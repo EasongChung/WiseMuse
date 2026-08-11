@@ -16,18 +16,20 @@ import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 
 /**
- * [v0.3.0] 系统 TextToSpeech 朗读桥（MethodChannel）。
+ * [v0.4.0] 系统 TextToSpeech 朗读桥（MethodChannel）。
  *
  * 语义完整对齐开源 flutter_tts 插件（用户授权直接复用其语义；本桥为
  * AGP9 Built-in Kotlin 约束下的等价移植）：
  * 1. **onInit 失败不判死**：status≠SUCCESS 只打日志，不把引擎标为不可用。
  *    可用性由「TextToSpeech service 连接是否绑定」决定（反射读
- *    mServiceConnection），而非 onInit 返回值——真机实测 onInit 可能返回
- *    非 SUCCESS 但连接实际可用，这正是旧实现误报「语音引擎不可用」的根因。
- * 2. **speak 时连接未绑定则自动重建 TextToSpeech 并等待就绪**（flutter_tts
- *    speak():627-630 同款逻辑），永不因 init 状态拒绝朗读。
- * 3. **用 applicationContext 构造引擎**（flutter_tts onAttachedToEngine 同款，
- *    非 Activity context）。
+ *    mServiceConnection），而非 onInit 返回值。
+ * 2. **speak 失败自动重建引擎并重试**（flutter_tts speak():627-630 同款：
+ *    连接未绑定 / speak 返回非 0 → 销毁重建 TextToSpeech 再试），最多
+ *    [MAX_SPEAK_ATTEMPTS] 次，永不因一次失败立即放弃。真机实测 onInit 可能
+ *    返回非 SUCCESS 但重建后连接可用，这是「语音引擎不可用」误报的根因。
+ * 3. **诊断回传**：speak 失败时把 onInit status / speak 返回码 / 引擎名塞进
+ *    error message，Dart 层 AppLog 直接可见，便于下次日志确诊。
+ * 4. 用 applicationContext 构造引擎（flutter_tts onAttachedToEngine 同款）。
  *
  * 阻塞播放完成通过后台线程 + CountDownLatch 实现，不卡 UI 线程。
  */
@@ -38,6 +40,7 @@ class TtsBridge : FlutterPlugin, MethodChannel.MethodCallHandler,
         private const val TAG = "TtsBridge"
         private const val TIMEOUT_MS = 30000L
         private const val READY_WAIT_MS = 10000L
+        private const val MAX_SPEAK_ATTEMPTS = 5
     }
 
     private var channel: MethodChannel? = null
@@ -49,6 +52,10 @@ class TtsBridge : FlutterPlugin, MethodChannel.MethodCallHandler,
     @Volatile
     private var engineCreated = false
 
+    // 最近一次 onInit 的 status（诊断用，非判死依据）
+    @Volatile
+    private var lastOnInitStatus = Int.MIN_VALUE
+
     // 等待引擎 service 连接就绪（onInit 回调后打开）
     @Volatile
     private var readyLatch = CountDownLatch(1)
@@ -57,8 +64,7 @@ class TtsBridge : FlutterPlugin, MethodChannel.MethodCallHandler,
         context = binding.applicationContext
         channel = MethodChannel(binding.binaryMessenger, CHANNEL)
         channel?.setMethodCallHandler(this)
-        // 预初始化：进入页面即建引擎，点播放时大概率已就绪（flutter_tts 同款懒加载
-        // 也在首次方法调用时创建，此处提前以加速首播）
+        // 预初始化：进入页面即建引擎，点播放时大概率已就绪
         createEngine()
     }
 
@@ -91,6 +97,7 @@ class TtsBridge : FlutterPlugin, MethodChannel.MethodCallHandler,
     }
 
     override fun onInit(status: Int) {
+        lastOnInitStatus = status
         // flutter_tts 语义：onInit 失败不判死，只打日志。连接可用性由
         // isServiceConnectionUsable() 判定，而非 status。
         if (status == TextToSpeech.SUCCESS) {
@@ -98,14 +105,14 @@ class TtsBridge : FlutterPlugin, MethodChannel.MethodCallHandler,
             setupChinese()
             tts?.setOnUtteranceProgressListener(utteranceProgressListener)
         } else {
-            Log.w(TAG, "TTS onInit status=$status（不判死，连接可用即朗读）")
+            Log.w(TAG, "TTS onInit status=$status（不判死，speak 时重建重试）")
         }
         readyLatch.countDown()
     }
 
     /**
      * 尽力将 TTS 语言设为中文（best-effort，只打日志不判成败）。
-     * 全部失败也不影响朗读——系统默认引擎/语言仍能按文本合成（与 flutter_tts 一致）。
+     * 全部失败也不影响朗读——系统默认引擎/语言仍能按文本合成。
      */
     private fun setupChinese() {
         try {
@@ -147,7 +154,6 @@ class TtsBridge : FlutterPlugin, MethodChannel.MethodCallHandler,
         when (call.method) {
             "init" -> {
                 // 引擎实体已创建即返回可用；service 连接未就绪时不判死。
-                // 若尚未创建（理论上 attach 时已创建），补建一次。
                 if (!engineCreated) createEngine()
                 result.success(engineCreated)
             }
@@ -160,10 +166,11 @@ class TtsBridge : FlutterPlugin, MethodChannel.MethodCallHandler,
                 // 阻塞等待播放完成，放后台线程避免卡 UI 线程。
                 Thread {
                     try {
-                        if (speakBlocking(text)) {
+                        val (ok, diag) = speakBlocking(text)
+                        if (ok) {
                             result.success(true)
                         } else {
-                            result.error("tts_failed", "朗读失败或超时", null)
+                            result.error("tts_failed", diag, null)
                         }
                     } catch (t: Throwable) {
                         Log.e(TAG, "speak 异常", t)
@@ -180,57 +187,92 @@ class TtsBridge : FlutterPlugin, MethodChannel.MethodCallHandler,
     }
 
     /**
-     * 阻塞播放 [text]，返回是否完成。
+     * 阻塞播放 [text]，返回是否完成及失败诊断信息。
      *
-     * flutter_tts 语义：连接不可用时自动重建 TextToSpeech 再试；永不因
-     * init 状态拒绝朗读。超时由 [TIMEOUT_MS] 兜底。
+     * flutter_tts 语义：speak 失败（连接不可用 / 返回非 0 / 超时 / onError）时
+     * 销毁重建 TextToSpeech 并重试，最多 [MAX_SPEAK_ATTEMPTS] 次。诊断信息
+     * 附带 onInit status / speak 返回码 / 引擎名，供 Dart 层 AppLog 记录。
      */
-    private fun speakBlocking(text: String): Boolean {
-        var ttsEngine = tts
-        if (!isServiceConnectionUsable(ttsEngine)) {
-            Log.w(TAG, "TTS service 连接未就绪，重建引擎后重试")
-            handler.post { createEngine() }
-            try {
-                readyLatch.await(READY_WAIT_MS, TimeUnit.MILLISECONDS)
-            } catch (_: InterruptedException) {
-                return false
+    private fun speakBlocking(text: String): Pair<Boolean, String> {
+        var attempt = 0
+        var lastDiag = "未知失败"
+        while (attempt < MAX_SPEAK_ATTEMPTS) {
+            attempt++
+            val engine = tts
+            if (engine == null) {
+                lastDiag = "引擎为空（onInit=$lastOnInitStatus）"
+                rebuildAndWait()
+                continue
             }
-            ttsEngine = tts
-        }
-        if (ttsEngine == null) {
-            Log.e(TAG, "TTS 引擎为空，无法朗读")
-            return false
-        }
+            if (!isServiceConnectionUsable(engine)) {
+                lastDiag = "service 连接未绑定（onInit=$lastOnInitStatus）"
+                rebuildAndWait()
+                continue
+            }
 
-        val done = CountDownLatch(1)
-        var finishedOk = false
-        val listener = object : UtteranceProgressListener() {
-            override fun onStart(utteranceId: String?) {}
-            override fun onDone(utteranceId: String?) {
-                finishedOk = true
-                done.countDown()
+            // 连接可用，尝试 speak
+            val done = CountDownLatch(1)
+            var finishedOk = false
+            var errorCode = -1
+            val listener = object : UtteranceProgressListener() {
+                override fun onStart(utteranceId: String?) {}
+                override fun onDone(utteranceId: String?) {
+                    finishedOk = true
+                    done.countDown()
+                }
+                @Deprecated("Deprecated in Java")
+                override fun onError(utteranceId: String?) {
+                    done.countDown()
+                }
+                override fun onError(utteranceId: String?, code: Int) {
+                    errorCode = code
+                    done.countDown()
+                }
             }
-            @Deprecated("Deprecated in Java")
-            override fun onError(utteranceId: String?) {
-                done.countDown()
+            engine.setOnUtteranceProgressListener(listener)
+            val uid = "wm_${UUID.randomUUID()}"
+            val code = engine.speak(text, TextToSpeech.QUEUE_FLUSH, null, uid)
+            if (code != TextToSpeech.SUCCESS) {
+                lastDiag = "speak 返回 $code（onInit=$lastOnInitStatus, engine=${engineName(engine)}）"
+                Log.w(TAG, "speak 返回 $code（尝试 $attempt/$MAX_SPEAK_ATTEMPTS）")
+                rebuildAndWait()
+                continue
             }
-            override fun onError(utteranceId: String?, errorCode: Int) {
-                done.countDown()
+            val finished = try {
+                done.await(TIMEOUT_MS, TimeUnit.MILLISECONDS)
+            } catch (_: InterruptedException) {
+                false
             }
+            if (finished && finishedOk) {
+                return true to ""
+            }
+            lastDiag = if (finishedOk) {
+                "onError(errorCode=$errorCode, onInit=$lastOnInitStatus)"
+            } else {
+                "speak 超时（${TIMEOUT_MS}ms, onInit=$lastOnInitStatus）"
+            }
+            Log.w(TAG, "speak 未完成（尝试 $attempt/$MAX_SPEAK_ATTEMPTS）: $lastDiag")
+            rebuildAndWait()
         }
-        ttsEngine.setOnUtteranceProgressListener(listener)
-        val utteranceId = "wm_${UUID.randomUUID()}"
-        val code = ttsEngine.speak(text, TextToSpeech.QUEUE_FLUSH, null, utteranceId)
-        if (code != TextToSpeech.SUCCESS) {
-            Log.w(TAG, "tts.speak 返回 $code")
-            return false
-        }
+        return false to lastDiag
+    }
+
+    /** 主线程重建引擎并等待 onInit（后台线程阻塞）。 */
+    private fun rebuildAndWait() {
+        handler.post { createEngine() }
         try {
-            done.await(TIMEOUT_MS, TimeUnit.MILLISECONDS)
+            readyLatch.await(READY_WAIT_MS, TimeUnit.MILLISECONDS)
         } catch (_: InterruptedException) {
-            return false
+            // 忽略
         }
-        return finishedOk
+    }
+
+    private fun engineName(engine: TextToSpeech): String {
+        return try {
+            engine.defaultEngine ?: "null"
+        } catch (_: Throwable) {
+            "未知"
+        }
     }
 
     /**
