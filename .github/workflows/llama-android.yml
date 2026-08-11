@@ -71,7 +71,8 @@ jobs:
           set -euo pipefail
           echo "==> 编译输出目录: $OUTPUT_DIR"
           echo "==> llama.cpp: $LLAMA_RELEASE"
-          "${{ github.workspace }}/.github/scripts/build_llama_android.sh" "$OUTPUT_DIR"
+          # 用 bash 前缀调用（仓库脚本为 100644，无执行位，直接执行会 Permission denied）
+          bash "${{ github.workspace }}/.github/scripts/build_llama_android.sh" "$OUTPUT_DIR"
         env:
           LLAMA_RELEASE: ${{ env.LLAMA_RELEASE }}
           ANDROID_NDK_ROOT: ${{ env.ANDROID_NDK_ROOT }}
