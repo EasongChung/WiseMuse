@@ -109,20 +109,28 @@ class LlamaBridge : FlutterPlugin, MethodChannel.MethodCallHandler {
                     eng.cleanUp()
                 }
                 // 等待原生库初始化完成（System.loadLibrary("ai-chat") 在内部协程）。
-                // 若 loadLibrary 失败（.so 缺失/ABI 不符），状态会落到 Error 或卡在
-                // Initializing，用超时兜底避免 UI 永久挂起。
-                val initialized = withTimeoutOrNull(30_000) {
-                    eng.state.first { st ->
-                        st is InferenceEngine.State.Initialized || st is InferenceEngine.State.Error
-                    } is InferenceEngine.State.Initialized
+                // 仅在 Uninitialized/Initializing（首次调用）时需要等；引擎复用后已处于
+                // ModelReady 等就绪态，直接进入 loadModel——若仍用 first{Initialized} 等，
+                // 单例第二次 init 永远等不到 Initialized，会 30s 虚超时误报
+                // （真机实测：换模型时 state=ModelReady 却被报 init_failed 超时）。
+                val cur = eng.state.value
+                if (cur is InferenceEngine.State.Uninitialized ||
+                    cur is InferenceEngine.State.Initializing
+                ) {
+                    val initialized = withTimeoutOrNull(30_000) {
+                        eng.state.first { st ->
+                            st is InferenceEngine.State.Initialized ||
+                                st is InferenceEngine.State.Error
+                        } is InferenceEngine.State.Initialized
+                    }
+                    if (initialized != true) {
+                        val st = eng.state.value.javaClass.simpleName
+                        Log.e(TAG, "引擎初始化失败或超时（state=$st）")
+                        result.error("init_failed", "引擎初始化失败或超时（state=$st）", null)
+                        return@launch
+                    }
                 }
-                if (initialized != true) {
-                    val st = eng.state.value.javaClass.simpleName
-                    Log.e(TAG, "引擎初始化失败或超时（state=$st）")
-                    result.error("init_failed", "引擎初始化失败或超时（state=$st）", null)
-                    return@launch
-                }
-                Log.i(TAG, "原生库已初始化，加载模型: $modelPath")
+                Log.i(TAG, "原生库已就绪（state=${eng.state.value.javaClass.simpleName}），加载模型: $modelPath")
                 eng.loadModel(modelPath)
                 Log.i(TAG, "模型加载完成: $modelPath")
                 result.success(true)

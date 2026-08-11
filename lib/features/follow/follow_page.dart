@@ -79,12 +79,18 @@ class _FollowPageState extends State<FollowPage> {
     setState(() => _status = '播放中…');
     final ttsReady = await _tts.init();
     if (!ttsReady) {
-      _setStatus('语音引擎不可用（设备可能缺中文语音包）');
-      return;
+      // 引擎未就绪：不直接判死——speak 内部还会等待/重试，慢热引擎此时可能已就绪。
+      // 即使确实不可用，speak 也会返回失败并给出具体原因（比笼统提示可观测）。
+      AppLog.w(_tag, 'TTS init 未就绪，仍尝试 speak（引擎慢热或初始化失败）');
     }
     final ok = await _tts.speak(text);
     if (!mounted) return;
-    _setStatus(ok ? '播放完成，点麦克风跟读' : '播放失败或中断');
+    if (ok) {
+      _setStatus('播放完成，点麦克风跟读');
+    } else {
+      AppLog.w(_tag, 'TTS speak 失败');
+      _setStatus('朗读失败：语音引擎不可用或初始化超时');
+    }
   }
 
   Future<void> _toggleListen() async {
