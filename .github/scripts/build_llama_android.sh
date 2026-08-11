@@ -57,8 +57,6 @@ cmake -S "$CMAKE_DIR" -B "$BUILD_DIR" -G Ninja \
   -DLLAMA_BUILD_COMMON=ON \
   -DLLAMA_OPENSSL=OFF \
   -DGGML_NATIVE=OFF \
-  -DGGML_BACKEND_DL=ON \
-  -DGGML_CPU_ALL_VARIANTS=ON \
   -DGGML_LLAMAFILE=OFF
 
 echo "==> [3/4] 编译（${NJOBS} 线程）"
@@ -69,7 +67,7 @@ STRIP="$NDK_ROOT/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-strip"
 test -x "$STRIP" || { echo "FATAL: llvm-strip 未找到: $STRIP" >&2; exit 1; }
 
 mkdir -p "$OUT_DIR/engine"
-# 需要的 .so：ai-chat / llama / llama-common / ggml / ggml-base / ggml-cpu 各变体
+# 需要的 .so：ai-chat / llama / llama-common / ggml / ggml-base / ggml-cpu（静态注册）
 # 排除：server/cli/bench 等（LLAMA_BUILD_APP=OFF 本应不产生，防御性剔除）、rpc/sycl
 find "$BUILD_DIR" -name '*.so' \( -name '*rpc*' -o -name '*sycl*' -o -name '*server*' \
   -o -name '*-cli*' -o -name '*bench*' -o -name '*impl*' -o -name '*mtmd*' \) -delete
@@ -78,7 +76,7 @@ FOUND=0
 while IFS= read -r -d '' so; do
   base="$(basename "$so")"
   case "$base" in
-    libai-chat.so|libllama.so|libllama-common.so|libggml-base.so|libggml.so|libggml-cpu-android_*.so)
+    libai-chat.so|libllama.so|libllama-common.so|libggml-base.so|libggml.so|libggml-cpu.so)
       "$STRIP" --strip-debug --strip-unneeded -o "$OUT_DIR/engine/$base" "$so"
       echo "    strip -> $base ($(du -h "$OUT_DIR/engine/$base" | cut -f1))"
       FOUND=1
