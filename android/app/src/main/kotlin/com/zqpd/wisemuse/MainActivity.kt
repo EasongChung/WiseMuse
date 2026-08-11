@@ -8,5 +8,7 @@ class MainActivity : FlutterActivity() {
         super.configureFlutterEngine(flutterEngine)
         // [v0.1.0] 注册 Vosk 离线语音识别桥
         flutterEngine.plugins.add(VoskBridge())
+        // [v0.1.0] 注册系统 TextToSpeech 朗读桥
+        flutterEngine.plugins.add(TtsBridge())
     }
 }

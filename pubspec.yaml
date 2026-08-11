@@ -25,6 +25,8 @@ dependencies:
   # 模型下载与解压
   http: 1.6.0
   archive: 4.0.9
+  # 跟读评分：汉字转拼音（音近容错），纯离线无传递依赖
+  pinyin: 3.3.0
 
 dev_dependencies:
   flutter_test:
