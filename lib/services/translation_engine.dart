@@ -1,0 +1,223 @@
+import 'dart:convert';
+
+import 'package:http/http.dart' as http;
+
+import '../core/debug/app_log.dart';
+import '../core/settings/settings_service.dart';
+import 'llm_service.dart';
+import 'mlkit_translation_service.dart';
+
+/// 翻译引擎类型。
+///
+/// 按优先级下降排列：ML Kit（快，离线）→ llama（强，离线）→ cloud（兜底，需联网）。
+enum TranslationEngineType {
+  /// ML Kit 翻译（standalone SDK，CDN 直连，无 GMS 依赖，快但质量一般）。
+  mlkit,
+
+  /// llama 本地大模型（Qwen3 等，需加载 GGUF，强但慢）。
+  llm,
+
+  /// 云端 OpenAI 兼容 API（需网络 + API 配置，质量最高）。
+  cloud,
+
+  /// 自动：ML Kit → llama → cloud 逐级回落。
+  auto,
+}
+
+/// [v0.3.0] 翻译引擎编排：三级回落（ML Kit → llama → 云端）。
+///
+/// 用法：
+/// ```dart
+/// final result = await TranslationEngine.translate('你好', 'zh', 'en');
+/// ```
+///
+/// 失败倒序：engine 开头的降级，静默进行，AppLog 打点记录每级错误。
+/// 三级全失败时返回 null（调用方自行决定是否展示错误）。
+class TranslationEngine {
+  static const _tag = 'translate';
+
+  final MlKitTranslationService _mlkit = MlKitTranslationService();
+  final LlmService _llm = LlmService();
+
+  /// 根据 [engineType] 翻译 [text] 从 [source] 到 [target]。
+  ///
+  /// [source]/[target] 为 BCP-47 代码（如 `zh`/`en`/`ja`）。
+  /// 返回翻译文本，全部失败返回 null。
+  static Future<String?> translate(
+    String text, {
+    required String source,
+    required String target,
+    TranslationEngineType engineType = TranslationEngineType.auto,
+  }) async {
+    return TranslationEngine()._translate(text, source, target, engineType);
+  }
+
+  Future<String?> _translate(
+    String text,
+    String source,
+    String target,
+    TranslationEngineType engineType,
+  ) async {
+    if (text.trim().isEmpty) return null;
+
+    // 按引擎类型尝试
+    switch (engineType) {
+      case TranslationEngineType.mlkit:
+        return _tryMlkit(text, source, target);
+      case TranslationEngineType.llm:
+        return _tryLlm(text, source, target);
+      case TranslationEngineType.cloud:
+        return _tryCloud(text, source, target);
+      case TranslationEngineType.auto:
+        return _tryAuto(text, source, target);
+    }
+  }
+
+  /// 三级自动回落：ML Kit → llama → 云端。
+  Future<String?> _tryAuto(String text, String source, String target) async {
+    // 1) ML Kit
+    final mlkit = await _tryMlkit(text, source, target);
+    if (mlkit != null) return mlkit;
+
+    // 2) llama
+    final llm = await _tryLlm(text, source, target);
+    if (llm != null) return llm;
+
+    // 3) 云端
+    return _tryCloud(text, source, target);
+  }
+
+  /// ML Kit 翻译（快，离线优先）。
+  Future<String?> _tryMlkit(String text, String source, String target) async {
+    AppLog.d(_tag, '尝试 ML Kit 翻译');
+    try {
+      final result = await _mlkit.translate(
+        text: text,
+        source: source,
+        target: target,
+      );
+      if (result != null) {
+        AppLog.d(_tag, 'ML Kit 翻译成功');
+        return result;
+      }
+    } catch (e) {
+      AppLog.e(_tag, 'ML Kit 翻译异常: $e');
+    }
+    return null;
+  }
+
+  /// llama 本地 LLM 翻译（需模型已加载；未加载时跳过）。
+  Future<String?> _tryLlm(String text, String source, String target) async {
+    AppLog.d(_tag, '尝试 llama 翻译');
+    try {
+      final available = await _llm.isAvailable();
+      if (!available) {
+        AppLog.d(_tag, 'llama 不可用（SDK 版本不足），跳过');
+        return null;
+      }
+      if (!_llm.isLoaded) {
+        AppLog.d(_tag, 'llama 未加载模型，跳过');
+        return null;
+      }
+      final prompt = _buildLlmPrompt(text, source, target);
+      final result = await _llm.chat(prompt, predictLength: 512);
+      if (result.isNotEmpty) {
+        AppLog.d(_tag, 'llama 翻译成功');
+        return result;
+      }
+    } catch (e) {
+      AppLog.e(_tag, 'llama 翻译异常: $e');
+    }
+    return null;
+  }
+
+  /// 构造 llama 翻译 prompt。
+  String _buildLlmPrompt(String text, String source, String target) {
+    final src = _langName(source);
+    final tgt = _langName(target);
+    return 'Translate the following $src text to $tgt. Output only the translation, no explanation.\n\n$text';
+  }
+
+  /// 云端 OpenAI 兼容 API 翻译（需在设置页配好 API 参数）。
+  Future<String?> _tryCloud(String text, String source, String target) async {
+    AppLog.d(_tag, '尝试云端翻译');
+    try {
+      final settings = SettingsService.instance;
+      final baseUrl = await settings.getApiBaseUrl();
+      final apiKey = await settings.getApiKey();
+      final model = await settings.getApiModel();
+      if (baseUrl == null ||
+          baseUrl.isEmpty ||
+          apiKey == null ||
+          apiKey.isEmpty) {
+        AppLog.d(_tag, '云端未配置 API，跳过');
+        return null;
+      }
+      final url =
+          '${baseUrl.endsWith('/') ? baseUrl : '$baseUrl/'}chat/completions';
+      final src = _langName(source);
+      final tgt = _langName(target);
+      final prompt =
+          'Translate the following $src text to $tgt. Output only the translation, no explanation.\n\n$text';
+      final resp = await http
+          .post(
+            Uri.parse(url),
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': 'Bearer $apiKey',
+            },
+            body: jsonEncode({
+              'model': model,
+              'messages': [
+                {'role': 'system', 'content': 'You are a translation engine.'},
+                {'role': 'user', 'content': prompt},
+              ],
+              'temperature': 0.3,
+              'max_tokens': 1024,
+            }),
+          )
+          .timeout(const Duration(seconds: 30));
+      if (resp.statusCode == 200) {
+        final json = jsonDecode(resp.body) as Map<String, dynamic>;
+        final choices = json['choices'] as List?;
+        if (choices != null && choices.isNotEmpty) {
+          final msg = choices[0] as Map<String, dynamic>;
+          final content = msg['message']?['content'] as String?;
+          if (content != null && content.trim().isNotEmpty) {
+            AppLog.d(_tag, '云端翻译成功');
+            return content.trim();
+          }
+        }
+      } else {
+        AppLog.e(_tag, '云端翻译 HTTP ${resp.statusCode}: ${resp.body}');
+      }
+    } catch (e) {
+      AppLog.e(_tag, '云端翻译异常: $e');
+    }
+    return null;
+  }
+
+  /// BCP-47 语言代码 → 英文名称（供 LLM prompt 使用）。
+  String _langName(String code) {
+    switch (code) {
+      case 'zh':
+        return 'Chinese';
+      case 'en':
+        return 'English';
+      case 'ja':
+        return 'Japanese';
+      case 'ko':
+        return 'Korean';
+      case 'fr':
+        return 'French';
+      case 'de':
+        return 'German';
+      case 'es':
+        return 'Spanish';
+      case 'ru':
+        return 'Russian';
+      default:
+        return code;
+    }
+  }
+}

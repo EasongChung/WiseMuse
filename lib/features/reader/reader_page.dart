@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:math' as math;
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
@@ -15,6 +16,7 @@ import '../../services/ocr_geometry_service.dart';
 import '../../services/ocr_service.dart';
 import '../../services/pdf_service.dart';
 import '../../services/text_position_service.dart';
+import '../../services/translation_engine.dart';
 import '../../vendor/flutter_pdfview/flutter_pdfview.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 
@@ -57,6 +59,8 @@ class _ReaderPageState extends State<ReaderPage> {
 
   // 图片模式
   ui.Size? _imageViewSize;
+  ui.Size? _imagePixelSize; // 图片实际像素尺寸（用于点击坐标归一化）
+  final TransformationController _imgTransformCtrl = TransformationController();
   List<OcrSentence> _imgSentences = const [];
   OcrSentence? _imgHighlight;
 
@@ -233,6 +237,19 @@ class _ReaderPageState extends State<ReaderPage> {
   Future<void> _initImage() async {
     final path = widget.book.originalFilePath;
     if (path == null) throw Exception('缺少图片原文件');
+    // 读取图片实际像素尺寸（用于点击坐标归一化，BoxFit.contain 显示区域计算）
+    try {
+      final bytes = await File(path).readAsBytes();
+      final codec = await ui.instantiateImageCodec(bytes);
+      final frameInfo = await codec.getNextFrame();
+      _imagePixelSize = ui.Size(
+        frameInfo.image.width.toDouble(),
+        frameInfo.image.height.toDouble(),
+      );
+      codec.dispose();
+    } catch (e) {
+      AppLog.e(_tag, '读取图片尺寸失败: $e');
+    }
     // 加载几何：先读 SentenceDao（导入已存），空则现场重跑 OCR
     if (_sentences.isNotEmpty) {
       final tmp = <OcrSentence>[];
@@ -268,6 +285,62 @@ class _ReaderPageState extends State<ReaderPage> {
     AppLog.d(_tag, '朗读: "$text"');
     final ok = await _tts.speak(text);
     if (!ok) AppLog.w(_tag, 'TTS speak 失败: "$text"');
+  }
+
+  // ===== 翻译 =====
+
+  Future<void> _translate(String text) async {
+    if (text.trim().isEmpty) return;
+    AppLog.d(_tag, '翻译: "$text"');
+    final result = await TranslationEngine.translate(
+      text,
+      source: 'zh',
+      target: 'en',
+    );
+    if (!mounted) return;
+    if (result != null) {
+      showModalBottomSheet(
+        context: context,
+        backgroundColor: StudyPalette.parchment,
+        shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(18)),
+        ),
+        builder:
+            (context) => Padding(
+              padding: const EdgeInsets.all(20),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    text,
+                    style: const TextStyle(
+                      fontSize: 16,
+                      color: StudyPalette.ink,
+                      height: 1.5,
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  Container(height: 1, color: StudyPalette.linen),
+                  const SizedBox(height: 12),
+                  Text(
+                    result,
+                    style: const TextStyle(
+                      fontSize: 16,
+                      color: StudyPalette.ember,
+                      fontWeight: FontWeight.w600,
+                      height: 1.5,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+      );
+    } else {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('翻译失败，请检查引擎配置')));
+    }
   }
 
   // ===== 工具 =====
@@ -357,6 +430,7 @@ class _ReaderPageState extends State<ReaderPage> {
     final path = widget.book.originalFilePath;
     if (path == null) return const Text('缺少图片文件');
     return InteractiveViewer(
+      transformationController: _imgTransformCtrl,
       child: GestureDetector(
         behavior: HitTestBehavior.opaque,
         onTapUp: (d) => _onImageTap(d),
@@ -368,11 +442,15 @@ class _ReaderPageState extends State<ReaderPage> {
                 Positioned.fill(
                   child: Image.file(File(path), fit: BoxFit.contain),
                 ),
-                // 高亮层（画在 child 内，与 toScene 命中同源）
+                // 高亮层（BoxFit.contain 映射，与点击命中同源）
                 if (_imgHighlight != null)
                   Positioned.fill(
                     child: CustomPaint(
-                      painter: _HighlightPainter(_imgHighlight!.rects),
+                      painter: _HighlightPainter(
+                        _imgHighlight!.rects,
+                        _imageViewSize ?? constraints.biggest,
+                        _imagePixelSize,
+                      ),
                     ),
                   ),
               ],
@@ -385,13 +463,34 @@ class _ReaderPageState extends State<ReaderPage> {
 
   void _onImageTap(TapUpDetails d) {
     if (_imgSentences.isEmpty) return;
-    // 屏幕 → 场景坐标 → 归一化
     final local = d.localPosition;
-    // 用 LayoutBuilder 拿到实际尺寸（简化为占满的 Image 区域）
-    final size = _imageViewSize;
-    if (size == null) return;
-    final nx = (local.dx / size.width).clamp(0.0, 1.0);
-    final ny = (local.dy / size.height).clamp(0.0, 1.0);
+    final viewSize = _imageViewSize;
+    final imgSize = _imagePixelSize;
+    // 用 BoxFit.contain 将点击坐标映射到图片像素坐标再归一化
+    if (viewSize == null || imgSize == null || imgSize.isEmpty) {
+      // 无图片尺寸信息时直接归一化（回退旧行为，允许不同 widget 尺寸）
+      if (viewSize != null) {
+        final nx = (local.dx / viewSize.width).clamp(0.0, 1.0);
+        final ny = (local.dy / viewSize.height).clamp(0.0, 1.0);
+        _hitImage(nx, ny);
+      }
+      return;
+    }
+    final scale = math.min(
+      viewSize.width / imgSize.width,
+      viewSize.height / imgSize.height,
+    );
+    final dispW = imgSize.width * scale;
+    final dispH = imgSize.height * scale;
+    final offsetX = (viewSize.width - dispW) / 2;
+    final offsetY = (viewSize.height - dispH) / 2;
+    // 点击点 → 图片显示区域归一化 [0,1]
+    final nx = ((local.dx - offsetX) / dispW).clamp(0.0, 1.0);
+    final ny = ((local.dy - offsetY) / dispH).clamp(0.0, 1.0);
+    _hitImage(nx, ny);
+  }
+
+  void _hitImage(double nx, double ny) {
     final hit = OcrGeometryService.hitSentence(
       _imgSentences,
       ui.Offset(nx, ny),
@@ -461,15 +560,40 @@ class _ReaderPageState extends State<ReaderPage> {
               _speak(s.text);
             },
             child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-              child: Text(
-                s.text,
-                style: TextStyle(
-                  fontSize: 18,
-                  height: 1.6,
-                  color: highlighted ? StudyPalette.ember : StudyPalette.ink,
-                  fontWeight: highlighted ? FontWeight.w600 : FontWeight.w400,
-                ),
+              padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 8,
+                      ),
+                      child: Text(
+                        s.text,
+                        style: TextStyle(
+                          fontSize: 18,
+                          height: 1.6,
+                          color:
+                              highlighted
+                                  ? StudyPalette.ember
+                                  : StudyPalette.ink,
+                          fontWeight:
+                              highlighted ? FontWeight.w600 : FontWeight.w400,
+                        ),
+                      ),
+                    ),
+                  ),
+                  IconButton(
+                    icon: const Icon(
+                      Icons.translate,
+                      size: 20,
+                      color: StudyPalette.inkSoft,
+                    ),
+                    tooltip: '翻译',
+                    onPressed: () => _translate(s.text),
+                  ),
+                ],
               ),
             ),
           ),
@@ -481,9 +605,14 @@ class _ReaderPageState extends State<ReaderPage> {
 
 /// 图片模式高亮画笔（归一化坐标 → 像素）。
 class _HighlightPainter extends CustomPainter {
-  _HighlightPainter(this.rects);
+  /// [rects] 为归一化 [0,1] 矩形（相对图片像素）；
+  /// [viewSize] 为 widget 尺寸，[imgSize] 为图片像素尺寸。
+  /// 绘制时按 BoxFit.contain 把归一化矩形映射到图片实际显示区域（与点击命中同源）。
+  _HighlightPainter(this.rects, this.viewSize, this.imgSize);
 
   final List<ui.Rect> rects;
+  final ui.Size viewSize;
+  final ui.Size? imgSize;
 
   @override
   void paint(ui.Canvas canvas, ui.Size size) {
@@ -491,13 +620,25 @@ class _HighlightPainter extends CustomPainter {
         ui.Paint()
           ..color = const ui.Color(0x50FFC800)
           ..style = ui.PaintingStyle.fill;
+    // 计算图片显示区域（BoxFit.contain）
+    double left = 0, top = 0, dispW = size.width, dispH = size.height;
+    if (imgSize != null && !imgSize!.isEmpty && size.isEmpty == false) {
+      final scale = math.min(
+        size.width / imgSize!.width,
+        size.height / imgSize!.height,
+      );
+      dispW = imgSize!.width * scale;
+      dispH = imgSize!.height * scale;
+      left = (size.width - dispW) / 2;
+      top = (size.height - dispH) / 2;
+    }
     for (final r in rects) {
       canvas.drawRect(
         ui.Rect.fromLTRB(
-          r.left * size.width,
-          r.top * size.height,
-          r.right * size.width,
-          r.bottom * size.height,
+          left + r.left * dispW,
+          top + r.top * dispH,
+          left + r.right * dispW,
+          top + r.bottom * dispH,
         ),
         paint,
       );

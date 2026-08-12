@@ -19,6 +19,11 @@ class SettingsService {
   static const kTtsPauseMs = 'tts_pause_ms';
   static const kPreferOffline = 'prefer_offline';
 
+  // ---- 翻译引擎 ----
+  /// 翻译引擎类型（[TranslationEngineType] 的 name：mlkit/llm/cloud/auto）。
+  /// 默认 auto（三级回落）。
+  static const kTranslationEngine = 'translation_engine';
+
   // ---- API 配置 ----
   Future<String?> getApiBaseUrl() async =>
       (await SharedPreferences.getInstance()).getString(kApiBaseUrl);
@@ -69,4 +74,12 @@ class SettingsService {
       (await SharedPreferences.getInstance()).getBool(kPreferOffline) ?? false;
   Future<void> setPreferOffline(bool v) async =>
       (await SharedPreferences.getInstance()).setBool(kPreferOffline, v);
+
+  // ---- 翻译引擎 ----
+  /// 当前翻译引擎类型（默认 auto）。
+  Future<String> getTranslationEngine() async =>
+      (await SharedPreferences.getInstance()).getString(kTranslationEngine) ??
+      'auto';
+  Future<void> setTranslationEngine(String v) async =>
+      (await SharedPreferences.getInstance()).setString(kTranslationEngine, v);
 }

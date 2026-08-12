@@ -83,4 +83,9 @@ dependencies {
     implementation("io.github.oothp:android-pdf-viewer:3.2.0-beta05")
     // [v0.2.0] ML Kit 中文 OCR（Bundled 模型随 AAR 打包，无 GMS、离线可用）
     implementation("com.google.mlkit:text-recognition-chinese:16.0.0")
+    // [v0.3.0] ML Kit 翻译 + 语种识别（standalone SDK：模型走 Google CDN 直连，
+    // 不经 Google Play Services，无 GMS 机型可用；模型 ~30MB/语对按需下载）。
+    // 与 speak_reader feat/mlkit-offline 同栈（google_mlkit_translation 0.13.0 底层即此库）。
+    implementation("com.google.mlkit:translate:17.0.3")
+    implementation("com.google.mlkit:language-id:17.0.6")
 }

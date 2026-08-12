@@ -19,6 +19,8 @@ class MainActivity : FlutterActivity() {
         flutterEngine.plugins.add(OcrBridge())
         // [v0.2.0] 注册拍照/相册选取桥（系统 intent，不依赖 CAMERA 权限）
         flutterEngine.plugins.add(PickerBridge())
+        // [v0.3.0] 注册 ML Kit 翻译 + 语种识别桥（standalone SDK，模型 CDN 直连，无 GMS）
+        flutterEngine.plugins.add(TranslationBridge())
         // [v0.2.0] flutter_pdfview 已 vendoring 进仓库并从 pubspec 移除，其插件自动
         // 注册（GeneratedPluginRegistrant）随之失效，必须在此手工注册平台视图，
         // 否则 PDF 原文视图空白。viewType 与 lib/vendor/flutter_pdfview 的 _kViewType 一致。

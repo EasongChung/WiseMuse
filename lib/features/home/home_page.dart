@@ -11,6 +11,7 @@ import '../../widgets/import_sheet.dart';
 import '../debug/log_page.dart';
 import '../follow/follow_page.dart';
 import '../reader/reader_page.dart';
+import '../settings/settings_page.dart';
 
 /// [v0.3.0] 书架首页：教材书架 + 导入入口（「暖色书房」设计）。
 ///
@@ -101,26 +102,8 @@ class _HomePageState extends State<HomePage> {
     }
   }
 
+  /// 直接删除教材（不弹确认——弹窗已由 [_BookCard._confirmDelete] 完成）。
   Future<void> _deleteBook(Book book) async {
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder:
-          (context) => AlertDialog(
-            title: const Text('删除教材'),
-            content: Text('确定删除「${book.title}」吗？相关句子会一并删除。'),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.of(context).pop(false),
-                child: const Text('取消'),
-              ),
-              FilledButton(
-                onPressed: () => Navigator.of(context).pop(true),
-                child: const Text('删除'),
-              ),
-            ],
-          ),
-    );
-    if (confirmed != true || !mounted) return;
     try {
       final db = await DatabaseProvider.database;
       await BookDao(db).delete(book.id);
@@ -153,6 +136,15 @@ class _HomePageState extends State<HomePage> {
             tooltip: '跟读练习',
             icon: const Icon(Icons.record_voice_over_outlined),
             onPressed: _openFollow,
+          ),
+          IconButton(
+            tooltip: '设置',
+            icon: const Icon(Icons.settings_outlined),
+            onPressed: () {
+              Navigator.of(
+                context,
+              ).push(MaterialPageRoute(builder: (_) => const SettingsPage()));
+            },
           ),
           IconButton(
             tooltip: '运行日志',
