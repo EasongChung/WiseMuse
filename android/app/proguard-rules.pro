@@ -23,3 +23,8 @@
     native <methods>;
 }
 -keep class kotlin.Metadata { *; }
+
+# pdfbox-android：JPXFilter 反射引用可选的 JPEG2000 解码器 com.gemalto.jp2.JP2Decoder
+# （存在时才启用 JPX 解码，本项目不处理 JPX 图）。R8 静态分析发现该类不在依赖里
+# 会报 "Missing classes detected"，按官方建议 -dontwarn 忽略即可。
+-dontwarn com.gemalto.jp2.**
