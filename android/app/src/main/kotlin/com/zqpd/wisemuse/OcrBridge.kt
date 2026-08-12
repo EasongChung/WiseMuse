@@ -1,5 +1,6 @@
 package com.zqpd.wisemuse
 
+import android.net.Uri
 import android.util.Log
 import com.google.mlkit.vision.common.InputImage
 import com.google.mlkit.vision.text.Text
@@ -8,6 +9,7 @@ import com.google.mlkit.vision.text.chinese.ChineseTextRecognizerOptions
 import io.flutter.embedding.engine.plugins.FlutterPlugin
 import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
+import java.io.File
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 
@@ -78,7 +80,7 @@ class OcrBridge : FlutterPlugin, MethodChannel.MethodCallHandler {
                 }
                 executor.execute {
                     try {
-                        val image = InputImage.fromFilePath(ctx, path)
+                        val image = InputImage.fromFilePath(ctx, Uri.fromFile(File(path)))
                         recognizer.process(image)
                             .addOnSuccessListener { r ->
                                 Log.i(TAG, "OCR 完成: ${r.text.length} 字")
