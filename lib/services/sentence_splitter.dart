@@ -52,9 +52,7 @@ List<String> _splitLong(String text) {
     } else {
       // 极长且无逗号可断：按固定窗口硬切（宁可断词不吞整段）
       for (var i = 0; i < s.length; i += maxSpeakLength) {
-        result.add(
-          s.substring(i, math.min(i + maxSpeakLength, s.length)),
-        );
+        result.add(s.substring(i, math.min(i + maxSpeakLength, s.length)));
       }
     }
   }

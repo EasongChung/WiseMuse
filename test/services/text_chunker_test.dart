@@ -15,8 +15,11 @@ void main() {
 
     test('超长但无章节标题时按字数分块(每块不超过上限)', () {
       final text = para('A', 2000); // ~16000 字, 触发分块
-      final chunks =
-          chunkText(text, minChunkChars: 10000, maxLenPerChunk: 5000);
+      final chunks = chunkText(
+        text,
+        minChunkChars: 10000,
+        maxLenPerChunk: 5000,
+      );
       expect(chunks.length, greaterThan(1));
       for (final c in chunks) {
         expect(c.length, lessThanOrEqualTo(5500), reason: '单块不应远超上限');

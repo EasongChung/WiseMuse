@@ -166,10 +166,7 @@ class ImportService {
     try {
       return utf8.decode(bytes, allowMalformed: false).trim();
     } on FormatException catch (e) {
-      throw FormatException(
-        'TXT 不是有效的 UTF-8 文本，请先转换为 UTF-8 编码后再导入。',
-        e,
-      );
+      throw FormatException('TXT 不是有效的 UTF-8 文本，请先转换为 UTF-8 编码后再导入。', e);
     }
   }
 

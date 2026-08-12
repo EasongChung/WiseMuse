@@ -133,8 +133,7 @@ class _ReaderPageState extends State<ReaderPage> {
       // 1) 电子版：字符坐标几何
       final geom = await _getPageGeom(path, details.page);
       if (geom != null && geom.chars.isNotEmpty) {
-        final sentences =
-            _pdfSentenceCache.putIfAbsent(details.page, () {
+        final sentences = _pdfSentenceCache.putIfAbsent(details.page, () {
           return buildSentences(geom.chars);
         });
         final point = ui.Offset(details.x, details.y);
@@ -162,21 +161,25 @@ class _ReaderPageState extends State<ReaderPage> {
       if (scanned.isNotEmpty) {
         // 归一化点击点 → PDF 点
         final nx = details.x / (details.pageWidth > 0 ? details.pageWidth : 1);
-        final ny = details.y / (details.pageHeight > 0 ? details.pageHeight : 1);
+        final ny =
+            details.y / (details.pageHeight > 0 ? details.pageHeight : 1);
         final hit = OcrGeometryService.hitSentence(
           scanned,
           ui.Offset(nx.clamp(0, 1), ny.clamp(0, 1)),
         );
         if (hit != null) {
           // 归一化 rect → PDF 点 rect
-          final pdfRects = hit.rects
-              .map((r) => ui.Rect.fromLTRB(
-                    r.left * details.pageWidth,
-                    r.top * details.pageHeight,
-                    r.right * details.pageWidth,
-                    r.bottom * details.pageHeight,
-                  ))
-              .toList();
+          final pdfRects =
+              hit.rects
+                  .map(
+                    (r) => ui.Rect.fromLTRB(
+                      r.left * details.pageWidth,
+                      r.top * details.pageHeight,
+                      r.right * details.pageWidth,
+                      r.bottom * details.pageHeight,
+                    ),
+                  )
+                  .toList();
           AppLog.d(_tag, '扫描件命中句子: ${hit.text}');
           await controller.setHighlights(details.page, pdfRects);
           await _tts.speak(hit.text);
@@ -211,7 +214,9 @@ class _ReaderPageState extends State<ReaderPage> {
           imageHeight: h,
         );
       } finally {
-        try { await File(tmp).delete(); } catch (_) {}
+        try {
+          await File(tmp).delete();
+        } catch (_) {}
       }
     } catch (e) {
       AppLog.e(_tag, '扫描件 OCR($page) 失败: $e');
@@ -290,7 +295,9 @@ class _ReaderPageState extends State<ReaderPage> {
           if (_hasOriginal())
             IconButton(
               tooltip: _useOriginal ? '切换文本模式' : '切换原文模式',
-              icon: Icon(_useOriginal ? Icons.text_fields : Icons.image_outlined),
+              icon: Icon(
+                _useOriginal ? Icons.text_fields : Icons.image_outlined,
+              ),
               onPressed: () => setState(() => _useOriginal = !_useOriginal),
             ),
         ],
@@ -407,9 +414,10 @@ class _ReaderPageState extends State<ReaderPage> {
           return Center(child: Text('Word 转换失败：${snapshot.error}'));
         }
         return WebViewWidget(
-          controller: WebViewController()
-            ..setJavaScriptMode(JavaScriptMode.disabled)
-            ..loadHtmlString(snapshot.data!),
+          controller:
+              WebViewController()
+                ..setJavaScriptMode(JavaScriptMode.disabled)
+                ..loadHtmlString(snapshot.data!),
         );
       },
     );
@@ -429,7 +437,10 @@ class _ReaderPageState extends State<ReaderPage> {
           padding: const EdgeInsets.symmetric(vertical: 6),
           child: InkWell(
             onTap: () => _speak(s.text),
-            child: Text(s.text, style: const TextStyle(fontSize: 18, height: 1.6)),
+            child: Text(
+              s.text,
+              style: const TextStyle(fontSize: 18, height: 1.6),
+            ),
           ),
         );
       },
@@ -445,9 +456,10 @@ class _HighlightPainter extends CustomPainter {
 
   @override
   void paint(ui.Canvas canvas, ui.Size size) {
-    final paint = ui.Paint()
-      ..color = const ui.Color(0x50FFC800)
-      ..style = ui.PaintingStyle.fill;
+    final paint =
+        ui.Paint()
+          ..color = const ui.Color(0x50FFC800)
+          ..style = ui.PaintingStyle.fill;
     for (final r in rects) {
       canvas.drawRect(
         ui.Rect.fromLTRB(
@@ -462,5 +474,6 @@ class _HighlightPainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(_HighlightPainter oldDelegate) => oldDelegate.rects != rects;
+  bool shouldRepaint(_HighlightPainter oldDelegate) =>
+      oldDelegate.rects != rects;
 }

@@ -27,7 +27,13 @@ void main() {
   });
 
   Sentence sent(String bookId, int page, int index, String text) =>
-      Sentence.create(bookId: bookId, page: page, chapter: 0, index: index, text: text);
+      Sentence.create(
+        bookId: bookId,
+        page: page,
+        chapter: 0,
+        index: index,
+        text: text,
+      );
 
   test('insertAll 批量写入 + getByBook 按 page,index 排序', () async {
     await sentenceDao.insertAll([

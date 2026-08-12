@@ -39,7 +39,10 @@ class BookImportService {
     final fileName = _fileName(path);
     AppLog.d(_tag, '导入文档: $fileName');
     try {
-      final result = await _import.importFile(path, pdfExtractor: _extractPdfText);
+      final result = await _import.importFile(
+        path,
+        pdfExtractor: _extractPdfText,
+      );
       // PDF：按页切句；docx/txt：整篇 page=0
       final sentences = <Sentence>[];
       if (result.pageTexts != null) {
@@ -49,7 +52,10 @@ class BookImportService {
       } else {
         _appendSentences(sentences, result.content, page: 0);
       }
-      final pageCount = result.source == BookSource.pdf ? await _pdf.getPageCount(path) : null;
+      final pageCount =
+          result.source == BookSource.pdf
+              ? await _pdf.getPageCount(path)
+              : null;
       return _persist(
         title: result.title,
         source: result.source,
@@ -119,7 +125,9 @@ class BookImportService {
           _appendSentences(sentences, result.text, page: i);
         }
       } finally {
-        try { await File(tmp).delete(); } catch (_) {}
+        try {
+          await File(tmp).delete();
+        } catch (_) {}
       }
     }
     return sentences;
@@ -148,11 +156,7 @@ class BookImportService {
 
   // ===== 句子构造与几何 =====
 
-  void _appendSentences(
-    List<Sentence> out,
-    String text, {
-    required int page,
-  }) {
+  void _appendSentences(List<Sentence> out, String text, {required int page}) {
     final sentences = splitTextToSentences(text);
     for (var i = 0; i < sentences.length; i++) {
       // bookId 在 _persist 里统一绑定；此处用占位避免泄漏临时状态
@@ -190,9 +194,10 @@ class BookImportService {
     );
     // 按文本匹配，重建带几何的句子
     return sentences.map((s) {
-      final hit = ocrSentences.where((o) {
-        return o.text.contains(s.text) || s.text.contains(o.text);
-      }).toList();
+      final hit =
+          ocrSentences.where((o) {
+            return o.text.contains(s.text) || s.text.contains(o.text);
+          }).toList();
       if (hit.isEmpty) return s;
       final rects = <Rect>[];
       for (final h in hit) {
@@ -223,7 +228,10 @@ class BookImportService {
     String? bookId;
     try {
       // 1) 复制原文件到私有目录（大文件流式）
-      copied = await FileStore.copyToOriginals(originalPath, _ext(originalPath));
+      copied = await FileStore.copyToOriginals(
+        originalPath,
+        _ext(originalPath),
+      );
       // 2) 建 Book
       final book = Book.create(
         title: title,
@@ -236,16 +244,19 @@ class BookImportService {
       bookId = book.id;
       // 3) 写库（Book + 句子事务）
       final db = await DatabaseProvider.database;
-      final fixed = sentences
-          .map((s) => Sentence.create(
-                bookId: book.id,
-                page: s.page,
-                chapter: s.chapter,
-                index: s.index,
-                text: s.text,
-                geometry: s.geometry,
-              ))
-          .toList();
+      final fixed =
+          sentences
+              .map(
+                (s) => Sentence.create(
+                  bookId: book.id,
+                  page: s.page,
+                  chapter: s.chapter,
+                  index: s.index,
+                  text: s.text,
+                  geometry: s.geometry,
+                ),
+              )
+              .toList();
       await BookDao(db).insert(book);
       await SentenceDao(db).insertAll(fixed);
       AppLog.d(_tag, '入库成功: ${book.id}');
@@ -254,7 +265,9 @@ class BookImportService {
       AppLog.e(_tag, '入库失败: $e\n$s');
       // 回滚：删除复制件 + 清句子 + 删 Book（若已插入）
       if (copied != null) {
-        try { await FileStore.delete(copied); } catch (_) {}
+        try {
+          await FileStore.delete(copied);
+        } catch (_) {}
       }
       if (bookId != null) {
         try {

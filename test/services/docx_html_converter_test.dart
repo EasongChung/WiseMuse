@@ -15,14 +15,17 @@ void main() {
   Future<File> makeDocx(String documentXml) async {
     final dir = await Directory.systemTemp.createTemp('wm_docx_test_');
     addTearDown(() => dir.delete(recursive: true));
-    final archive = Archive()
-      ..add(ArchiveFile.string(
-          'word/document.xml',
-          '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
-              '<w:document'
-              ' xmlns:w="$wNs" '
-              ' xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">'
-              '<w:body>$documentXml</w:body></w:document>'));
+    final archive =
+        Archive()..add(
+          ArchiveFile.string(
+            'word/document.xml',
+            '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+                '<w:document'
+                ' xmlns:w="$wNs" '
+                ' xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">'
+                '<w:body>$documentXml</w:body></w:document>',
+          ),
+        );
     final bytes = ZipEncoder().encodeBytes(archive);
     final file = File('${dir.path}${Platform.pathSeparator}test.docx');
     await file.writeAsBytes(bytes, flush: true);
@@ -30,7 +33,8 @@ void main() {
   }
 
   /// 一个居中加粗标题段落。
-  String paragraphBoldCenter(String text) => '<w:p><w:pPr>'
+  String paragraphBoldCenter(String text) =>
+      '<w:p><w:pPr>'
       '<w:jc w:val="center"/></w:pPr>'
       '<w:r><w:rPr><w:b/></w:rPr><w:t>$text</w:t></w:r></w:p>';
 
@@ -54,18 +58,21 @@ void main() {
     test('缺少 word/document.xml 时抛出明确异常', () async {
       final dir = await Directory.systemTemp.createTemp('wm_docx_bad_');
       addTearDown(() => dir.delete(recursive: true));
-      final archive = Archive()
-        ..add(ArchiveFile.bytes('word/media/x.png', utf8.encode('xxxx')));
+      final archive =
+          Archive()
+            ..add(ArchiveFile.bytes('word/media/x.png', utf8.encode('xxxx')));
       final bytes = ZipEncoder().encodeBytes(archive);
       final file = File('${dir.path}${Platform.pathSeparator}broken.docx');
       await file.writeAsBytes(bytes, flush: true);
       await expectLater(
         DocxHtmlConverter.convert(file.path),
-        throwsA(isA<Exception>().having(
-          (e) => e.toString(),
-          'message',
-          contains('document.xml'),
-        )),
+        throwsA(
+          isA<Exception>().having(
+            (e) => e.toString(),
+            'message',
+            contains('document.xml'),
+          ),
+        ),
       );
     });
   });

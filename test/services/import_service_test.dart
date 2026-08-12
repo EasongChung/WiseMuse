@@ -23,8 +23,7 @@ void main() {
     test('非 UTF-8 字节报错而非乱码', () async {
       final dir = await Directory.systemTemp.createTemp('wm_import_');
       addTearDown(() => dir.delete(recursive: true));
-      final file =
-          File('${dir.path}${Platform.pathSeparator}invalid.txt');
+      final file = File('${dir.path}${Platform.pathSeparator}invalid.txt');
       await file.writeAsBytes([0x81, 0x81, 0x81], flush: true);
 
       expect(
@@ -46,11 +45,14 @@ void main() {
     Future<File> makeDocx(String documentXml) async {
       final dir = await Directory.systemTemp.createTemp('wm_docx_import_');
       addTearDown(() => dir.delete(recursive: true));
-      final archive = Archive()
-        ..add(ArchiveFile.string(
-            'word/document.xml',
-            '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
-                '<w:document xmlns:w="$wNs"><w:body>$documentXml</w:body></w:document>'));
+      final archive =
+          Archive()..add(
+            ArchiveFile.string(
+              'word/document.xml',
+              '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+                  '<w:document xmlns:w="$wNs"><w:body>$documentXml</w:body></w:document>',
+            ),
+          );
       final bytes = ZipEncoder().encodeBytes(archive);
       final file = File('${dir.path}${Platform.pathSeparator}test.docx');
       await file.writeAsBytes(bytes, flush: true);
@@ -59,21 +61,26 @@ void main() {
 
     test('提取 w:t 文本, 段落间换行', () async {
       final file = await makeDocx(
-          '<w:p><w:r><w:t>第一段</w:t></w:r></w:p>'
-          '<w:p><w:r><w:t>第二段</w:t></w:r></w:p>');
+        '<w:p><w:r><w:t>第一段</w:t></w:r></w:p>'
+        '<w:p><w:r><w:t>第二段</w:t></w:r></w:p>',
+      );
       final result = await ImportService().importFile(file.path);
 
       expect(result.content, contains('第一段'));
       expect(result.content, contains('第二段'));
-      expect(result.content.split('\n').where((l) => l.isNotEmpty), hasLength(2));
+      expect(
+        result.content.split('\n').where((l) => l.isNotEmpty),
+        hasLength(2),
+      );
       expect(result.source, BookSource.word);
     });
 
     test('缺 document.xml 抛异常', () async {
       final dir = await Directory.systemTemp.createTemp('wm_docx_bad_');
       addTearDown(() => dir.delete(recursive: true));
-      final archive = Archive()
-        ..add(ArchiveFile.bytes('word/media/x.png', utf8.encode('xxxx')));
+      final archive =
+          Archive()
+            ..add(ArchiveFile.bytes('word/media/x.png', utf8.encode('xxxx')));
       final bytes = ZipEncoder().encodeBytes(archive);
       final file = File('${dir.path}${Platform.pathSeparator}broken.docx');
       await file.writeAsBytes(bytes, flush: true);
@@ -93,12 +100,14 @@ void main() {
       await file.writeAsBytes([1, 2, 3], flush: true);
 
       Future<PdfExtractResult> extractor(String path) async => PdfExtractResult(
-            content: '第一页内容。\n\n第二页内容。',
-            pageTexts: ['第一页内容。', '第二页内容。'],
-          );
+        content: '第一页内容。\n\n第二页内容。',
+        pageTexts: ['第一页内容。', '第二页内容。'],
+      );
 
-      final result = await ImportService().importFile(file.path,
-          pdfExtractor: extractor);
+      final result = await ImportService().importFile(
+        file.path,
+        pdfExtractor: extractor,
+      );
 
       expect(result.source, BookSource.pdf);
       expect(result.pageTexts, hasLength(2));
@@ -130,11 +139,13 @@ void main() {
 
       await expectLater(
         () => ImportService().importFile(file.path),
-        throwsA(isA<Exception>().having(
-          (e) => e.toString(),
-          'message',
-          contains('docx'),
-        )),
+        throwsA(
+          isA<Exception>().having(
+            (e) => e.toString(),
+            'message',
+            contains('docx'),
+          ),
+        ),
       );
     });
 
@@ -146,11 +157,13 @@ void main() {
 
       await expectLater(
         () => ImportService().importFile(file.path),
-        throwsA(isA<Exception>().having(
-          (e) => e.toString(),
-          'message',
-          contains('不支持'),
-        )),
+        throwsA(
+          isA<Exception>().having(
+            (e) => e.toString(),
+            'message',
+            contains('不支持'),
+          ),
+        ),
       );
     });
   });

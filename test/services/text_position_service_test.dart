@@ -11,14 +11,7 @@ Map<Object?, Object?> ch(
   required double y,
   double fs = 10,
   double? w,
-}) =>
-    <Object?, Object?>{
-      'c': c,
-      'x': x,
-      'y': y,
-      'w': w ?? fs,
-      'fs': fs,
-    };
+}) => <Object?, Object?>{'c': c, 'x': x, 'y': y, 'w': w ?? fs, 'fs': fs};
 
 /// 按阅读顺序把一串字符排成一行(等宽推进), 返回字符 Map 列表。
 List<Map<Object?, Object?>> line(

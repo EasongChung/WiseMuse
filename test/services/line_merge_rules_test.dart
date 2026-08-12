@@ -9,17 +9,16 @@ bool merge(
   String nextLine, {
   double blockRight = 20,
   double indent = 0,
-}) =>
-    canMergeLines(
-      prevRight: prevLine.length.toDouble(),
-      blockRight: blockRight,
-      nextLeft: indent,
-      blockLeft: 0,
-      charW: 1,
-      prevLastChar: prevLine.isEmpty ? '' : prevLine[prevLine.length - 1],
-      nextFirstChar: nextLine.isEmpty ? '' : nextLine[0],
-      nextLineText: nextLine,
-    );
+}) => canMergeLines(
+  prevRight: prevLine.length.toDouble(),
+  blockRight: blockRight,
+  nextLeft: indent,
+  blockLeft: 0,
+  charW: 1,
+  prevLastChar: prevLine.isEmpty ? '' : prevLine[prevLine.length - 1],
+  nextFirstChar: nextLine.isEmpty ? '' : nextLine[0],
+  nextLineText: nextLine,
+);
 
 void main() {
   group('canMergeLines 四条判据', () {

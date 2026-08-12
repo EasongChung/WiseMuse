@@ -29,7 +29,11 @@ class OcrLine {
 
 /// OCR 识别出的一个文本块（多行，像素坐标）。
 class OcrBlock {
-  OcrBlock({required this.text, required this.boundingBox, required this.lines});
+  OcrBlock({
+    required this.text,
+    required this.boundingBox,
+    required this.lines,
+  });
 
   final String text;
   final Rect boundingBox; // 原图像素
@@ -134,8 +138,11 @@ class OcrGeometryService {
   }
 
   /// 给定归一化点击点(0~1), 返回命中的句子(含吸附); 未命中返回 null。
-  static OcrSentence? hitSentence(List<OcrSentence> sentences, Offset point,
-      {double snap = 0.02}) {
+  static OcrSentence? hitSentence(
+    List<OcrSentence> sentences,
+    Offset point, {
+    double snap = 0.02,
+  }) {
     if (sentences.isEmpty) return null;
     OcrSentence? best;
     var bestD = double.infinity;
@@ -159,11 +166,11 @@ class OcrGeometryService {
   static double _normY(double py, double h) =>
       (py / h).clamp(0.0, 1.0).toDouble();
   static Rect _normRect(Rect r, double w, double h) => Rect.fromLTRB(
-        _normX(r.left, w),
-        _normY(r.top, h),
-        _normX(r.right, w),
-        _normY(r.bottom, h),
-      );
+    _normX(r.left, w),
+    _normY(r.top, h),
+    _normX(r.right, w),
+    _normY(r.bottom, h),
+  );
 
   static double _medianLineHeight(List<OcrLine> lines) {
     if (lines.isEmpty) return 20;
@@ -211,8 +218,7 @@ List<Rect>? decodeSentenceGeometry(String? json) {
 /// 把句子矩形列表编码为 [Sentence.geometry] JSON。
 String encodeSentenceGeometry(List<Rect> rects) {
   return jsonEncode({
-    'rects': rects
-        .map((r) => <double>[r.left, r.top, r.right, r.bottom])
-        .toList(),
+    'rects':
+        rects.map((r) => <double>[r.left, r.top, r.right, r.bottom]).toList(),
   });
 }

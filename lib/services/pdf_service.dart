@@ -15,7 +15,9 @@ class PdfService {
   /// 获取 PDF 页数；失败返回 null。
   Future<int?> getPageCount(String path) async {
     try {
-      final n = await _channel.invokeMethod<int>('getPageCount', {'path': path});
+      final n = await _channel.invokeMethod<int>('getPageCount', {
+        'path': path,
+      });
       return n;
     } catch (e) {
       AppLog.e(_tag, 'getPageCount 失败: $e');
@@ -30,10 +32,11 @@ class PdfService {
     double scale = 2.0,
   }) async {
     try {
-      final bytes = await _channel.invokeMethod<Uint8List>(
-        'renderPage',
-        {'path': path, 'pageIndex': pageIndex, 'scale': scale},
-      );
+      final bytes = await _channel.invokeMethod<Uint8List>('renderPage', {
+        'path': path,
+        'pageIndex': pageIndex,
+        'scale': scale,
+      });
       return bytes;
     } catch (e) {
       AppLog.e(_tag, 'renderPage($pageIndex) 失败: $e');
@@ -68,10 +71,9 @@ class PdfService {
   /// 提取整本 PDF 逐页纯文本（索引 = 页码 - 1）；失败返回 null。
   Future<List<String>?> extractTexts(String path) async {
     try {
-      final pages = await _channel.invokeMethod<List<Object?>>(
-        'extractTexts',
-        {'path': path},
-      );
+      final pages = await _channel.invokeMethod<List<Object?>>('extractTexts', {
+        'path': path,
+      });
       return pages?.map((e) => e?.toString() ?? '').toList();
     } catch (e) {
       AppLog.e(_tag, 'extractTexts 失败: $e');
@@ -105,9 +107,12 @@ class PdfPageGeometry {
       cropX: (map['cropX'] as num?)?.toDouble() ?? 0,
       cropY: (map['cropY'] as num?)?.toDouble() ?? 0,
       rotation: (map['rotation'] as int?) ?? 0,
-      chars: raw
-          .map<Map<Object?, Object?>>((e) => (e as Map).cast<Object?, Object?>())
-          .toList(),
+      chars:
+          raw
+              .map<Map<Object?, Object?>>(
+                (e) => (e as Map).cast<Object?, Object?>(),
+              )
+              .toList(),
     );
   }
 

@@ -29,7 +29,10 @@ class ImportSheet {
             children: [
               const Padding(
                 padding: EdgeInsets.symmetric(vertical: 12),
-                child: Text('导入教材', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                child: Text(
+                  '导入教材',
+                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                ),
               ),
               ListTile(
                 leading: const Icon(Icons.photo_camera_outlined),

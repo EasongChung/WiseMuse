@@ -62,7 +62,8 @@ class _Line {
 
   double get xMax => chars
       .map<double>(
-          (c) => (c['x'] as num).toDouble() + (c['w'] as num).toDouble())
+        (c) => (c['x'] as num).toDouble() + (c['w'] as num).toDouble(),
+      )
       .reduce((a, b) => a > b ? a : b);
 }
 
@@ -86,7 +87,7 @@ List<_Line> _buildLines(List<Map<Object?, Object?>> chars) {
     final prev = raw.last.last;
     final sameLine =
         (_y(c) - _y(prev)).abs() <= 0.55 * (_fs(prev) + _fs(c)) / 2 &&
-            (_x(c) - _x(prev)) > -_fs(c) * 0.3;
+        (_x(c) - _x(prev)) > -_fs(c) * 0.3;
     sameLine ? raw.last.add(c) : raw.add([c]);
   }
 
@@ -177,7 +178,9 @@ List<SentenceBox> buildSentences(
         if (!merge) {
           flush();
         } else if (needsSpaceBetween(
-            lastChar, line.chars.first['c'].toString())) {
+          lastChar,
+          line.chars.first['c'].toString(),
+        )) {
           sb.write(' '); // 拉丁文折行处原为词间空格，需补回
         }
       }
@@ -227,8 +230,9 @@ List<ParagraphBox> buildParagraphs(
 
   void flush() {
     if (curRects.isEmpty) return;
-    paragraphs
-        .add(ParagraphBox(text: buf.toString(), rects: List.of(curRects)));
+    paragraphs.add(
+      ParagraphBox(text: buf.toString(), rects: List.of(curRects)),
+    );
     curRects.clear();
     buf.clear();
   }
@@ -252,40 +256,62 @@ List<ParagraphBox> buildParagraphs(
 ///
 /// **按 [SentenceBox.rects] 逐个行段判定**，不能用 `union`：跨行句的 union
 /// 是横跨多行的大矩形，会把行首/行尾的空白区域也算作命中。
-SentenceBox? hitSentence(List<SentenceBox> sentences, Offset point,
-    {double snapEm = 4}) {
+SentenceBox? hitSentence(
+  List<SentenceBox> sentences,
+  Offset point, {
+  double snapEm = 4,
+}) {
   if (sentences.isEmpty) return null;
   // 吸附阈值基于真实行高，不是整句框高度（避免跨行长句误扩大吸附范围）
-  final lineHeights = sentences
-      .expand((s) => s.rects.map((r) => r.height))
-      .where((h) => h > 0)
-      .toList();
-  final est = lineHeights.isNotEmpty
-      ? (lineHeights..sort())[lineHeights.length ~/ 2]
-      : 12.0;
+  final lineHeights =
+      sentences
+          .expand((s) => s.rects.map((r) => r.height))
+          .where((h) => h > 0)
+          .toList();
+  final est =
+      lineHeights.isNotEmpty
+          ? (lineHeights..sort())[lineHeights.length ~/ 2]
+          : 12.0;
   return _hitRects<SentenceBox>(
-      sentences, (s) => s.rects, point, snapEm * math.max(est, 1));
+    sentences,
+    (s) => s.rects,
+    point,
+    snapEm * math.max(est, 1),
+  );
 }
 
 /// 点所在的段落；未包含则吸附最近段（仅容忍段内行距，避免空白误选）。
-ParagraphBox? hitParagraph(List<ParagraphBox> paragraphs, Offset point,
-    {double snapEm = 1.5}) {
+ParagraphBox? hitParagraph(
+  List<ParagraphBox> paragraphs,
+  Offset point, {
+  double snapEm = 1.5,
+}) {
   if (paragraphs.isEmpty) return null;
   // 吸附阈值基于真实行高，不是整段框高度
-  final lineHeights = paragraphs
-      .expand((p) => p.rects.map((r) => r.height))
-      .where((h) => h > 0)
-      .toList();
-  final est = lineHeights.isNotEmpty
-      ? (lineHeights..sort())[lineHeights.length ~/ 2]
-      : 12.0;
+  final lineHeights =
+      paragraphs
+          .expand((p) => p.rects.map((r) => r.height))
+          .where((h) => h > 0)
+          .toList();
+  final est =
+      lineHeights.isNotEmpty
+          ? (lineHeights..sort())[lineHeights.length ~/ 2]
+          : 12.0;
   return _hit<ParagraphBox>(
-      paragraphs, (p) => p.union, point, snapEm * math.max(est, 1));
+    paragraphs,
+    (p) => p.union,
+    point,
+    snapEm * math.max(est, 1),
+  );
 }
 
 /// 按行段矩形命中：任一 rect 包含则直接命中，否则取到各 rect 的最短距离。
 T? _hitRects<T>(
-    List<T> items, List<Rect> Function(T) rectsOf, Offset point, double snap) {
+  List<T> items,
+  List<Rect> Function(T) rectsOf,
+  Offset point,
+  double snap,
+) {
   T? best;
   var bestD = double.infinity;
   for (final it in items) {

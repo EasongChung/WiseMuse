@@ -76,7 +76,11 @@ void main() {
 
       // 3) 断言：sentences 表已建、books 数据完好、索引在
       expect(await _tableExists(v2, 'sentences'), true);
-      final rows = await v2.query('books', where: 'id = ?', whereArgs: ['b_old']);
+      final rows = await v2.query(
+        'books',
+        where: 'id = ?',
+        whereArgs: ['b_old'],
+      );
       expect(rows.length, 1);
       expect(rows.first['title'], '老教材');
       expect(rows.first['page_count'], 3);

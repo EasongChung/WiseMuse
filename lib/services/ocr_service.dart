@@ -52,7 +52,9 @@ class OcrResult {
           final lm = (l as Map).cast<String, dynamic>();
           final lb = _parseBbox(lm['bbox']);
           if (lb == null) continue;
-          lines.add(OcrLine(text: lm['text']?.toString() ?? '', boundingBox: lb));
+          lines.add(
+            OcrLine(text: lm['text']?.toString() ?? '', boundingBox: lb),
+          );
         }
       }
       blocks.add(

@@ -65,9 +65,9 @@ class _HomePageState extends State<HomePage> {
       await _refresh();
       if (!mounted) return;
       // 打开阅读页
-      await Navigator.of(context).push(
-        MaterialPageRoute<void>(builder: (_) => ReaderPage(book: book)),
-      );
+      await Navigator.of(
+        context,
+      ).push(MaterialPageRoute<void>(builder: (_) => ReaderPage(book: book)));
       await _refresh();
     } catch (e, s) {
       AppLog.e(_tag, '导入失败: $e\n$s');
@@ -103,20 +103,21 @@ class _HomePageState extends State<HomePage> {
   Future<void> _deleteBook(Book book) async {
     final confirmed = await showDialog<bool>(
       context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('删除教材'),
-        content: Text('确定删除「${book.title}」吗？相关句子会一并删除。'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(false),
-            child: const Text('取消'),
+      builder:
+          (context) => AlertDialog(
+            title: const Text('删除教材'),
+            content: Text('确定删除「${book.title}」吗？相关句子会一并删除。'),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(context).pop(false),
+                child: const Text('取消'),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.of(context).pop(true),
+                child: const Text('删除'),
+              ),
+            ],
           ),
-          FilledButton(
-            onPressed: () => Navigator.of(context).pop(true),
-            child: const Text('删除'),
-          ),
-        ],
-      ),
     );
     if (confirmed != true || !mounted) return;
     try {
@@ -130,15 +131,15 @@ class _HomePageState extends State<HomePage> {
   }
 
   void _openFollow() {
-    Navigator.of(context).push(
-      MaterialPageRoute<void>(builder: (_) => const FollowPage()),
-    );
+    Navigator.of(
+      context,
+    ).push(MaterialPageRoute<void>(builder: (_) => const FollowPage()));
   }
 
   void _openLog() {
-    Navigator.of(context).push(
-      MaterialPageRoute<void>(builder: (_) => const LogPage()),
-    );
+    Navigator.of(
+      context,
+    ).push(MaterialPageRoute<void>(builder: (_) => const LogPage()));
   }
 
   @override
@@ -197,7 +198,9 @@ class _HomePageState extends State<HomePage> {
             Icon(
               Icons.auto_stories_outlined,
               size: 72,
-              color: Theme.of(context).colorScheme.primary.withValues(alpha: 0.4),
+              color: Theme.of(
+                context,
+              ).colorScheme.primary.withValues(alpha: 0.4),
             ),
             const SizedBox(height: 16),
             const Text('书架空空如也', style: TextStyle(fontSize: 16)),
@@ -222,28 +225,28 @@ class _HomePageState extends State<HomePage> {
             padding: const EdgeInsets.only(right: 20),
             child: const Icon(Icons.delete_outline, color: Colors.white),
           ),
-          confirmDismiss: (_) => showDialog<bool>(
-            context: context,
-            builder: (context) => AlertDialog(
-              title: const Text('删除教材'),
-              content: Text('确定删除「${book.title}」吗？'),
-              actions: [
-                TextButton(
-                  onPressed: () => Navigator.of(context).pop(false),
-                  child: const Text('取消'),
-                ),
-                FilledButton(
-                  onPressed: () => Navigator.of(context).pop(true),
-                  child: const Text('删除'),
-                ),
-              ],
-            ),
-          ),
+          confirmDismiss:
+              (_) => showDialog<bool>(
+                context: context,
+                builder:
+                    (context) => AlertDialog(
+                      title: const Text('删除教材'),
+                      content: Text('确定删除「${book.title}」吗？'),
+                      actions: [
+                        TextButton(
+                          onPressed: () => Navigator.of(context).pop(false),
+                          child: const Text('取消'),
+                        ),
+                        FilledButton(
+                          onPressed: () => Navigator.of(context).pop(true),
+                          child: const Text('删除'),
+                        ),
+                      ],
+                    ),
+              ),
           onDismissed: (_) => _deleteBook(book),
           child: ListTile(
-            leading: CircleAvatar(
-              child: Icon(_sourceIcon(book.source)),
-            ),
+            leading: CircleAvatar(child: Icon(_sourceIcon(book.source))),
             title: Text(book.title),
             subtitle: Text(
               '${book.source.label}'

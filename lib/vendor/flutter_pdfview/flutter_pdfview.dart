@@ -84,7 +84,8 @@ class PdfTapDetails {
   final double pageHeight;
 
   @override
-  String toString() => 'PdfTapDetails(page: $page, x: $x, y: $y, '
+  String toString() =>
+      'PdfTapDetails(page: $page, x: $x, y: $y, '
       'pageWidth: $pageWidth, pageHeight: $pageHeight)';
 }
 
@@ -212,23 +213,26 @@ class _PDFViewState extends State<PDFView> {
     if (defaultTargetPlatform == TargetPlatform.android) {
       return PlatformViewLink(
         viewType: _kViewType,
-        surfaceFactory:
-            (BuildContext context, PlatformViewController controller) {
+        surfaceFactory: (
+          BuildContext context,
+          PlatformViewController controller,
+        ) {
           return AndroidViewSurface(
             controller: controller as AndroidViewController,
-            gestureRecognizers: widget.gestureRecognizers ??
+            gestureRecognizers:
+                widget.gestureRecognizers ??
                 const <Factory<OneSequenceGestureRecognizer>>{},
             hitTestBehavior: PlatformViewHitTestBehavior.opaque,
           );
         },
         onCreatePlatformView: (PlatformViewCreationParams params) {
           return PlatformViewsService.initSurfaceAndroidView(
-            id: params.id,
-            viewType: _kViewType,
-            layoutDirection: TextDirection.rtl,
-            creationParams: _CreationParams.fromWidget(widget).toMap(),
-            creationParamsCodec: const StandardMessageCodec(),
-          )
+              id: params.id,
+              viewType: _kViewType,
+              layoutDirection: TextDirection.rtl,
+              creationParams: _CreationParams.fromWidget(widget).toMap(),
+              creationParamsCodec: const StandardMessageCodec(),
+            )
             ..addOnPlatformViewCreatedListener(params.onPlatformViewCreated)
             ..addOnPlatformViewCreatedListener(_onPlatformViewCreated)
             ..create();
@@ -249,13 +253,15 @@ class _PDFViewState extends State<PDFView> {
   void didUpdateWidget(PDFView oldWidget) {
     super.didUpdateWidget(oldWidget);
     _controller.future.then(
-        (PDFViewController controller) => controller._updateWidget(widget));
+      (PDFViewController controller) => controller._updateWidget(widget),
+    );
   }
 
   @override
   void dispose() {
-    _controller.future
-        .then((PDFViewController controller) => controller.dispose());
+    _controller.future.then(
+      (PDFViewController controller) => controller.dispose(),
+    );
     super.dispose();
   }
 }
@@ -381,8 +387,8 @@ class _PDFViewSettings {
 
 class PDFViewController {
   PDFViewController._(int id, PDFView widget)
-      : _channel = MethodChannel('plugins.endigo.io/pdfview_$id'),
-        _widget = widget {
+    : _channel = MethodChannel('plugins.endigo.io/pdfview_$id'),
+      _widget = widget {
     _settings = _PDFViewSettings.fromWidget(widget);
     _channel.setMethodCallHandler(_onMethodCall);
   }
@@ -407,15 +413,19 @@ class PDFViewController {
         widget.onRender?.call(call.arguments['pages']);
         return null;
       case 'onPageChanged':
-        widget.onPageChanged
-            ?.call(call.arguments['page'], call.arguments['total']);
+        widget.onPageChanged?.call(
+          call.arguments['page'],
+          call.arguments['total'],
+        );
         return null;
       case 'onError':
         widget.onError?.call(call.arguments['error']);
         return null;
       case 'onPageError':
-        widget.onPageError
-            ?.call(call.arguments['page'], call.arguments['error']);
+        widget.onPageError?.call(
+          call.arguments['page'],
+          call.arguments['error'],
+        );
         return null;
       case 'onLinkHandler':
         widget.onLinkHandler?.call(call.arguments);
@@ -423,17 +433,20 @@ class PDFViewController {
       // [v0.2.0] 原生侧上报的点击位置
       case 'onTap':
         final Map<Object?, Object?> a = call.arguments as Map<Object?, Object?>;
-        widget.onTap?.call(PdfTapDetails(
-          page: (a['page'] as num).toInt(),
-          x: (a['x'] as num).toDouble(),
-          y: (a['y'] as num).toDouble(),
-          pageWidth: (a['pageWidth'] as num).toDouble(),
-          pageHeight: (a['pageHeight'] as num).toDouble(),
-        ));
+        widget.onTap?.call(
+          PdfTapDetails(
+            page: (a['page'] as num).toInt(),
+            x: (a['x'] as num).toDouble(),
+            y: (a['y'] as num).toDouble(),
+            pageWidth: (a['pageWidth'] as num).toDouble(),
+            pageHeight: (a['pageHeight'] as num).toDouble(),
+          ),
+        );
         return null;
     }
     throw MissingPluginException(
-        '${call.method} was invoked but has no handler');
+      '${call.method} was invoked but has no handler',
+    );
   }
 
   Future<int?> getPageCount() async {
@@ -445,8 +458,9 @@ class PDFViewController {
   }
 
   Future<bool?> setPage(int page) async {
-    return _channel
-        .invokeMethod<bool>('setPage', <String, dynamic>{'page': page});
+    return _channel.invokeMethod<bool>('setPage', <String, dynamic>{
+      'page': page,
+    });
   }
 
   /// [v0.2.0] 在指定页绘制高亮框。
@@ -456,9 +470,10 @@ class PDFViewController {
   Future<void> setHighlights(int page, List<Rect> rects) async {
     await _channel.invokeMethod<bool>('setHighlights', <String, dynamic>{
       'page': page,
-      'rects': rects
-          .map((Rect r) => <double>[r.left, r.top, r.right, r.bottom])
-          .toList(),
+      'rects':
+          rects
+              .map((Rect r) => <double>[r.left, r.top, r.right, r.bottom])
+              .toList(),
     });
   }
 

@@ -55,12 +55,14 @@ class DocxHtmlConverter {
     const ns = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main';
     final buf = StringBuffer();
     buf.write('<meta charset="utf-8">');
-    buf.write('<style>'
-        'body{font-family:sans-serif;margin:12px;font-size:16px;line-height:1.7;}'
-        'table{border-collapse:collapse;margin:6px 0;}'
-        'td,th{border:1px solid #888;padding:4px 8px;vertical-align:top;}'
-        'img{max-width:100%;height:auto;}'
-        '</style>');
+    buf.write(
+      '<style>'
+      'body{font-family:sans-serif;margin:12px;font-size:16px;line-height:1.7;}'
+      'table{border-collapse:collapse;margin:6px 0;}'
+      'td,th{border:1px solid #888;padding:4px 8px;vertical-align:top;}'
+      'img{max-width:100%;height:auto;}'
+      '</style>',
+    );
     var blockCount = 0;
     for (final body in document.findAllElements('body', namespace: ns)) {
       for (final child in body.children) {
@@ -83,7 +85,10 @@ class DocxHtmlConverter {
 
   /// 单个块级元素 → HTML（段落/表格）。
   static String _blockToHtml(
-      XmlElement el, String ns, Map<String, String> media) {
+    XmlElement el,
+    String ns,
+    Map<String, String> media,
+  ) {
     if (el.name.local == 'p') return _paragraphToHtml(el, ns, media);
     if (el.name.local == 'tbl') return _tableToHtml(el, ns, media);
     if (el.name.local == 'sectPr') return ''; // 节属性, 无排版在本方案内
@@ -94,7 +99,10 @@ class DocxHtmlConverter {
 
   /// 段落 → <p>（含对齐/缩进/行距, 文本 run 内联样式）。
   static String _paragraphToHtml(
-      XmlElement p, String ns, Map<String, String> media) {
+    XmlElement p,
+    String ns,
+    Map<String, String> media,
+  ) {
     final style = StringBuffer();
     // 段落属性
     final pPr = _firstChild(p, 'pPr', ns);
@@ -110,7 +118,10 @@ class DocxHtmlConverter {
 
   /// 表格 → <table>。
   static String _tableToHtml(
-      XmlElement tbl, String ns, Map<String, String> media) {
+    XmlElement tbl,
+    String ns,
+    Map<String, String> media,
+  ) {
     final rows = <String>[];
     for (final tr in tbl.childElements.where((e) => e.name.local == 'tr')) {
       final cells = <String>[];
@@ -150,12 +161,16 @@ class DocxHtmlConverter {
     }
     final ind = _firstChild(pPr, 'ind', ns);
     if (ind != null) {
-      final left = ind.getAttribute(
-              '{http://schemas.openxmlformats.org/wordprocessingml/2006/main}left') ??
+      final left =
+          ind.getAttribute(
+            '{http://schemas.openxmlformats.org/wordprocessingml/2006/main}left',
+          ) ??
           ind.getAttribute('left');
       // firstLine 以 twentieths of a point (dxa) 为单位; 粗转 em
-      final fl = ind.getAttribute(
-              '{http://schemas.openxmlformats.org/wordprocessingml/2006/main}firstLine') ??
+      final fl =
+          ind.getAttribute(
+            '{http://schemas.openxmlformats.org/wordprocessingml/2006/main}firstLine',
+          ) ??
           ind.getAttribute('firstLine');
       if (fl != null && fl.isNotEmpty) {
         final dxa = int.tryParse(fl.toString()) ?? 0;
@@ -172,11 +187,15 @@ class DocxHtmlConverter {
     }
     final spacing = _firstChild(pPr, 'spacing', ns);
     if (spacing != null) {
-      final line = spacing.getAttribute(
-              '{http://schemas.openxmlformats.org/wordprocessingml/2006/main}line') ??
+      final line =
+          spacing.getAttribute(
+            '{http://schemas.openxmlformats.org/wordprocessingml/2006/main}line',
+          ) ??
           spacing.getAttribute('line');
-      final lineRule = spacing.getAttribute(
-              '{http://schemas.openxmlformats.org/wordprocessingml/2006/main}lineRule') ??
+      final lineRule =
+          spacing.getAttribute(
+            '{http://schemas.openxmlformats.org/wordprocessingml/2006/main}lineRule',
+          ) ??
           spacing.getAttribute('lineRule');
       if (line != null) {
         final v = int.tryParse(line.toString()) ?? 0;
@@ -192,7 +211,10 @@ class DocxHtmlConverter {
 
   /// 段落内所有 run/（超链接等）→ 文本 HTML（含行内样式）。
   static String _runsToHtml(
-      XmlElement parent, String ns, Map<String, String> media) {
+    XmlElement parent,
+    String ns,
+    Map<String, String> media,
+  ) {
     final buf = StringBuffer();
     for (final child in parent.childElements) {
       final name = child.name.local;
@@ -245,8 +267,10 @@ class DocxHtmlConverter {
     }
     final sz = _firstChild(rPr, 'sz', ns);
     if (sz != null) {
-      final v = sz.getAttribute(
-              '{http://schemas.openxmlformats.org/wordprocessingml/2006/main}val') ??
+      final v =
+          sz.getAttribute(
+            '{http://schemas.openxmlformats.org/wordprocessingml/2006/main}val',
+          ) ??
           sz.getAttribute('val');
       final half = int.tryParse(v?.toString() ?? '') ?? 0;
       if (half > 0) {
@@ -255,8 +279,10 @@ class DocxHtmlConverter {
     }
     final color = _firstChild(rPr, 'color', ns);
     if (color != null) {
-      final v = color.getAttribute(
-              '{http://schemas.openxmlformats.org/wordprocessingml/2006/main}val') ??
+      final v =
+          color.getAttribute(
+            '{http://schemas.openxmlformats.org/wordprocessingml/2006/main}val',
+          ) ??
           color.getAttribute('val');
       final hex = v?.toString() ?? '';
       if (hex.isNotEmpty && hex != 'auto') {
@@ -267,12 +293,17 @@ class DocxHtmlConverter {
 
   /// 从 run 内的 drawing/pict 取内联图片 HTML（data-URI）。
   static String? _inlineImage(
-      XmlElement run, String ns, Map<String, String> media) {
+    XmlElement run,
+    String ns,
+    Map<String, String> media,
+  ) {
     // 找 blip 的 r:embed id
     for (final blip in run.descendants.whereType<XmlElement>()) {
       if (blip.name.local != 'blip') continue;
-      final embed = blip.getAttribute(
-              '{http://schemas.openxmlformats.org/officeDocument/2006/relationships}embed') ??
+      final embed =
+          blip.getAttribute(
+            '{http://schemas.openxmlformats.org/officeDocument/2006/relationships}embed',
+          ) ??
           blip.getAttribute('r:embed') ??
           blip.getAttribute('embed');
       if (embed == null) continue;
@@ -284,10 +315,13 @@ class DocxHtmlConverter {
       final num = numMatch?.group(1);
       String? base64;
       if (num != null) {
-        final m = media.entries
-            .where(
-                (e) => e.key.contains('$num.') || e.key.startsWith('image$num'))
-            .toList();
+        final m =
+            media.entries
+                .where(
+                  (e) =>
+                      e.key.contains('$num.') || e.key.startsWith('image$num'),
+                )
+                .toList();
         if (m.isNotEmpty) base64 = m.first.value;
       }
       if (base64 == null && media.isNotEmpty) {
