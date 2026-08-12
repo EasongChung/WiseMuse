@@ -23,7 +23,7 @@ import java.io.FileOutputStream
  *
  * 不引入 image_picker（其 Android 实现是 Kotlin，属 AGP9 KGP 风险点），
  * 直接走系统 intent：
- * - 相册：`ACTION_GET_CONTENT image/*` → contentResolver 复制到 app 私有目录；
+ * - 相册：`ACTION_GET_CONTENT image/ *` → contentResolver 复制到 app 私有目录；
  * - 拍照：MediaStore insert 得 content:// → `ACTION_IMAGE_CAPTURE EXTRA_OUTPUT`
  *   （系统相机 APP 代拍，**无需 CAMERA 权限**）→ 从该 URI 复制到 app 私有目录。
  *
