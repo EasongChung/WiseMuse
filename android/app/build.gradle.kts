@@ -40,6 +40,15 @@ android {
 
     buildTypes {
         release {
+            // [fix] 图片 OCR NPE 根因：Flutter 3.44.9 默认对 release 开启 R8 minify +
+            // shrinkResources（FlutterPlugin.kt:217），会把 ML Kit bundled 中文模型的
+            // 内部类/资源当死代码裁掉，recognizer.process() 运行时反射加载 NPE
+            // （"Attempt to invoke virtual method ... getClass() on a null object"）。
+            // 与 speak_reader 34092c2（2026-07-07）同坑同解：显式关闭 R8 混淆与资源压缩。
+            // 保留 proguard-rules.pro 无害（minify 关闭时不生效），将来若重开 R8 仍兜底。
+            isMinifyEnabled = false
+            isShrinkResources = false
+
             val releaseSigning = signingConfigs.findByName("release")
             if (releaseSigning != null && releaseSigning.storeFile != null
                 && releaseSigning.storeFile?.exists() == true) {
