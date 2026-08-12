@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
@@ -35,7 +36,7 @@ class FollowPage extends StatefulWidget {
   State<FollowPage> createState() => _FollowPageState();
 }
 
-class _FollowPageState extends State<FollowPage> {
+class _FollowPageState extends State<FollowPage> with WidgetsBindingObserver {
   static const _tag = 'follow';
 
   final AsrService _asr = VoskAsrService();
@@ -44,7 +45,12 @@ class _FollowPageState extends State<FollowPage> {
   final _sentenceController = TextEditingController();
 
   bool _listening = false;
-  final bool _busy = false;
+  bool _playing = false;
+  bool _operationBusy = false;
+  bool _navigating = false;
+  bool _appActive = true;
+  int _playRequest = 0;
+  int _lifecycleRequest = 0;
   FollowScore? _lastScore;
   String _recognized = '';
   String _status = '选择句子，点播放跟读';
@@ -60,65 +66,157 @@ class _FollowPageState extends State<FollowPage> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _sentenceController.text = _sampleSentences.first;
   }
 
   @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    final nextActive = state == AppLifecycleState.resumed;
+    if (nextActive == _appActive) return;
+    _appActive = nextActive;
+    if (!_appActive) {
+      final request = ++_lifecycleRequest;
+      _playRequest++;
+      setState(() => _operationBusy = true);
+      unawaited(_suspendPractice(request));
+    }
+  }
+
+  Future<void> _suspendPractice(int request) async {
+    final ttsStopped = await _tts.stop();
+    if (_listening) {
+      try {
+        await _asr.stop();
+      } catch (e) {
+        AppLog.w(_tag, '后台切换时停止录音失败: $e');
+      }
+    }
+    if (!mounted || request != _lifecycleRequest) return;
+    setState(() {
+      _playing = false;
+      _listening = false;
+      _operationBusy = false;
+      _status =
+          ttsStopped
+              ? (_appActive ? '语音已停止，可继续练习' : '已暂停，返回应用后可继续')
+              : '语音停止失败，请重新进入页面';
+    });
+  }
+
+  @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _appActive = false;
+    _lifecycleRequest++;
+    _playRequest++;
+    unawaited(_tts.stop());
+    unawaited(_disposeAsr());
     _sentenceController.dispose();
     super.dispose();
   }
 
-  /// 播放当前句子。
+  /// 播放当前句子。Future 直到系统 TTS 真正 onDone 后才完成。
   Future<void> _play() async {
+    if (!_appActive ||
+        _playing ||
+        _listening ||
+        _operationBusy ||
+        _navigating) {
+      return;
+    }
     final text = _sentenceController.text.trim();
     if (text.isEmpty) {
       _setStatus('请先输入要跟读的句子');
       return;
     }
+
+    final request = ++_playRequest;
     AppLog.d(_tag, '播放: "$text"');
-    setState(() => _status = '播放中…');
+    setState(() {
+      _playing = true;
+      _status = '播放中…';
+    });
+
     final ttsReady = await _tts.init();
+    if (!mounted || request != _playRequest) return;
     if (!ttsReady) {
-      // 引擎未就绪：不直接判死——speak 内部还会等待/重试，慢热引擎此时可能已就绪。
-      // 即使确实不可用，speak 也会返回失败并给出具体原因（比笼统提示可观测）。
-      AppLog.w(_tag, 'TTS init 未就绪，仍尝试 speak（引擎慢热或初始化失败）');
+      AppLog.w(_tag, 'TTS 初始化失败');
+      setState(() {
+        _playing = false;
+        _status = '朗读失败：语音引擎不可用';
+      });
+      return;
     }
+
     final ok = await _tts.speak(text);
-    if (!mounted) return;
-    if (ok) {
-      _setStatus('播放完成，点麦克风跟读');
-    } else {
-      AppLog.w(_tag, 'TTS speak 失败');
-      _setStatus('朗读失败：语音引擎不可用或初始化超时');
-    }
+    if (!mounted || request != _playRequest) return;
+    setState(() {
+      _playing = false;
+      _status = ok ? '播放完成，点麦克风跟读' : '朗读已停止或失败';
+    });
+    if (!ok) AppLog.w(_tag, 'TTS speak 未正常完成');
+  }
+
+  bool _isLifecycleCurrent(int request) {
+    return mounted && _appActive && request == _lifecycleRequest;
   }
 
   Future<void> _toggleListen() async {
-    if (_listening) {
-      AppLog.d(_tag, '停止录音');
-      final text = await _asr.stop();
-      AppLog.d(_tag, '识别结果: "$text"');
-      if (!mounted) return;
-      setState(() {
-        _listening = false;
-        _recognized = text;
-        _status = '识别完成';
-      });
-      await _scoreAndPersist(text);
-    } else {
-      final perm = await Permission.microphone.request();
-      if (!perm.isGranted) {
-        _setStatus('麦克风权限被拒绝');
-        return;
+    if (!_appActive || _playing || _operationBusy || _navigating) return;
+    final lifecycleRequest = _lifecycleRequest;
+    setState(() => _operationBusy = true);
+    try {
+      if (_listening) {
+        AppLog.d(_tag, '停止录音');
+        // 先同步状态，避免生命周期回调对同一录音并发 stop。
+        setState(() => _listening = false);
+        final text = await _asr.stop();
+        AppLog.d(_tag, '识别结果: "$text"');
+        if (!_isLifecycleCurrent(lifecycleRequest)) return;
+        setState(() {
+          _recognized = text;
+          _status = '识别完成';
+        });
+        await _scoreAndPersist(text);
+      } else {
+        // 防御性停止 TTS：只有取消屏障明确成立后才允许启动录音，避免
+        // 扬声器内容被 Vosk 录入并污染跟读评分。
+        _playRequest++;
+        final ttsStopped = await _tts.stop();
+        if (!_isLifecycleCurrent(lifecycleRequest)) return;
+        if (!ttsStopped) {
+          _setStatus('无法停止朗读，请重新进入页面后再试');
+          return;
+        }
+
+        final perm = await Permission.microphone.request();
+        if (!_isLifecycleCurrent(lifecycleRequest)) return;
+        if (!perm.isGranted) {
+          _setStatus('麦克风权限被拒绝');
+          return;
+        }
+        AppLog.d(_tag, '开始录音');
+        final ok = await _asr.start();
+        if (!_isLifecycleCurrent(lifecycleRequest)) {
+          if (ok) {
+            try {
+              await _asr.stop();
+            } catch (e) {
+              AppLog.w(_tag, '页面失活后回收录音失败: $e');
+            }
+          }
+          return;
+        }
+        setState(() {
+          _listening = ok;
+          _status = ok ? '录音中… 说完点停止' : '启动录音失败';
+        });
       }
-      AppLog.d(_tag, '开始录音');
-      final ok = await _asr.start();
-      if (!mounted) return;
-      setState(() {
-        _listening = ok;
-        _status = ok ? '录音中… 说完点停止' : '启动录音失败';
-      });
+    } finally {
+      if (mounted && lifecycleRequest == _lifecycleRequest) {
+        setState(() => _operationBusy = false);
+      }
     }
   }
 
@@ -181,22 +279,38 @@ class _FollowPageState extends State<FollowPage> {
     setState(() => _status = s);
   }
 
-  void _openLog() {
-    Navigator.of(
-      context,
-    ).push(MaterialPageRoute<void>(builder: (_) => const LogPage()));
+  Future<void> _openLog() => _openPage(const LogPage());
+
+  Future<void> _openDemo() => _openPage(const AsrDemoPage());
+
+  Future<void> _openLlmDemo() => _openPage(const LlmDemoPage());
+
+  Future<void> _openPage(Widget page) async {
+    if (!_appActive || _listening || _operationBusy || _navigating) return;
+    final lifecycleRequest = _lifecycleRequest;
+    final navigator = Navigator.of(context);
+    setState(() => _navigating = true);
+    try {
+      _playRequest++;
+      final stopped = await _tts.stop();
+      if (!_isLifecycleCurrent(lifecycleRequest)) return;
+      if (!stopped) {
+        _setStatus('无法停止朗读，暂不能切换页面');
+        return;
+      }
+      setState(() => _playing = false);
+      await navigator.push(MaterialPageRoute<void>(builder: (_) => page));
+    } finally {
+      if (mounted) setState(() => _navigating = false);
+    }
   }
 
-  void _openDemo() {
-    Navigator.of(
-      context,
-    ).push(MaterialPageRoute<void>(builder: (_) => const AsrDemoPage()));
-  }
-
-  void _openLlmDemo() {
-    Navigator.of(
-      context,
-    ).push(MaterialPageRoute<void>(builder: (_) => const LlmDemoPage()));
+  Future<void> _disposeAsr() async {
+    try {
+      await _asr.dispose();
+    } catch (e) {
+      AppLog.w(_tag, 'ASR dispose 失败: $e');
+    }
   }
 
   @override
@@ -230,6 +344,7 @@ class _FollowPageState extends State<FollowPage> {
           const SizedBox(height: 16),
           TextField(
             controller: _sentenceController,
+            enabled: !_playing && !_listening && !_operationBusy,
             decoration: const InputDecoration(
               labelText: '跟读句子',
               border: OutlineInputBorder(),
@@ -243,10 +358,13 @@ class _FollowPageState extends State<FollowPage> {
               for (final s in _sampleSentences)
                 ActionChip(
                   label: Text(s, style: const TextStyle(fontSize: 12)),
-                  onPressed: () {
-                    _sentenceController.text = s;
-                    setState(() => _lastScore = null);
-                  },
+                  onPressed:
+                      _playing || _listening || _operationBusy
+                          ? null
+                          : () {
+                            _sentenceController.text = s;
+                            setState(() => _lastScore = null);
+                          },
                 ),
             ],
           ),
@@ -255,15 +373,21 @@ class _FollowPageState extends State<FollowPage> {
             children: [
               Expanded(
                 child: FilledButton.icon(
-                  onPressed: canPractice && !_busy ? _play : null,
+                  onPressed:
+                      canPractice && !_playing && !_listening && !_operationBusy
+                          ? _play
+                          : null,
                   icon: const Icon(Icons.volume_up),
-                  label: const Text('播放'),
+                  label: Text(_playing ? '播放中…' : '播放'),
                 ),
               ),
               const SizedBox(width: 12),
               Expanded(
                 child: FilledButton.icon(
-                  onPressed: canPractice && !_busy ? _toggleListen : null,
+                  onPressed:
+                      canPractice && !_playing && !_operationBusy
+                          ? _toggleListen
+                          : null,
                   icon: Icon(_listening ? Icons.stop : Icons.mic),
                   label: Text(_listening ? '停止' : '跟读'),
                 ),

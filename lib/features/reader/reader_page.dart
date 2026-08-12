@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 import 'dart:math' as math;
 import 'dart:ui' as ui;
@@ -38,7 +39,7 @@ class ReaderPage extends StatefulWidget {
   State<ReaderPage> createState() => _ReaderPageState();
 }
 
-class _ReaderPageState extends State<ReaderPage> {
+class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
   static const _tag = 'reader';
 
   final NativeTtsService _tts = NativeTtsService();
@@ -53,9 +54,11 @@ class _ReaderPageState extends State<ReaderPage> {
   final Map<int, List<SentenceBox>> _pdfSentenceCache = {};
   final Map<int, PdfPageGeometry?> _pageGeomCache = {};
   final Map<int, List<OcrSentence>> _pdfOcrSentenceCache = {};
+  final Map<int, Future<List<OcrSentence>>> _pdfOcrInFlight = {};
 
   // PDFView 控制器（onViewCreated 赋值，供 onTap/onPageChanged 使用）
   PDFViewController? _pdfController;
+  int _pdfViewGeneration = 0;
 
   // 图片模式
   ui.Size? _imageViewSize;
@@ -67,10 +70,38 @@ class _ReaderPageState extends State<ReaderPage> {
   // 文本模式（TXT / Word 文本视图 / PDF 文本模式共用）：当前朗读句索引（高亮）
   int? _textHighlightIndex;
 
+  // 页面级朗读代次：每次点击、模式切换或 dispose 自增。耗时 PDF/OCR
+  // 任务完成后必须校验代次，旧任务不得晚到发声。
+  int _speechRequest = 0;
+  int _workGeneration = 0;
+  bool _switchingMode = false;
+
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _init();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state != AppLifecycleState.resumed) {
+      _speechRequest++;
+      _workGeneration++;
+      unawaited(_tts.stop());
+    }
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _speechRequest++;
+    _workGeneration++;
+    _pdfViewGeneration++;
+    unawaited(_tts.stop());
+    _pdfController = null;
+    _imgTransformCtrl.dispose();
+    super.dispose();
   }
 
   Future<void> _init() async {
@@ -106,17 +137,29 @@ class _ReaderPageState extends State<ReaderPage> {
     await PdfService().getPageCount(path);
   }
 
-  /// onPageChanged / onViewCreated：下发 CropBox 尺寸（G2.5 必需）
-  Future<void> _syncPageSize(PDFViewController controller, int page) async {
+  /// onPageChanged / onViewCreated：下发 CropBox 尺寸（G2.5 必需）。
+  Future<void> _syncPageSize(
+    PDFViewController controller,
+    int page,
+    int viewGeneration,
+  ) async {
     try {
       final path = widget.book.originalFilePath;
       if (path == null) return;
       final geom = await _getPageGeom(path, page);
-      if (geom != null) {
-        await controller.setPageSize(page, geom.pageWidth, geom.pageHeight);
+      if (geom == null ||
+          !mounted ||
+          !_useOriginal ||
+          _switchingMode ||
+          viewGeneration != _pdfViewGeneration ||
+          !identical(controller, _pdfController)) {
+        return;
       }
+      await controller.setPageSize(page, geom.pageWidth, geom.pageHeight);
     } catch (e) {
-      AppLog.e(_tag, 'syncPageSize($page) 失败: $e');
+      if (mounted && viewGeneration == _pdfViewGeneration) {
+        AppLog.e(_tag, 'syncPageSize($page) 失败: $e');
+      }
     }
   }
 
@@ -133,41 +176,69 @@ class _ReaderPageState extends State<ReaderPage> {
   Future<void> _onPdfTap(
     PDFViewController controller,
     PdfTapDetails details,
+    int viewGeneration,
   ) async {
     final path = widget.book.originalFilePath;
-    if (path == null) return;
+    if (path == null ||
+        _switchingMode ||
+        !_useOriginal ||
+        viewGeneration != _pdfViewGeneration ||
+        !identical(controller, _pdfController)) {
+      return;
+    }
+    final request = ++_speechRequest;
     AppLog.d(_tag, 'PDF 点击 page=${details.page} (${details.x},${details.y})');
     try {
-      // 1) 电子版：字符坐标几何
+      // 点击新位置先停止旧句；后续每个耗时步骤都核对页面、视图和朗读代次。
+      final stopped = await _tts.stop();
+      if (!stopped ||
+          !_isPdfRequestCurrent(request, controller, viewGeneration)) {
+        return;
+      }
+
+      // 1) 电子版：字符坐标几何。无论原生 pageSize 是否已同步，始终
+      // 按本次上报页尺寸归一到 PDFBox CropBox 点坐标。
       final geom = await _getPageGeom(path, details.page);
+      if (!_isPdfRequestCurrent(request, controller, viewGeneration)) return;
       if (geom != null && geom.chars.isNotEmpty) {
+        final width =
+            details.pageWidth > 0 ? details.pageWidth : geom.pageWidth;
+        final height =
+            details.pageHeight > 0 ? details.pageHeight : geom.pageHeight;
+        final point = ui.Offset(
+          (details.x / width * geom.pageWidth).clamp(0.0, geom.pageWidth),
+          (details.y / height * geom.pageHeight).clamp(0.0, geom.pageHeight),
+        );
         final sentences = _pdfSentenceCache.putIfAbsent(details.page, () {
           return buildSentences(geom.chars);
         });
-        final point = ui.Offset(details.x, details.y);
         final hit = hitSentence(sentences, point, snapEm: 4);
         if (hit != null) {
           AppLog.d(_tag, '命中句子: ${hit.text}');
           await controller.setHighlights(details.page, hit.rects);
-          await _tts.speak(hit.text);
+          if (!_isPdfRequestCurrent(request, controller, viewGeneration)) {
+            return;
+          }
+          await _speakRequest(hit.text, request);
           return;
         }
-        final paras = buildParagraphs(geom.chars);
-        final paraHit = hitParagraph(paras, point, snapEm: 1.5);
+        final paraHit = hitParagraph(
+          buildParagraphs(geom.chars),
+          point,
+          snapEm: 1.5,
+        );
         if (paraHit != null) {
           AppLog.d(_tag, '未中句子，命中段落（仅高亮）');
           await controller.setHighlights(details.page, paraHit.rects);
           return;
         }
       }
-      // 2) 扫描件：render 图 OCR 几何 → 归一化 × pageSize ≈ PDF 点
-      var scanned = _pdfOcrSentenceCache[details.page];
-      if (scanned == null) {
-        scanned = await _ocrPdfPage(path, details.page);
-        _pdfOcrSentenceCache[details.page] = scanned;
-      }
+
+      // 2) 扫描件：同一页的 render + OCR 只运行一份；结果无论哪次点击
+      // 仍有效都会写入缓存，朗读代次只控制高亮和发声。
+      final scanned = await _getPdfOcrSentences(path, details.page);
+      if (!_isPdfRequestCurrent(request, controller, viewGeneration)) return;
       if (scanned.isNotEmpty) {
-        // 归一化点击点 → PDF 点
         final nx = details.x / (details.pageWidth > 0 ? details.pageWidth : 1);
         final ny =
             details.y / (details.pageHeight > 0 ? details.pageHeight : 1);
@@ -176,7 +247,6 @@ class _ReaderPageState extends State<ReaderPage> {
           ui.Offset(nx.clamp(0, 1), ny.clamp(0, 1)),
         );
         if (hit != null) {
-          // 归一化 rect → PDF 点 rect
           final pdfRects =
               hit.rects
                   .map(
@@ -190,26 +260,59 @@ class _ReaderPageState extends State<ReaderPage> {
                   .toList();
           AppLog.d(_tag, '扫描件命中句子: ${hit.text}');
           await controller.setHighlights(details.page, pdfRects);
-          await _tts.speak(hit.text);
+          if (!_isPdfRequestCurrent(request, controller, viewGeneration)) {
+            return;
+          }
+          await _speakRequest(hit.text, request);
           return;
         }
       }
-      // 3) 都未中：清高亮
-      await controller.clearHighlights();
+
+      if (_isPdfRequestCurrent(request, controller, viewGeneration)) {
+        await controller.clearHighlights();
+      }
     } catch (e) {
-      AppLog.e(_tag, 'PDF 点击处理失败: $e');
+      if (_isPdfRequestCurrent(request, controller, viewGeneration)) {
+        AppLog.e(_tag, 'PDF 点击处理失败: $e');
+      }
     }
   }
 
-  Future<List<OcrSentence>> _ocrPdfPage(String path, int page) async {
+  Future<List<OcrSentence>> _getPdfOcrSentences(String path, int page) async {
+    final cached = _pdfOcrSentenceCache[page];
+    if (cached != null) return cached;
+
+    final workGeneration = _workGeneration;
+    final future = _pdfOcrInFlight.putIfAbsent(
+      page,
+      () => _ocrPdfPage(path, page, workGeneration),
+    );
+    try {
+      final result = await future;
+      if (_isWorkCurrent(workGeneration)) {
+        _pdfOcrSentenceCache[page] = result;
+      }
+      return result;
+    } finally {
+      if (identical(_pdfOcrInFlight[page], future)) {
+        _pdfOcrInFlight.remove(page);
+      }
+    }
+  }
+
+  Future<List<OcrSentence>> _ocrPdfPage(
+    String path,
+    int page,
+    int workGeneration,
+  ) async {
     try {
       final png = await PdfService().renderPage(path, page, scale: 2.0);
-      if (png == null) return const [];
+      if (png == null || !_isWorkCurrent(workGeneration)) return const [];
       final tmp = await _writeTempPng(png);
       try {
+        if (!_isWorkCurrent(workGeneration)) return const [];
         final result = await OcrService().recognizeFile(tmp);
         if (result == null) return const [];
-        // 图片宽高 = render 图尺寸（用块最大坐标近似）
         var w = 1.0;
         var h = 1.0;
         for (final b in result.blocks) {
@@ -227,7 +330,9 @@ class _ReaderPageState extends State<ReaderPage> {
         } catch (_) {}
       }
     } catch (e) {
-      AppLog.e(_tag, '扫描件 OCR($page) 失败: $e');
+      if (_isWorkCurrent(workGeneration)) {
+        AppLog.e(_tag, '扫描件 OCR($page) 失败: $e');
+      }
       return const [];
     }
   }
@@ -279,10 +384,65 @@ class _ReaderPageState extends State<ReaderPage> {
 
   // ===== 朗读 =====
 
+  bool _isSpeechRequestCurrent(int request) {
+    return mounted && !_switchingMode && request == _speechRequest;
+  }
+
+  bool _isWorkCurrent(int generation) {
+    return mounted && generation == _workGeneration;
+  }
+
+  bool _isPdfRequestCurrent(
+    int request,
+    PDFViewController controller,
+    int viewGeneration,
+  ) {
+    return _isSpeechRequestCurrent(request) &&
+        _useOriginal &&
+        viewGeneration == _pdfViewGeneration &&
+        identical(controller, _pdfController);
+  }
+
   Future<void> _speak(String text) async {
+    if (_switchingMode) return;
+    final request = ++_speechRequest;
+    await _speakRequest(text, request);
+  }
+
+  Future<void> _speakRequest(String text, int request) async {
+    if (text.trim().isEmpty || !_isSpeechRequestCurrent(request)) return;
     AppLog.d(_tag, '朗读: "$text"');
     final ok = await _tts.speak(text);
-    if (!ok) AppLog.w(_tag, 'TTS speak 失败: "$text"');
+    if (!ok && _isSpeechRequestCurrent(request)) {
+      AppLog.w(_tag, 'TTS speak 未完成: "$text"');
+    }
+  }
+
+  Future<void> _switchViewMode() async {
+    if (_switchingMode) return;
+    _speechRequest++;
+    _workGeneration++;
+    _pdfOcrInFlight.clear();
+    setState(() => _switchingMode = true);
+
+    final stopped = await _tts.stop();
+    if (!mounted) return;
+    if (!stopped) {
+      setState(() => _switchingMode = false);
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('无法停止朗读，请稍后重试')));
+      return;
+    }
+
+    setState(() {
+      _pdfViewGeneration++;
+      _pdfController = null;
+      _useOriginal = !_useOriginal;
+      _textHighlightIndex = null;
+      _imgHighlight = null;
+      _switchingMode = false;
+    });
   }
 
   // ===== 翻译 =====
@@ -373,11 +533,11 @@ class _ReaderPageState extends State<ReaderPage> {
               icon: Icon(
                 _useOriginal ? Icons.text_fields : Icons.image_outlined,
               ),
-              onPressed: () => setState(() => _useOriginal = !_useOriginal),
+              onPressed: _switchingMode ? null : _switchViewMode,
             ),
         ],
       ),
-      body: _buildBody(),
+      body: IgnorePointer(ignoring: _switchingMode, child: _buildBody()),
     );
   }
 
@@ -403,22 +563,35 @@ class _ReaderPageState extends State<ReaderPage> {
   Widget _buildPdfView() {
     final path = widget.book.originalFilePath;
     if (path == null) return const Text('缺少 PDF 文件');
+    final viewGeneration = _pdfViewGeneration;
     return PDFView(
       filePath: path,
       enableSwipe: true,
       onViewCreated: (controller) async {
+        if (!mounted || viewGeneration != _pdfViewGeneration) return;
         _pdfController = controller;
-        await _syncPageSize(controller, 0);
+        await _syncPageSize(controller, 0, viewGeneration);
       },
       onPageChanged: (page, total) async {
+        _speechRequest++;
+        final stopped = await _tts.stop();
+        if (!stopped ||
+            !mounted ||
+            viewGeneration != _pdfViewGeneration ||
+            !_useOriginal ||
+            _switchingMode) {
+          return;
+        }
         final c = _pdfController;
         if (c != null && page != null) {
-          await _syncPageSize(c, page);
+          await _syncPageSize(c, page, viewGeneration);
         }
       },
       onTap: (details) {
         final c = _pdfController;
-        if (c != null) _onPdfTap(c, details);
+        if (c != null) {
+          _onPdfTap(c, details, viewGeneration);
+        }
       },
       onError: (e) => AppLog.e(_tag, 'PDFView 错误: $e'),
     );
@@ -505,6 +678,7 @@ class _ReaderPageState extends State<ReaderPage> {
   Widget _buildWordView() {
     final path = widget.book.originalFilePath;
     if (path == null) return const Text('缺少 Word 文件');
+    final workGeneration = _workGeneration;
     return FutureBuilder<String>(
       future: DocxHtmlConverter.convert(path),
       builder: (context, snapshot) {
@@ -523,6 +697,11 @@ class _ReaderPageState extends State<ReaderPage> {
                 ..addJavaScriptChannel(
                   'WiseMuseTap',
                   onMessageReceived: (m) {
+                    if (!_isWorkCurrent(workGeneration) ||
+                        !_useOriginal ||
+                        _switchingMode) {
+                      return;
+                    }
                     final text = m.message.trim();
                     if (text.isNotEmpty) _speak(text);
                   },
