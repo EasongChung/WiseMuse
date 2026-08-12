@@ -264,12 +264,10 @@ class _ReaderPageState extends State<ReaderPage> {
     if (_imgSentences.isEmpty) {
       final result = await OcrService().recognizeFile(path);
       if (result != null) {
-        var w = 1.0;
-        var h = 1.0;
-        for (final b in result.blocks) {
-          if (b.boundingBox.right > w) w = b.boundingBox.right;
-          if (b.boundingBox.bottom > h) h = b.boundingBox.bottom;
-        }
+        // 用 OcrBridge 返回的图片真实像素尺寸做归一化分母（与导入同源），
+        // 不再用块外接框最大坐标近似。
+        final w = result.width?.toDouble() ?? _imagePixelSize?.width ?? 1.0;
+        final h = result.height?.toDouble() ?? _imagePixelSize?.height ?? 1.0;
         _imgSentences = OcrGeometryService.buildSentences(
           result.blocks,
           imageWidth: w,

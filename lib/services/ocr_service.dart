@@ -31,10 +31,20 @@ class OcrService {
 
 /// OCR 识别结果（含块/行结构）。
 class OcrResult {
-  OcrResult({required this.text, required this.blocks});
+  OcrResult({
+    required this.text,
+    required this.blocks,
+    this.width,
+    this.height,
+  });
 
   final String text;
   final List<OcrBlock> blocks;
+
+  /// 图片实际像素宽高（OcrBridge 从 InputImage 取；用于句子几何归一化分母，
+  /// 与阅读页点击坐标 BoxFit.contain 映射同源）。
+  final int? width;
+  final int? height;
 
   static OcrResult? fromMap(Map<String, dynamic> map) {
     final text = map['text'];
@@ -65,7 +75,12 @@ class OcrResult {
         ),
       );
     }
-    return OcrResult(text: text?.toString() ?? '', blocks: blocks);
+    return OcrResult(
+      text: text?.toString() ?? '',
+      blocks: blocks,
+      width: (map['width'] as num?)?.toInt(),
+      height: (map['height'] as num?)?.toInt(),
+    );
   }
 
   static Rect? _parseBbox(Object? raw) {

@@ -84,7 +84,7 @@ class OcrBridge : FlutterPlugin, MethodChannel.MethodCallHandler {
                         recognizer.process(image)
                             .addOnSuccessListener { r ->
                                 Log.i(TAG, "OCR 完成: ${r.text.length} 字")
-                                result.success(toMap(r))
+                                result.success(toMap(r, image))
                             }
                             .addOnFailureListener { e ->
                                 Log.e(TAG, "OCR 失败", e)
@@ -100,7 +100,7 @@ class OcrBridge : FlutterPlugin, MethodChannel.MethodCallHandler {
         }
     }
 
-    private fun toMap(r: Text): Map<String, Any> {
+    private fun toMap(r: Text, image: InputImage): Map<String, Any> {
         val blocks = ArrayList<Map<String, Any>>(r.textBlocks.size)
         for (b in r.textBlocks) {
             val lines = ArrayList<Map<String, Any>>(b.lines.size)
@@ -130,6 +130,11 @@ class OcrBridge : FlutterPlugin, MethodChannel.MethodCallHandler {
                 )
             )
         }
-        return hashMapOf("text" to r.text, "blocks" to blocks)
+        return hashMapOf(
+            "text" to r.text,
+            "width" to image.width,
+            "height" to image.height,
+            "blocks" to blocks,
+        )
     }
 }

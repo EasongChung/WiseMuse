@@ -1,5 +1,4 @@
 import 'dart:io';
-import 'dart:ui';
 
 import '../core/debug/app_log.dart';
 import '../core/models/book.dart';
@@ -77,25 +76,45 @@ class BookImportService {
     }
   }
 
-  /// 导入图片（拍照/相册）。OCR 后文本 + 归一化几何一并入库。
+  /// 导入图片（拍照/相册）。OCR 后按几何切句（文本 + 归一化坐标同源入库）。
   Future<Book> importImage(String path, BookSource source) async {
     AppLog.d(_tag, '导入图片: $source');
     final title = source == BookSource.camera ? '拍照识别' : '相册识别';
-    final sentences = <Sentence>[];
     final result = await _ocr.recognizeFile(path);
     if (result == null) {
       throw Exception('识别失败：图片无法识别出文字');
     }
-    if (result.text.trim().isNotEmpty) {
-      // 按 OCR 文本切句，geometry 由块几何反查（见下）
-      _appendSentences(sentences, result.text, page: 0);
-      return _persist(
-        title: title,
-        source: source,
-        originalPath: path,
-        pageCount: 1,
-        sentences: _attachGeometry(sentences, result),
+    // 句子直接来自 OcrGeometryService.buildSentences（canMergeLines 判据，
+    // 与 PDF 点击朗读同一套合并规则），文本与几何同源，杜绝两套切句再对齐。
+    // 归一化分母用图片真实像素尺寸（OcrBridge 从 InputImage 取），
+    // 与阅读页点击坐标 BoxFit.contain 映射同源。
+    final width = result.width?.toDouble() ?? 0;
+    final height = result.height?.toDouble() ?? 0;
+    final sentences = <Sentence>[];
+    if (width > 0 && height > 0) {
+      final ocrSentences = OcrGeometryService.buildSentences(
+        result.blocks,
+        imageWidth: width,
+        imageHeight: height,
       );
+      for (var i = 0; i < ocrSentences.length; i++) {
+        final o = ocrSentences[i];
+        if (o.text.trim().isEmpty) continue;
+        sentences.add(
+          Sentence.create(
+            bookId: '',
+            page: 0,
+            chapter: 0,
+            index: i,
+            text: o.text,
+            geometry: encodeSentenceGeometry(o.rects),
+          ),
+        );
+      }
+    } else {
+      // 兜底：拿不到图片尺寸时退化为纯文本切句（无几何，点击朗读不可用）
+      AppLog.w(_tag, 'OCR 未返回图片尺寸，退化为纯文本切句');
+      _appendSentences(sentences, result.text, page: 0);
     }
     return _persist(
       title: title,
@@ -170,48 +189,6 @@ class BookImportService {
         ),
       );
     }
-  }
-
-  /// 给图片书句子附加 OCR 归一化几何（按文本近似匹配句级矩形）。
-  ///
-  /// OcrGeometryService 输出的 OcrSentence 有 rects（归一化），按文本与
-  /// 已切句子对齐（先精确、再包含）。返回**新列表**（geometry 是 final 字段，
-  /// 不可原地改，需重建 Sentence），几何写入 Sentence.geometry JSON。
-  List<Sentence> _attachGeometry(List<Sentence> sentences, OcrResult result) {
-    final blocks = result.blocks;
-    if (blocks.isEmpty) return sentences;
-    // 图片宽高未知时无法归一化；此处用块外接框的最大坐标作为虚拟图像尺寸。
-    var maxX = 1.0;
-    var maxY = 1.0;
-    for (final b in blocks) {
-      if (b.boundingBox.right > maxX) maxX = b.boundingBox.right;
-      if (b.boundingBox.bottom > maxY) maxY = b.boundingBox.bottom;
-    }
-    final ocrSentences = OcrGeometryService.buildSentences(
-      blocks,
-      imageWidth: maxX,
-      imageHeight: maxY,
-    );
-    // 按文本匹配，重建带几何的句子
-    return sentences.map((s) {
-      final hit =
-          ocrSentences.where((o) {
-            return o.text.contains(s.text) || s.text.contains(o.text);
-          }).toList();
-      if (hit.isEmpty) return s;
-      final rects = <Rect>[];
-      for (final h in hit) {
-        rects.addAll(h.rects);
-      }
-      return Sentence.create(
-        bookId: s.bookId,
-        page: s.page,
-        chapter: s.chapter,
-        index: s.index,
-        text: s.text,
-        geometry: encodeSentenceGeometry(rects),
-      );
-    }).toList();
   }
 
   // ===== 入库与回滚 =====
