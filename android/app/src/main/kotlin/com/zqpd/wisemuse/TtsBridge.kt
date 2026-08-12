@@ -187,11 +187,16 @@ class TtsBridge : FlutterPlugin, MethodChannel.MethodCallHandler,
     }
 
     /**
-     * 阻塞播放 [text]，返回是否完成及失败诊断信息。
+     * 非阻塞播放 [text]：发送文本到 TTS 引擎后立即返回。
      *
-     * flutter_tts 语义：speak 失败（连接不可用 / 返回非 0 / 超时 / onError）时
-     * 销毁重建 TextToSpeech 并重试，最多 [MAX_SPEAK_ATTEMPTS] 次。诊断信息
-     * 附带 onInit status / speak 返回码 / 引擎名，供 Dart 层 AppLog 记录。
+     * 用 `QUEUE_FLUSH` 打断前一个 utterance，确保新点击的句子立即生效。
+     * 旧版本（v0.4.0）用 CountDownLatch 等 Done 信号，但 QUEUE_FLUSH 打断
+     * 后旧 utterance 永远等不到 Done → 30s 超时 → rebuildAndWait → 重建
+     * 引擎后重读旧文本，造成「B 句读完又复读 A 句」的 bug。
+     *
+     * 现改为 fire-and-forget：只检查引擎是否可用、speak 返回值是否 SUCCESS，
+     * 不等待朗读完成。Dart 侧 NativeTtsService 用 _speakToken 防复读兜底。
+     * 最多重试 [MAX_SPEAK_ATTEMPTS] 次引擎重建。
      */
     private fun speakBlocking(text: String): Pair<Boolean, String> {
         var attempt = 0
@@ -210,26 +215,7 @@ class TtsBridge : FlutterPlugin, MethodChannel.MethodCallHandler,
                 continue
             }
 
-            // 连接可用，尝试 speak
-            val done = CountDownLatch(1)
-            var finishedOk = false
-            var errorCode = -1
-            val listener = object : UtteranceProgressListener() {
-                override fun onStart(utteranceId: String?) {}
-                override fun onDone(utteranceId: String?) {
-                    finishedOk = true
-                    done.countDown()
-                }
-                @Deprecated("Deprecated in Java")
-                override fun onError(utteranceId: String?) {
-                    done.countDown()
-                }
-                override fun onError(utteranceId: String?, code: Int) {
-                    errorCode = code
-                    done.countDown()
-                }
-            }
-            engine.setOnUtteranceProgressListener(listener)
+            // 连接可用，尝试 speak（fire-and-forget，不等 Done）
             val uid = "wm_${UUID.randomUUID()}"
             val code = engine.speak(text, TextToSpeech.QUEUE_FLUSH, null, uid)
             if (code != TextToSpeech.SUCCESS) {
@@ -238,21 +224,8 @@ class TtsBridge : FlutterPlugin, MethodChannel.MethodCallHandler,
                 rebuildAndWait()
                 continue
             }
-            val finished = try {
-                done.await(TIMEOUT_MS, TimeUnit.MILLISECONDS)
-            } catch (_: InterruptedException) {
-                false
-            }
-            if (finished && finishedOk) {
-                return true to ""
-            }
-            lastDiag = if (finishedOk) {
-                "onError(errorCode=$errorCode, onInit=$lastOnInitStatus)"
-            } else {
-                "speak 超时（${TIMEOUT_MS}ms, onInit=$lastOnInitStatus）"
-            }
-            Log.w(TAG, "speak 未完成（尝试 $attempt/$MAX_SPEAK_ATTEMPTS）: $lastDiag")
-            rebuildAndWait()
+            // 成功入队，立即返回
+            return true to ""
         }
         return false to lastDiag
     }
