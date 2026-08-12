@@ -97,7 +97,7 @@ class TranslationBridge : FlutterPlugin, MethodChannel.MethodCallHandler {
             return
         }
 
-        val translator = getOrCreateTranslator(source, target, srcLang, tgtLang)
+        val translator = getOrCreateTranslator("$source-$target", srcLang, tgtLang)
         val conditions = DownloadConditions.Builder().requireWifi().build()
 
         // 先确保模型已下载（已存在则 immediately 成功），再翻译。
