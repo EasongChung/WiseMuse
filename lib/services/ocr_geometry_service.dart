@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:ui';
 
 import 'line_merge_rules.dart';
+import 'sentence_splitter.dart';
 
 /// [v0.2.0] OCR 句子几何：把 ML Kit 识别出的**行级**轴向框合并为**句子级**矩形。
 ///
@@ -13,6 +14,13 @@ import 'line_merge_rules.dart';
 /// - 输入: 像素 `Rect`（OCR 的 boundingBox）+ 图片宽高。
 /// - 输出: 归一化 `Rect`，用 `left = x / width`、`top = y / height` 换算，
 ///   与图片 `BoxFit.contain` / `InteractiveViewer` 缩放无关。
+///
+/// ## 句子切分（v0.3.0 修复）
+/// **行内先按终止标点切段**（复用 [sentenceTerms]，与 PDF 几何 / 文本侧同源）：
+/// ML Kit 的一行文本可能含多个句子（如 `"用一句话介绍你自己。帮我出个谜语。"`
+/// 在同一行），旧实现只按跨行判据断句，把整行甚至整页拼成一句 → 高亮框覆盖
+/// 整页。现改为：段末是终止标点时强制断句；跨行合并仍走 [canMergeLines]
+/// （仅当上一句未结束且排版为自动折行）。
 ///
 /// ## 跨行合并
 /// 复用 [canMergeLines] 判据（与 PDF 点击朗读同一套规则），保证朗读单元与高亮
@@ -81,60 +89,84 @@ class OcrGeometryService {
       final rects = <Rect>[];
       var lastChar = '';
 
-      // 把块内行按「句子终止标点 + canMergeLines」合并
+      /// 结束当前句（收集到 result）
+      void flush() {
+        final s = sb.toString().trim();
+        if (s.isNotEmpty && rects.isNotEmpty) {
+          result.add(OcrSentence(text: s, rects: List.of(rects)));
+        }
+        sb.clear();
+        rects.clear();
+        lastChar = '';
+      }
+
       for (final line in block.lines) {
         final text = line.text.trim();
         if (text.isEmpty) {
           // 空行是段落硬边界
-          if (sb.isNotEmpty) {
-            final s = sb.toString().trim();
-            if (s.isNotEmpty) {
-              result.add(OcrSentence(text: s, rects: List.of(rects)));
-            }
-            sb.clear();
-            rects.clear();
-            lastChar = '';
-          }
+          flush();
           continue;
         }
 
-        final firstChar = text.isEmpty ? '' : text[0];
-        final rx = _normX(line.boundingBox.left, imageWidth);
         final rr = _normRect(line.boundingBox, imageWidth, imageHeight);
+        final rx = _normX(line.boundingBox.left, imageWidth);
 
-        if (sb.isNotEmpty) {
-          final merge = canMergeLines(
-            prevRight: rects.isNotEmpty ? rects.last.right : 0,
-            blockRight: blockRight / imageWidth,
-            nextLeft: rx,
-            blockLeft: blockLeft / imageWidth,
-            charW: charW / imageWidth,
-            prevLastChar: lastChar,
-            nextFirstChar: firstChar,
-            nextLineText: text,
-          );
-          if (!merge) {
-            final s = sb.toString().trim();
-            if (s.isNotEmpty) {
-              result.add(OcrSentence(text: s, rects: List.of(rects)));
+        // **行内先按终止标点切段**（复用 sentenceTerms，与 PDF/文本侧同源）。
+        // ML Kit 一行可能含多个句子；段末是终止标点时该段独立成句。
+        final segments = _splitLineByTerms(text);
+        if (segments.isEmpty) continue;
+
+        for (final seg in segments) {
+          final segText = seg.trim();
+          if (segText.isEmpty) continue;
+          final segFirst = segText[0];
+          final segLast = segText[segText.length - 1];
+          final segEndsTerm = sentenceTerms.contains(segLast);
+
+          // 已有挂起句，且本段是行首第一段 → 先判定是否与上一句跨行合并
+          // （仅当上一句未结束——行内切段后段末无终止标点才可能挂起）。
+          if (sb.isNotEmpty && rects.isNotEmpty) {
+            final merge = canMergeLines(
+              prevRight: rects.last.right,
+              blockRight: blockRight / imageWidth,
+              nextLeft: rx,
+              blockLeft: blockLeft / imageWidth,
+              charW: charW / imageWidth,
+              prevLastChar: lastChar,
+              nextFirstChar: segFirst,
+              nextLineText: segText,
+            );
+            if (!merge) {
+              flush();
+            } else if (needsSpaceBetween(lastChar, segFirst)) {
+              sb.write(' ');
             }
-            sb.clear();
-            rects.clear();
-          } else if (needsSpaceBetween(lastChar, firstChar)) {
-            sb.write(' ');
           }
+
+          sb.write(segText);
+          rects.add(rr);
+          lastChar = segLast;
+          if (segEndsTerm) flush();
         }
-        sb.write(text);
-        rects.add(rr);
-        lastChar = text.isEmpty ? '' : text[text.length - 1];
       }
-      // 块结束: 收尾该句
-      final tail = sb.toString().trim();
-      if (tail.isNotEmpty) {
-        result.add(OcrSentence(text: tail, rects: List.of(rects)));
-      }
+      // 块结束: 收尾残留句
+      flush();
     }
     return result;
+  }
+
+  /// 按终止标点把一行文本切成段（标点归入前段）。
+  ///
+  /// 与 [sentenceTerms]（`splitTextToSentences` 同一终止标点集）对齐：
+  /// `"你好。世界！"` → `["你好。", "世界！"]`；无标点整行 → `["整行"]`。
+  static List<String> _splitLineByTerms(String text) {
+    final parts = text.split(RegExp('(?<=[$sentenceTerms])'));
+    final out = <String>[];
+    for (final p in parts) {
+      final t = p.trim();
+      if (t.isNotEmpty) out.add(t);
+    }
+    return out.isEmpty ? [text] : out;
   }
 
   /// 给定归一化点击点(0~1), 返回命中的句子(含吸附); 未命中返回 null。

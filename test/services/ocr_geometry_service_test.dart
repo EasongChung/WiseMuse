@@ -94,5 +94,55 @@ void main() {
       final miss = OcrGeometryService.hitSentence(out, const Offset(0.9, 0.9));
       expect(miss, isNull);
     });
+
+    test('[v0.3.0] 行内多个终止标点 → 每句独立，不整行拼句', () {
+      // 一行文本含两个完整句子（ML Kit 行级常见）
+      final blocks = [
+        block([(0, 0, 100, 10, '用一句话介绍你自己。帮我出个谜语。')]),
+      ];
+      final out = OcrGeometryService.buildSentences(
+        blocks,
+        imageWidth: 100,
+        imageHeight: 200,
+      );
+      expect(out.length, 2, reason: '行内两段终止标点应为两句');
+      expect(out[0].text, '用一句话介绍你自己。');
+      expect(out[1].text, '帮我出个谜语。');
+      // 两句各带该行 rect（行级 bbox 共用）
+      expect(out[0].rects, hasLength(1));
+      expect(out[1].rects, hasLength(1));
+    });
+
+    test('[v0.3.0] 行内标点截断 + 行末无标点 → 跨行合并仍生效', () {
+      // 行1: 句点结束 + 半句; 行2: 后半句结束
+      final blocks = [
+        block([(0, 0, 100, 10, '第一句。前半'), (0, 30, 100, 10, '后半句。')]),
+      ];
+      final out = OcrGeometryService.buildSentences(
+        blocks,
+        imageWidth: 100,
+        imageHeight: 200,
+      );
+      // 行1: "第一句。" 独立; 行1 "前半" + 行2 "后半句。" 合并（无缩进、贴边、无符号）
+      expect(out.length, 2);
+      expect(out[0].text, '第一句。');
+      expect(out[1].text, '前半后半句。');
+      expect(out[1].rects, hasLength(2), reason: '跨行句含两行矩形');
+    });
+
+    test('[v0.3.0] 行内无标点整行 + 跨行 | 不合并判据优先', () {
+      // 行1 右缘不贴块右(60 < 100) → 行末远离边界 → 不应与下行合并
+      final blocks = [
+        block([(0, 0, 60, 10, '短行'), (0, 30, 100, 10, '这是很长的下一行')]),
+      ];
+      final out = OcrGeometryService.buildSentences(
+        blocks,
+        imageWidth: 100,
+        imageHeight: 200,
+      );
+      expect(out.length, 2);
+      expect(out[0].text, '短行');
+      expect(out[1].text, contains('下一行'));
+    });
   });
 }
