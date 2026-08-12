@@ -27,6 +27,11 @@ dependencies:
   archive: 4.0.9
   # 跟读评分：汉字转拼音（音近容错），纯离线无传递依赖
   pinyin: 3.3.0
+  # Phase 2 导入与识别：
+  # docx 解析（zip 内 word/document.xml 的 WordprocessingML），与 archive 4.x 兼容
+  xml: 6.6.1
+  # Word 原文模式（docx→HTML 后 WebView 渲染）；Android 实现为纯 Java，无 AGP9 KGP 风险
+  webview_flutter: 4.14.1
 
 dev_dependencies:
   flutter_test:

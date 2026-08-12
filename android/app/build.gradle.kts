@@ -66,4 +66,12 @@ dependencies {
     implementation("com.alphacephei:vosk-android:0.3.75")
     // llama.android 官方 Java 桥（com.arm.aichat，vendored）依赖协程 Flow/StateFlow
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2")
+    // [v0.2.0] PDFBox 字符坐标提取（CharBoxStripper / PdfBridge.extractTextPositions）。
+    // AAR 无 Kotlin 源，AGP9 无 KGP 风险；需先 PDFBoxResourceLoader.init（见 PdfBridge）。
+    implementation("com.tom-roush:pdfbox-android:2.0.27.0")
+    // [v0.2.0] PDF 渲染视图（vendored flutter_pdfview 的 AndroidPdfViewer）。
+    // 原由 flutter_pdfview 1.4.4 传递引入，现由 app 模块直接声明，版本与上游一致。
+    implementation("io.github.oothp:android-pdf-viewer:3.2.0-beta05")
+    // [v0.2.0] ML Kit 中文 OCR（Bundled 模型随 AAR 打包，无 GMS、离线可用）
+    implementation("com.google.mlkit:text-recognition-chinese:16.0.0")
 }

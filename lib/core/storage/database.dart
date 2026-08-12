@@ -10,20 +10,40 @@ class DatabaseProvider {
   DatabaseProvider._();
 
   static const String dbName = 'wisemuse.db';
-  static const int dbVersion = 1;
+  static const int dbVersion = 2;
 
   static Database? _db;
 
-  /// 获取打开的数据库（首次调用创建并建表）。
+  /// 获取打开的数据库（首次调用创建并建表；已有库按版本迁移）。
   static Future<Database> get database async {
     if (_db != null) return _db!;
     _db = await openDatabase(
       p.join(await getDatabasesPath(), dbName),
       version: dbVersion,
       onCreate: _onCreate,
+      onUpgrade: _onUpgrade,
     );
     return _db!;
   }
+
+  // ===== sentences 表 SQL（_onCreate 与 _onUpgrade 共用，杜绝双份漂移）=====
+
+  static const String _createSentencesSql = '''
+      CREATE TABLE sentences (
+        id TEXT PRIMARY KEY,
+        book_id TEXT NOT NULL,
+        page INTEGER NOT NULL DEFAULT 0,
+        chapter INTEGER NOT NULL DEFAULT 0,
+        sentence_index INTEGER NOT NULL DEFAULT 0,
+        text TEXT NOT NULL,
+        geometry TEXT
+      )
+    ''';
+
+  static const String _createSentenceIndexesSql = '''
+      CREATE INDEX idx_sentences_book ON sentences(book_id);
+      CREATE INDEX idx_sentences_book_page ON sentences(book_id, page);
+    ''';
 
   /// 建表（版本 1）。
   static Future<void> _onCreate(Database db, int version) async {
@@ -69,6 +89,22 @@ class DatabaseProvider {
     );
     await db.execute('CREATE INDEX idx_records_type ON learning_records(type)');
     await db.execute('CREATE INDEX idx_records_at ON learning_records(at)');
+    // 教材句（Phase 2：导入时按页/句切好的文本骨架 + 图片 OCR 几何）
+    await db.execute(_createSentencesSql);
+    await db.execute(_createSentenceIndexesSql);
+  }
+
+  /// 数据库迁移（版本升级时）。只做增量，不删旧数据。
+  static Future<void> _onUpgrade(
+    Database db,
+    int oldVersion,
+    int newVersion,
+  ) async {
+    if (oldVersion < 2) {
+      // v1 → v2：新增 sentences 表（复用 _onCreate 的 SQL 常量）
+      await db.execute(_createSentencesSql);
+      await db.execute(_createSentenceIndexesSql);
+    }
   }
 
   /// 关闭并重置单例（测试用 / 应用退出）。
@@ -86,6 +122,19 @@ class DatabaseProvider {
       inMemoryDatabasePath,
       version: dbVersion,
       onCreate: _onCreate,
+    );
+  }
+
+  /// 测试用：以指定文件路径打开数据库（含完整建表 + 迁移）。
+  ///
+  /// 供迁移测试使用：先用 v1 schema 建一个旧库，再以本方法（v2）重开，
+  /// 验证 [onUpgrade] 增量建 sentences 表且旧数据完好。
+  static Future<Database> openFile(String path) {
+    return openDatabase(
+      path,
+      version: dbVersion,
+      onCreate: _onCreate,
+      onUpgrade: _onUpgrade,
     );
   }
 }

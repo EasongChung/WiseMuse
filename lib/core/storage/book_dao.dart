@@ -1,6 +1,7 @@
 import 'package:sqflite/sqflite.dart';
 
 import '../models/book.dart';
+import 'sentence_dao.dart';
 
 /// [v0.1.0] 教材（Book）数据访问。
 
@@ -47,13 +48,14 @@ class BookDao {
 
   /// 删除教材及其引用。
   Future<int> delete(String id) async {
-    // 关联清理：生词引用置空、学习记录保留（历史）。
+    // 关联清理：生词引用置空、学习记录保留（历史）、句子级联删。
     await db.update(
       'word_entries',
       {'from_book_id': null},
       where: 'from_book_id = ?',
       whereArgs: [id],
     );
+    await SentenceDao(db).deleteByBook(id);
     return db.delete(_table, where: 'id = ?', whereArgs: [id]);
   }
 }
