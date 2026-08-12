@@ -2,8 +2,9 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 
 import '../core/debug/app_log.dart';
+import '../core/theme/app_theme.dart';
 
-/// [v0.2.0] 导入入口底部弹窗：拍照识别 / 从相册选图 / 选择文档。
+/// [v0.3.0] 导入入口底部弹窗（「暖色书房」风格）：拍照识别 / 从相册选图 / 选择文档。
 ///
 /// 三个动作各自返回结果类型由调用方决定（拍照/相册给路径，文档给 FilePickerResult）。
 /// 调用方 await 本弹窗，根据返回值继续导入流程。
@@ -22,37 +23,55 @@ class ImportSheet {
   static Future<ImportAction?> show(BuildContext context) {
     return showModalBottomSheet<ImportAction>(
       context: context,
+      backgroundColor: StudyPalette.parchment,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(22)),
+      ),
       builder: (context) {
         return SafeArea(
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              const Padding(
-                padding: EdgeInsets.symmetric(vertical: 12),
-                child: Text(
-                  '导入教材',
-                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+              // 顶部抓手
+              Container(
+                width: 40,
+                height: 4,
+                margin: const EdgeInsets.only(top: 10, bottom: 6),
+                decoration: BoxDecoration(
+                  color: StudyPalette.linen,
+                  borderRadius: BorderRadius.circular(2),
                 ),
               ),
-              ListTile(
-                leading: const Icon(Icons.photo_camera_outlined),
-                title: const Text('拍照识别'),
-                subtitle: const Text('拍摄课本/资料页'),
-                onTap: () => Navigator.of(context).pop(ImportAction.camera),
-              ),
-              ListTile(
-                leading: const Icon(Icons.photo_library_outlined),
-                title: const Text('从相册选图'),
-                subtitle: const Text('选择已保存的图片'),
-                onTap: () => Navigator.of(context).pop(ImportAction.gallery),
-              ),
-              ListTile(
-                leading: const Icon(Icons.description_outlined),
-                title: const Text('选择文档'),
-                subtitle: const Text('Word / PDF / TXT'),
-                onTap: () => Navigator.of(context).pop(ImportAction.file),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 8, 20, 4),
+                child: Align(
+                  alignment: Alignment.centerLeft,
+                  child: Text('放入一本新书', style: titleStyle(fontSize: 18)),
+                ),
               ),
               const SizedBox(height: 8),
+              _ImportOption(
+                icon: Icons.photo_camera_outlined,
+                color: StudyPalette.spineImage,
+                title: '拍照识别',
+                subtitle: '拍摄课本或资料页',
+                onTap: () => Navigator.of(context).pop(ImportAction.camera),
+              ),
+              _ImportOption(
+                icon: Icons.photo_library_outlined,
+                color: StudyPalette.spineImage,
+                title: '从相册选图',
+                subtitle: '选择已保存的图片',
+                onTap: () => Navigator.of(context).pop(ImportAction.gallery),
+              ),
+              _ImportOption(
+                icon: Icons.description_outlined,
+                color: StudyPalette.spinePdf,
+                title: '选择文档',
+                subtitle: 'Word / PDF / TXT',
+                onTap: () => Navigator.of(context).pop(ImportAction.file),
+              ),
+              const SizedBox(height: 12),
             ],
           ),
         );
@@ -66,6 +85,54 @@ class ImportSheet {
     return FilePicker.pickFiles(
       type: FileType.custom,
       allowedExtensions: const ['pdf', 'docx', 'txt', 'md'],
+    );
+  }
+}
+
+/// 导入选项行：圆角图标块（来源色）+ 标题 + 副标题。
+class _ImportOption extends StatelessWidget {
+  const _ImportOption({
+    required this.icon,
+    required this.color,
+    required this.title,
+    required this.subtitle,
+    required this.onTap,
+  });
+
+  final IconData icon;
+  final Color color;
+  final String title;
+  final String subtitle;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return ListTile(
+      contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 4),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+      leading: Container(
+        width: 44,
+        height: 44,
+        decoration: BoxDecoration(
+          color: color.withValues(alpha: 0.14),
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Icon(icon, color: color, size: 24),
+      ),
+      title: Text(
+        title,
+        style: const TextStyle(
+          fontSize: 15,
+          fontWeight: FontWeight.w600,
+          color: StudyPalette.ink,
+        ),
+      ),
+      subtitle: Text(
+        subtitle,
+        style: const TextStyle(fontSize: 12, color: StudyPalette.inkSoft),
+      ),
+      trailing: const Icon(Icons.chevron_right, color: StudyPalette.inkSoft),
+      onTap: onTap,
     );
   }
 }

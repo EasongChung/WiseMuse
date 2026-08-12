@@ -8,6 +8,7 @@ import '../../core/models/book.dart';
 import '../../core/models/sentence.dart';
 import '../../core/storage/database.dart';
 import '../../core/storage/sentence_dao.dart';
+import '../../core/theme/app_theme.dart';
 import '../../services/docx_html_converter.dart';
 import '../../services/native_tts_service.dart';
 import '../../services/ocr_geometry_service.dart';
@@ -58,6 +59,9 @@ class _ReaderPageState extends State<ReaderPage> {
   ui.Size? _imageViewSize;
   List<OcrSentence> _imgSentences = const [];
   OcrSentence? _imgHighlight;
+
+  // 文本模式（TXT / Word 文本视图 / PDF 文本模式共用）：当前朗读句索引（高亮）
+  int? _textHighlightIndex;
 
   @override
   void initState() {
@@ -413,10 +417,19 @@ class _ReaderPageState extends State<ReaderPage> {
         if (snapshot.hasError) {
           return Center(child: Text('Word 转换失败：${snapshot.error}'));
         }
+        // 原文模式点读：converter 注入的脚本点击段落 → 高亮 + postMessage 文本，
+        // 经 WiseMuseTap channel 回调朗读（需启用 JS）。
         return WebViewWidget(
           controller:
               WebViewController()
-                ..setJavaScriptMode(JavaScriptMode.disabled)
+                ..setJavaScriptMode(JavaScriptMode.unrestricted)
+                ..addJavaScriptChannel(
+                  'WiseMuseTap',
+                  onMessageReceived: (m) {
+                    final text = m.message.trim();
+                    if (text.isNotEmpty) _speak(text);
+                  },
+                )
                 ..loadHtmlString(snapshot.data!),
         );
       },
@@ -428,18 +441,36 @@ class _ReaderPageState extends State<ReaderPage> {
     if (_sentences.isEmpty) {
       return const Center(child: Text('暂无句子内容'));
     }
-    return ListView.builder(
+    return ListView.separated(
       padding: const EdgeInsets.all(16),
       itemCount: _sentences.length,
+      separatorBuilder: (_, _) => const SizedBox(height: 8),
       itemBuilder: (context, index) {
         final s = _sentences[index];
-        return Padding(
-          padding: const EdgeInsets.symmetric(vertical: 6),
+        final highlighted = _textHighlightIndex == index;
+        return Material(
+          color:
+              highlighted
+                  ? StudyPalette.emberSoft
+                  : Colors.white.withValues(alpha: 0.6),
+          borderRadius: BorderRadius.circular(12),
           child: InkWell(
-            onTap: () => _speak(s.text),
-            child: Text(
-              s.text,
-              style: const TextStyle(fontSize: 18, height: 1.6),
+            borderRadius: BorderRadius.circular(12),
+            onTap: () {
+              setState(() => _textHighlightIndex = index);
+              _speak(s.text);
+            },
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              child: Text(
+                s.text,
+                style: TextStyle(
+                  fontSize: 18,
+                  height: 1.6,
+                  color: highlighted ? StudyPalette.ember : StudyPalette.ink,
+                  fontWeight: highlighted ? FontWeight.w600 : FontWeight.w400,
+                ),
+              ),
             ),
           ),
         );

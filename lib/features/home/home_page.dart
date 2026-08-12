@@ -4,6 +4,7 @@ import '../../core/debug/app_log.dart';
 import '../../core/models/book.dart';
 import '../../core/storage/book_dao.dart';
 import '../../core/storage/database.dart';
+import '../../core/theme/app_theme.dart';
 import '../../services/book_import_service.dart';
 import '../../services/picker_service.dart';
 import '../../widgets/import_sheet.dart';
@@ -11,10 +12,10 @@ import '../debug/log_page.dart';
 import '../follow/follow_page.dart';
 import '../reader/reader_page.dart';
 
-/// [v0.2.0] 书架首页：教材列表 + 导入入口。
+/// [v0.3.0] 书架首页：教材书架 + 导入入口（「暖色书房」设计）。
 ///
-/// - AppBar：跟读练习（保留既有链路）/ 日志入口
-/// - body：BookDao 列表（点击进 ReaderPage，Dismissible 删除）
+/// - AppBar：标题「我的书架」+ 跟读练习 / 日志入口
+/// - body：书本形态卡片网格（书脊色按来源区分，点击进 ReaderPage）
 /// - FAB：导入 → ImportSheet 三分支
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
@@ -161,27 +162,45 @@ class _HomePageState extends State<HomePage> {
         ],
       ),
       body: Stack(
-        children: [
-          _buildBody(),
-          if (_importing)
-            Container(
-              color: Colors.black38,
-              alignment: Alignment.center,
-              child: const Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  CircularProgressIndicator(),
-                  SizedBox(height: 12),
-                  Text('导入中…', style: TextStyle(color: Colors.white)),
-                ],
-              ),
-            ),
-        ],
+        children: [_buildBody(), if (_importing) _buildImportOverlay()],
       ),
       floatingActionButton: FloatingActionButton.extended(
         onPressed: _importing ? null : _onImport,
         icon: const Icon(Icons.add),
-        label: const Text('导入'),
+        label: const Text(
+          '导入',
+          style: TextStyle(
+            fontFamily: 'ZCOOLKuaiLe',
+            fontSize: 16,
+            letterSpacing: 0.5,
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// 导入中的全屏遮罩（暖色书房风格）。
+  Widget _buildImportOverlay() {
+    return Container(
+      color: StudyPalette.ink.withValues(alpha: 0.35),
+      alignment: Alignment.center,
+      child: Card(
+        color: StudyPalette.parchment,
+        child: const Padding(
+          padding: EdgeInsets.symmetric(horizontal: 28, vertical: 20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              SizedBox(
+                width: 32,
+                height: 32,
+                child: CircularProgressIndicator(strokeWidth: 3),
+              ),
+              SizedBox(height: 14),
+              Text('正在导入课本…', style: TextStyle(color: StudyPalette.ink)),
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -191,77 +210,190 @@ class _HomePageState extends State<HomePage> {
       return const Center(child: CircularProgressIndicator());
     }
     if (_books.isEmpty) {
-      return Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(
-              Icons.auto_stories_outlined,
-              size: 72,
-              color: Theme.of(
-                context,
-              ).colorScheme.primary.withValues(alpha: 0.4),
-            ),
-            const SizedBox(height: 16),
-            const Text('书架空空如也', style: TextStyle(fontSize: 16)),
-            const SizedBox(height: 8),
-            const Text('点击右下角导入课本、图片或文档'),
-          ],
-        ),
-      );
+      return _buildEmptyShelf();
     }
-    return ListView.separated(
-      padding: const EdgeInsets.symmetric(vertical: 8),
+    // 书本形态卡片网格：两列，卡片含书脊 + 封面色 + 标题
+    return GridView.builder(
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 96),
+      gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
+        maxCrossAxisExtent: 220,
+        mainAxisSpacing: 14,
+        crossAxisSpacing: 14,
+        childAspectRatio: 0.82,
+      ),
       itemCount: _books.length,
-      separatorBuilder: (_, _) => const Divider(height: 1),
       itemBuilder: (context, index) {
         final book = _books[index];
-        return Dismissible(
-          key: ValueKey(book.id),
-          direction: DismissDirection.endToStart,
-          background: Container(
-            color: Colors.red.shade300,
-            alignment: Alignment.centerRight,
-            padding: const EdgeInsets.only(right: 20),
-            child: const Icon(Icons.delete_outline, color: Colors.white),
-          ),
-          confirmDismiss:
-              (_) => showDialog<bool>(
-                context: context,
-                builder:
-                    (context) => AlertDialog(
-                      title: const Text('删除教材'),
-                      content: Text('确定删除「${book.title}」吗？'),
-                      actions: [
-                        TextButton(
-                          onPressed: () => Navigator.of(context).pop(false),
-                          child: const Text('取消'),
-                        ),
-                        FilledButton(
-                          onPressed: () => Navigator.of(context).pop(true),
-                          child: const Text('删除'),
-                        ),
-                      ],
-                    ),
-              ),
-          onDismissed: (_) => _deleteBook(book),
-          child: ListTile(
-            leading: CircleAvatar(child: Icon(_sourceIcon(book.source))),
-            title: Text(book.title),
-            subtitle: Text(
-              '${book.source.label}'
-              '${book.pageCount != null ? ' · ${book.pageCount} 页' : ''}',
-            ),
-            onTap: () async {
-              await Navigator.of(context).push(
-                MaterialPageRoute<void>(builder: (_) => ReaderPage(book: book)),
-              );
-              await _refresh();
-            },
-          ),
+        return _BookCard(
+          book: book,
+          onTap: () async {
+            await Navigator.of(context).push(
+              MaterialPageRoute<void>(builder: (_) => ReaderPage(book: book)),
+            );
+            await _refresh();
+          },
+          onDelete: () => _deleteBook(book),
         );
       },
     );
+  }
+
+  Widget _buildEmptyShelf() {
+    return Center(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            width: 96,
+            height: 96,
+            decoration: BoxDecoration(
+              color: StudyPalette.parchmentDeep,
+              shape: BoxShape.circle,
+            ),
+            child: const Icon(
+              Icons.auto_stories_outlined,
+              size: 48,
+              color: StudyPalette.spineWord,
+            ),
+          ),
+          const SizedBox(height: 18),
+          Text('书架空空如也', style: titleStyle(fontSize: 20)),
+          const SizedBox(height: 8),
+          const Text(
+            '点右下角「导入」，放入课本、图片或文档',
+            style: TextStyle(color: StudyPalette.inkSoft),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// 书本形态卡片：书脊（来源色）+ 封面色 + 标题 + 副标题。
+///
+/// 整体观感像一本书立在书架上，来源类型映射为不同书脊色
+/// （PDF=靛蓝 / 图片=橙 / Word=苔绿 / TXT=灰紫，见 [StudyPalette.spineFor]）。
+class _BookCard extends StatelessWidget {
+  const _BookCard({
+    required this.book,
+    required this.onTap,
+    required this.onDelete,
+  });
+
+  final Book book;
+  final VoidCallback onTap;
+  final VoidCallback onDelete;
+
+  @override
+  Widget build(BuildContext context) {
+    final spine = StudyPalette.spineFor(book.source);
+    return GestureDetector(
+      onTap: onTap,
+      onLongPress: () => _confirmDelete(context),
+      child: Container(
+        decoration: BoxDecoration(
+          color: Colors.white.withValues(alpha: 0.75),
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: StudyPalette.linen),
+          boxShadow: [
+            BoxShadow(
+              color: StudyPalette.ink.withValues(alpha: 0.08),
+              blurRadius: 8,
+              offset: const Offset(0, 3),
+            ),
+          ],
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            // 书脊 + 封面
+            Expanded(
+              flex: 3,
+              child: ClipRRect(
+                borderRadius: const BorderRadius.vertical(
+                  top: Radius.circular(13),
+                ),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    // 书脊条
+                    Container(width: 12, color: spine),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Container(
+                        color: StudyPalette.parchmentDeep.withValues(
+                          alpha: 0.55,
+                        ),
+                        padding: const EdgeInsets.all(10),
+                        child: Align(
+                          alignment: Alignment.topLeft,
+                          child: Icon(
+                            _sourceIcon(book.source),
+                            size: 26,
+                            color: spine,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            // 标题区
+            Padding(
+              padding: const EdgeInsets.fromLTRB(14, 10, 14, 12),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    book.title,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w600,
+                      color: StudyPalette.ink,
+                      height: 1.3,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    '${book.source.label}'
+                    '${book.pageCount != null ? ' · ${book.pageCount} 页' : ''}',
+                    style: const TextStyle(
+                      fontSize: 11,
+                      color: StudyPalette.inkSoft,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _confirmDelete(BuildContext context) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder:
+          (context) => AlertDialog(
+            title: const Text('删除教材'),
+            content: Text('确定删除「${book.title}」吗？相关句子会一并删除。'),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(context).pop(false),
+                child: const Text('取消'),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.of(context).pop(true),
+                child: const Text('删除'),
+              ),
+            ],
+          ),
+    );
+    if (confirmed == true) onDelete();
   }
 
   IconData _sourceIcon(BookSource source) {

@@ -9,6 +9,7 @@ import '../../core/models/word_entry.dart';
 import '../../core/storage/database.dart';
 import '../../core/storage/learning_record_dao.dart';
 import '../../core/storage/word_entry_dao.dart';
+import '../../core/theme/app_theme.dart';
 import '../../services/asr_service.dart';
 import '../../services/native_tts_service.dart';
 import '../../services/tts_service.dart';
@@ -270,7 +271,12 @@ class _FollowPageState extends State<FollowPage> {
             ],
           ),
           const SizedBox(height: 8),
-          Center(child: Text(_status, style: const TextStyle(fontSize: 12))),
+          Center(
+            child: Text(
+              _status,
+              style: const TextStyle(fontSize: 12, color: StudyPalette.inkSoft),
+            ),
+          ),
           const SizedBox(height: 16),
           if (_lastScore != null) ..._buildScoreCard(),
         ],
@@ -280,11 +286,11 @@ class _FollowPageState extends State<FollowPage> {
 
   List<Widget> _buildScoreCard() {
     final s = _lastScore!;
-    final color = s.passed ? Colors.green : Colors.orange;
+    final color = s.passed ? StudyPalette.moss : StudyPalette.ember;
     return [
       Card(
         child: Padding(
-          padding: const EdgeInsets.all(12),
+          padding: const EdgeInsets.all(14),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -293,23 +299,33 @@ class _FollowPageState extends State<FollowPage> {
                   Text(
                     '${s.score.toStringAsFixed(0)} 分',
                     style: TextStyle(
-                      fontSize: 28,
+                      fontSize: 32,
                       fontWeight: FontWeight.bold,
                       color: color,
+                      fontFamily: 'ZCOOLKuaiLe',
                     ),
                   ),
-                  const SizedBox(width: 12),
+                  const SizedBox(width: 14),
                   Expanded(
                     child: Text(
                       s.passed ? '读得很好，继续加油！' : '有读错的，跟着再读一遍吧',
-                      style: const TextStyle(fontSize: 14),
+                      style: const TextStyle(
+                        fontSize: 14,
+                        color: StudyPalette.ink,
+                      ),
                     ),
                   ),
                 ],
               ),
-              const SizedBox(height: 8),
-              Text('你说的是：$_recognized', style: const TextStyle(fontSize: 12)),
-              const SizedBox(height: 8),
+              const SizedBox(height: 10),
+              Text(
+                '你说的是：$_recognized',
+                style: const TextStyle(
+                  fontSize: 13,
+                  color: StudyPalette.inkSoft,
+                ),
+              ),
+              const SizedBox(height: 10),
               Text.rich(_buildDiffSpans()),
             ],
           ),
@@ -318,7 +334,7 @@ class _FollowPageState extends State<FollowPage> {
     ];
   }
 
-  /// 逐字标色：对=绿 / 同音=蓝 / 错=红 / 漏=灰划线 / 多=橙划线。
+  /// 逐字标色：对=苔绿 / 同音=靛蓝 / 错=砖红 / 漏=暖灰划线 / 多=橙划线。
   InlineSpan _buildDiffSpans() {
     final spans = <InlineSpan>[];
     for (final d in _lastScore!.diffs) {
@@ -328,7 +344,7 @@ class _FollowPageState extends State<FollowPage> {
             TextSpan(
               text: d.target,
               style: const TextStyle(
-                color: Colors.green,
+                color: StudyPalette.moss,
                 fontWeight: FontWeight.bold,
               ),
             ),
@@ -338,7 +354,7 @@ class _FollowPageState extends State<FollowPage> {
             TextSpan(
               text: d.target,
               style: const TextStyle(
-                color: Colors.blue,
+                color: StudyPalette.spinePdf,
                 decoration: TextDecoration.underline,
               ),
             ),
@@ -348,7 +364,7 @@ class _FollowPageState extends State<FollowPage> {
             TextSpan(
               text: '${d.target}(${d.actual})',
               style: const TextStyle(
-                color: Colors.red,
+                color: Color(0xFFB6482E),
                 fontWeight: FontWeight.bold,
               ),
             ),
@@ -358,7 +374,7 @@ class _FollowPageState extends State<FollowPage> {
             TextSpan(
               text: d.target ?? '',
               style: const TextStyle(
-                color: Colors.grey,
+                color: StudyPalette.inkSoft,
                 decoration: TextDecoration.lineThrough,
               ),
             ),
@@ -368,7 +384,7 @@ class _FollowPageState extends State<FollowPage> {
             TextSpan(
               text: '＋${d.actual}',
               style: const TextStyle(
-                color: Colors.orange,
+                color: StudyPalette.ember,
                 decoration: TextDecoration.lineThrough,
               ),
             ),

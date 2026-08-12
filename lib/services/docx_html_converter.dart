@@ -61,6 +61,8 @@ class DocxHtmlConverter {
       'table{border-collapse:collapse;margin:6px 0;}'
       'td,th{border:1px solid #888;padding:4px 8px;vertical-align:top;}'
       'img{max-width:100%;height:auto;}'
+      // 点读高亮态（原文模式点击段落时由注入脚本添加）
+      '.wm-hl{background:#FBE4D8;border-radius:4px;}'
       '</style>',
     );
     var blockCount = 0;
@@ -80,6 +82,27 @@ class DocxHtmlConverter {
     if (blockCount == 0) {
       throw Exception('docx 未提取到排版内容,可改用文本模式阅读');
     }
+
+    // 点读脚本：点击段落/单元格/列表项 → 高亮该块 + 文本经 JavaScriptChannel
+    // 发给 Flutter（channel 名 `WiseMuseTap`，见 reader_page._buildWordView）。
+    // WebView JS 默认关闭，由 reader_page 显式 setJavaScriptMode(unrestricted)。
+    buf.write(
+      '<script>'
+      '(function(){'
+      'document.addEventListener("click",function(e){'
+      'var el=e.target.closest("p,td,li");'
+      'if(!el)return;'
+      'var text=(el.innerText||"").trim();'
+      'if(!text)return;'
+      'var prev=document.querySelector(".wm-hl");'
+      'if(prev)prev.classList.remove("wm-hl");'
+      'el.classList.add("wm-hl");'
+      'if(window.WiseMuseTap)window.WiseMuseTap.postMessage(text);'
+      '});'
+      '})();'
+      '</script>',
+    );
+
     return buf.toString().trim();
   }
 

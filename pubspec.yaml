@@ -42,3 +42,9 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
+
+  # [v0.3.0] UI 重设计「暖色书房」：标题字体站酷快乐体（圆体童趣），打包进 assets 离线可用。
+  fonts:
+    - family: ZCOOLKuaiLe
+      fonts:
+        - asset: assets/fonts/ZCOOLKuaiLe-Regular.ttf
