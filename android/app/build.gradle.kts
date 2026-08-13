@@ -58,19 +58,6 @@ android {
             }
         }
     }
-
-    // [瘦身] 只打包 arm64-v8a 原生库。
-    // Flutter 插件的 configureAbiWithoutSplits() 在配置期会清空 abiFilters 并填入三个 ABI。
-    // splits.abi { include("arm64-v8a") } 在 AGP 9 上的优先级高于 Flutter 插件的覆盖行为，
-    // afterEvaluate 作为双保险兜底。
-    splits {
-        abi {
-            enable = true
-            reset()
-            include("arm64-v8a")
-            universalApk = false
-        }
-    }
 }
 
 kotlin {
@@ -94,8 +81,20 @@ dependencies {
     // [v0.2.0] PDF 渲染视图（vendored flutter_pdfview 的 AndroidPdfViewer）。
     // 原由 flutter_pdfview 1.4.4 传递引入，现由 app 模块直接声明，版本与上游一致。
     implementation("io.github.oothp:android-pdf-viewer:3.2.0-beta05")
+    // [v0.2.0] ML Kit 中文 OCR（Bundled 模型随 AAR 打包，无 GMS、离线可用）
+    implementation("com.google.mlkit:text-recognition-chinese:16.0.0")
+    // [v0.3.0] ML Kit 翻译 + 语种识别（standalone SDK：模型走 Google CDN 直连，
+    // 不经 Google Play Services，无 GMS 机型可用；模型 ~30MB/语对按需下载）。
+    // 与 speak_reader feat/mlkit-offline 同栈（google_mlkit_translation 0.13.0 底层即此库）。
+    implementation("com.google.mlkit:translate:17.0.3")
+    implementation("com.google.mlkit:language-id:17.0.6")
+}
 
-
+// [瘦身] 只打包 arm64-v8a 原生库。
+// 根因：Flutter 插件的 configureAbiWithoutSplits() 在配置期会无条件
+// abiFilters.clear() + addAll(全部支持 ABI)，覆盖写在 defaultConfig 里的设置，
+// 导致第三方 AAR 依赖（Vosk/ML Kit/PDFBox/翻译）的 .so 仍 3 个 ABI 全打。
+// 已确认 afterEvaluate 在 AGP 9 上生效（splits.abi 在 AGP 9 不再支持）。
 project.afterEvaluate {
     extensions.configure<com.android.build.api.dsl.ApplicationExtension>("android") {
         defaultConfig.ndk {
