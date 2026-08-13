@@ -2,7 +2,9 @@ import 'package:flutter/material.dart';
 
 import '../../core/debug/app_log.dart';
 import '../../core/theme/app_theme.dart';
+import '../../services/quiz_depth_service.dart';
 import '../../services/statistics_service.dart';
+import '../quiz/quiz_scorer.dart';
 
 /// [v0.1.0] 学习统计页：掌握率 / 学习记录 / 错词分布 / 近期活动。
 ///
@@ -18,6 +20,7 @@ class _StatsPageState extends State<StatsPage> {
   static const _tag = 'stats';
 
   LearningStats? _stats;
+  List<QuizDepthStat> _depthStats = const [];
   bool _loading = true;
 
   @override
@@ -29,9 +32,11 @@ class _StatsPageState extends State<StatsPage> {
   Future<void> _load() async {
     try {
       final stats = await StatisticsService().load();
+      final depthStats = await QuizDepthService.load();
       if (!mounted) return;
       setState(() {
         _stats = stats;
+        _depthStats = depthStats;
         _loading = false;
       });
     } catch (e, s) {
@@ -69,6 +74,9 @@ class _StatsPageState extends State<StatsPage> {
         const SizedBox(height: 24),
         _buildSectionTitle('近 7 天活动'),
         _buildActivityCard(s),
+        const SizedBox(height: 24),
+        _buildSectionTitle('章节测验详情'),
+        _buildQuizDepthCard(),
       ],
     );
   }
@@ -318,6 +326,86 @@ class _StatsPageState extends State<StatsPage> {
           );
         }),
       ),
+    );
+  }
+
+  // ===== 章节测验详情 =====
+
+  Widget _buildQuizDepthCard() {
+    if (_depthStats.isEmpty) {
+      return Card(
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Text(
+            '暂无测验记录',
+            style: const TextStyle(color: StudyPalette.inkSoft),
+          ),
+        ),
+      );
+    }
+    // 按 bookId 分组展示
+    String? lastBookTitle;
+    return Card(
+      child: Column(
+        children: List.generate(_depthStats.length, (i) {
+          final d = _depthStats[i];
+          final isNewBook = d.bookTitle != lastBookTitle;
+          lastBookTitle = d.bookTitle;
+          return Column(
+            children: [
+              if (isNewBook)
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
+                  child: Row(
+                    children: [
+                      Icon(
+                        Icons.library_books,
+                        size: 16,
+                        color: StudyPalette.spinePdf,
+                      ),
+                      const SizedBox(width: 6),
+                      Text(d.bookTitle, style: titleStyle(fontSize: 14)),
+                    ],
+                  ),
+                ),
+              ListTile(
+                dense: true,
+                title: Text(d.chapterLabel),
+                trailing: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    _starRating(d.bestScore),
+                    const SizedBox(width: 12),
+                    Text(
+                      '${d.totalAttempts} 次',
+                      style: const TextStyle(
+                        fontSize: 13,
+                        color: StudyPalette.inkSoft,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              if (i != _depthStats.length - 1)
+                const Divider(height: 1, indent: 16),
+            ],
+          );
+        }),
+      ),
+    );
+  }
+
+  Widget _starRating(double score) {
+    final stars = QuizScorer.starRating(score);
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: List.generate(5, (i) {
+        return Icon(
+          i < stars ? Icons.star : Icons.star_border,
+          size: 16,
+          color: i < stars ? StudyPalette.ember : StudyPalette.inkSoft,
+        );
+      }),
     );
   }
 

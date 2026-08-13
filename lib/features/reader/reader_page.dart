@@ -24,6 +24,7 @@ import '../../services/pdf_service.dart';
 import '../../services/text_position_service.dart';
 import '../../services/translation_engine.dart';
 import '../../vendor/flutter_pdfview/flutter_pdfview.dart';
+import '../knowledge/knowledge_detail_sheet.dart';
 import '../follow/follow_page.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 
@@ -1093,6 +1094,7 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
                     ),
                     title: Text(p.text),
                     subtitle: p.definition != null ? Text(p.definition!) : null,
+                    onTap: () => KnowledgeDetailSheet.show(context, p),
                   ),
                 ),
               ],
