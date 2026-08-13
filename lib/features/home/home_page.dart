@@ -12,6 +12,7 @@ import '../debug/log_page.dart';
 import '../follow/follow_page.dart';
 import '../reader/reader_page.dart';
 import '../settings/settings_page.dart';
+import '../wordbook/wordbook_page.dart';
 
 /// [v0.3.0] 书架首页：教材书架 + 导入入口（「暖色书房」设计）。
 ///
@@ -126,12 +127,23 @@ class _HomePageState extends State<HomePage> {
     ).push(MaterialPageRoute<void>(builder: (_) => const LogPage()));
   }
 
+  void _openWordBook() {
+    Navigator.of(
+      context,
+    ).push(MaterialPageRoute<void>(builder: (_) => const WordBookPage()));
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
         title: const Text('我的书架'),
         actions: [
+          IconButton(
+            tooltip: '生词本',
+            icon: const Icon(Icons.menu_book_outlined),
+            onPressed: _openWordBook,
+          ),
           IconButton(
             tooltip: '跟读练习',
             icon: const Icon(Icons.record_voice_over_outlined),

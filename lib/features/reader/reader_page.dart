@@ -18,6 +18,8 @@ import '../../services/ocr_service.dart';
 import '../../services/pdf_service.dart';
 import '../../services/text_position_service.dart';
 import '../../services/translation_engine.dart';
+import '../../core/models/word_entry.dart';
+import '../../core/storage/word_entry_dao.dart';
 import '../../vendor/flutter_pdfview/flutter_pdfview.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 
@@ -470,6 +472,29 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
     }
   }
 
+  Future<void> _markWord(String text) async {
+    if (text.trim().isEmpty) return;
+    AppLog.d(_tag, '标记生词: "$text"');
+    try {
+      final db = await DatabaseProvider.database;
+      final entry = WordEntry.create(
+        word: text.trim(),
+        lang: widget.book.source == BookSource.txt ? 'zh' : 'zh',
+        fromBookId: widget.book.id,
+      );
+      await WordEntryDao(db).upsert(entry);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('已加入生词本：${text.trim()}'),
+          duration: const Duration(seconds: 2),
+        ),
+      );
+    } catch (e) {
+      AppLog.e(_tag, '标记生词失败: $e');
+    }
+  }
+
   Future<void> _translate(String text) async {
     if (text.trim().isEmpty) return;
     AppLog.d(_tag, '翻译: "$text"');
@@ -812,6 +837,15 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
                     ),
                     tooltip: '翻译',
                     onPressed: () => _translate(s.text),
+                  ),
+                  IconButton(
+                    icon: const Icon(
+                      Icons.bookmark_add_outlined,
+                      size: 20,
+                      color: StudyPalette.inkSoft,
+                    ),
+                    tooltip: '标记生词',
+                    onPressed: () => _markWord(s.text),
                   ),
                 ],
               ),
