@@ -35,7 +35,7 @@ List<String> chunkText(
 
   for (var i = 0; i < lines.length; i++) {
     final line = lines[i];
-    final isChapter = _isChapterLine(line);
+    final isChapter = isChapterLine(line);
     // 章节标题 → 新块边界（若当前缓冲非空则先行 flush）
     if (isChapter) {
       if (bufLen > 0) flush();
@@ -76,7 +76,7 @@ List<String> chapterTitlesOf(List<String> chunks) {
     final c = chunks[i];
     // 取块内首个章节标题行
     for (final line in c.split('\n')) {
-      if (_isChapterLine(line)) {
+      if (isChapterLine(line)) {
         final t = line.trim();
         return t.length > 30 ? '${t.substring(0, 30)}…' : t;
       }
@@ -86,7 +86,16 @@ List<String> chapterTitlesOf(List<String> chunks) {
 }
 
 /// 识别章节标题行（中文常见章节编号 / 数字标题）。
-bool _isChapterLine(String line) {
+/// 公开供 ChapterIndexer 复用（S3）。
+///
+/// 判定规则：
+/// 1. 「第X章/节/部分」格式
+/// 2. 「一、二、」等中文序号 + 顿号
+/// 3. 「(一)(二)」等括号序号
+/// 4. 「1. 2.」等数字序号（含后续内容 ≤40 字）
+/// 5. 「(1) (2)」等括号数字 + 内容
+/// 6. ≤20 字且无句尾标点的短行（疑似标题）
+bool isChapterLine(String line) {
   final t = line.trim();
   if (t.isEmpty) return false;
   // 中文：第X章 / 第X节 / 第X部分
