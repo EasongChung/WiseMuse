@@ -24,6 +24,12 @@ class SettingsService {
   /// 默认 auto（三级回落）。
   static const kTranslationEngine = 'translation_engine';
 
+  /// 翻译源语种（'auto' 自动识别，或 BCP-47 代码如 'zh'/'en'）。默认 'auto'。
+  static const kTranslationSource = 'translation_source';
+
+  /// 翻译目标语种（BCP-47 代码如 'en'/'zh'/'ja'）。默认 'en'。
+  static const kTranslationTarget = 'translation_target';
+
   // ---- API 配置 ----
   Future<String?> getApiBaseUrl() async =>
       (await SharedPreferences.getInstance()).getString(kApiBaseUrl);
@@ -82,4 +88,18 @@ class SettingsService {
       'auto';
   Future<void> setTranslationEngine(String v) async =>
       (await SharedPreferences.getInstance()).setString(kTranslationEngine, v);
+
+  /// 翻译源语种（默认 'auto' 自动识别；设为 BCP-47 代码时固定源语种）。
+  Future<String> getTranslationSource() async =>
+      (await SharedPreferences.getInstance()).getString(kTranslationSource) ??
+      'auto';
+  Future<void> setTranslationSource(String v) async =>
+      (await SharedPreferences.getInstance()).setString(kTranslationSource, v);
+
+  /// 翻译目标语种（BCP-47 代码，默认 'en'）。
+  Future<String> getTranslationTarget() async =>
+      (await SharedPreferences.getInstance()).getString(kTranslationTarget) ??
+      'en';
+  Future<void> setTranslationTarget(String v) async =>
+      (await SharedPreferences.getInstance()).setString(kTranslationTarget, v);
 }

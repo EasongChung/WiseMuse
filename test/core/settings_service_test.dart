@@ -39,4 +39,18 @@ void main() {
     expect(await s.getTtsPauseMs(), 500);
     expect(await s.getPreferOffline(), true);
   });
+
+  test('翻译语种默认值', () async {
+    final s = SettingsService.instance;
+    expect(await s.getTranslationSource(), 'auto');
+    expect(await s.getTranslationTarget(), 'en');
+  });
+
+  test('翻译语种读写', () async {
+    final s = SettingsService.instance;
+    await s.setTranslationSource('zh');
+    await s.setTranslationTarget('ja');
+    expect(await s.getTranslationSource(), 'zh');
+    expect(await s.getTranslationTarget(), 'ja');
+  });
 }

@@ -447,14 +447,33 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
 
   // ===== 翻译 =====
 
+  String _langDisplayName(String code) {
+    switch (code) {
+      case 'zh':
+        return '中';
+      case 'en':
+        return '英';
+      case 'ja':
+        return '日';
+      case 'ko':
+        return '韩';
+      case 'fr':
+        return '法';
+      case 'de':
+        return '德';
+      case 'es':
+        return '西';
+      case 'ru':
+        return '俄';
+      default:
+        return code;
+    }
+  }
+
   Future<void> _translate(String text) async {
     if (text.trim().isEmpty) return;
     AppLog.d(_tag, '翻译: "$text"');
-    final result = await TranslationEngine.translate(
-      text,
-      source: 'zh',
-      target: 'en',
-    );
+    final result = await TranslationEngine.translateWithSettings(text);
     if (!mounted) return;
     if (result != null) {
       showModalBottomSheet(
@@ -470,6 +489,30 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
+                  Row(
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 8,
+                          vertical: 3,
+                        ),
+                        decoration: BoxDecoration(
+                          color: StudyPalette.emberSoft,
+                          borderRadius: BorderRadius.circular(6),
+                        ),
+                        child: Text(
+                          '${_langDisplayName(result.source)} → '
+                          '${_langDisplayName(result.target)}',
+                          style: const TextStyle(
+                            fontSize: 12,
+                            color: StudyPalette.ember,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 10),
                   Text(
                     text,
                     style: const TextStyle(
@@ -482,7 +525,7 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
                   Container(height: 1, color: StudyPalette.linen),
                   const SizedBox(height: 12),
                   Text(
-                    result,
+                    result.text,
                     style: const TextStyle(
                       fontSize: 16,
                       color: StudyPalette.ember,

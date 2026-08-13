@@ -33,6 +33,23 @@ enum TranslationEngineType {
 ///
 /// 失败倒序：engine 开头的降级，静默进行，AppLog 打点记录每级错误。
 /// 三级全失败时返回 null（调用方自行决定是否展示错误）。
+class TranslationResult {
+  /// 翻译结果文本。
+  final String text;
+
+  /// 实际使用的源语种（BCP-47 代码）。
+  final String source;
+
+  /// 目标语种（BCP-47 代码）。
+  final String target;
+
+  const TranslationResult({
+    required this.text,
+    required this.source,
+    required this.target,
+  });
+}
+
 class TranslationEngine {
   static const _tag = 'translate';
 
@@ -50,6 +67,47 @@ class TranslationEngine {
     TranslationEngineType engineType = TranslationEngineType.auto,
   }) async {
     return TranslationEngine()._translate(text, source, target, engineType);
+  }
+
+  /// 按设置页配置翻译 [text]：源语种为 `auto` 时先用 ML Kit 自动识别，
+  /// 识别失败（`und`）或未知时兜底 `zh`。
+  ///
+  /// 返回 [TranslationResult] 包含译文文本与实际使用的源/目标语种。
+  /// 三级全部失败时返回 null。
+  static Future<TranslationResult?> translateWithSettings(String text) async {
+    return TranslationEngine()._translateWithSettings(text);
+  }
+
+  Future<TranslationResult?> _translateWithSettings(String text) async {
+    if (text.trim().isEmpty) return null;
+
+    final settings = SettingsService.instance;
+    var source = await settings.getTranslationSource();
+    final target = await settings.getTranslationTarget();
+
+    // auto 源语种识别
+    if (source == 'auto') {
+      try {
+        final detected = await _mlkit.identifyLanguage(text);
+        if (detected != 'und' && detected.isNotEmpty) {
+          source = detected;
+        } else {
+          source = 'zh';
+        }
+      } catch (e) {
+        AppLog.w(_tag, '语种识别失败，兜底 zh: $e');
+        source = 'zh';
+      }
+    }
+
+    final result = await _translate(
+      text,
+      source,
+      target,
+      TranslationEngineType.auto,
+    );
+    if (result == null) return null;
+    return TranslationResult(text: result, source: source, target: target);
   }
 
   Future<String?> _translate(

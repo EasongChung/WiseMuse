@@ -21,6 +21,10 @@ class _SettingsPageState extends State<SettingsPage> {
   // 当前引擎
   String _engine = 'auto';
 
+  // 翻译语种
+  String _sourceLang = 'auto';
+  String _targetLang = 'en';
+
   // 模型下载状态（按 BCP-47 代码）
   final Map<String, bool> _modelStatus = {};
   final Map<String, bool> _modelBusy = {};
@@ -32,7 +36,19 @@ class _SettingsPageState extends State<SettingsPage> {
 
   bool _initDone = false;
 
-  // 预设语言对
+  // 源语种选项（含自动识别）
+  static const _sourceOptions = [
+    ('auto', '自动识别'),
+    ('zh', '中文'),
+    ('en', '英语'),
+    ('ja', '日语'),
+    ('ko', '韩语'),
+    ('fr', '法语'),
+    ('de', '德语'),
+    ('es', '西班牙语'),
+  ];
+
+  // 预设语言对（目标语种）
   static const _langs = [
     ('zh', '中文'),
     ('en', '英语'),
@@ -59,6 +75,8 @@ class _SettingsPageState extends State<SettingsPage> {
 
   Future<void> _load() async {
     _engine = await _settings.getTranslationEngine();
+    _sourceLang = await _settings.getTranslationSource();
+    _targetLang = await _settings.getTranslationTarget();
     _baseUrlCtrl.text = (await _settings.getApiBaseUrl()) ?? '';
     _apiKeyCtrl.text = (await _settings.getApiKey()) ?? '';
     _modelCtrl.text = (await _settings.getApiModel()) ?? '';
@@ -118,6 +136,100 @@ class _SettingsPageState extends State<SettingsPage> {
     return code;
   }
 
+  Future<void> _saveSourceLang(String v) async {
+    await _settings.setTranslationSource(v);
+    setState(() => _sourceLang = v);
+  }
+
+  Future<void> _saveTargetLang(String v) async {
+    await _settings.setTranslationTarget(v);
+    setState(() => _targetLang = v);
+  }
+
+  Widget _buildLanguageSelector() {
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                const SizedBox(width: 8),
+                const Icon(Icons.translate, size: 20, color: StudyPalette.ink),
+                const SizedBox(width: 8),
+                Text('源语种', style: titleStyle(fontSize: 14)),
+                const Spacer(),
+                DropdownButton<String>(
+                  value: _sourceLang,
+                  underline: const SizedBox(),
+                  items:
+                      _sourceOptions.map((opt) {
+                        return DropdownMenuItem(
+                          value: opt.$1,
+                          child: Text(
+                            opt.$2,
+                            style: const TextStyle(
+                              color: StudyPalette.ink,
+                              fontSize: 14,
+                            ),
+                          ),
+                        );
+                      }).toList(),
+                  onChanged: (v) {
+                    if (v != null) _saveSourceLang(v);
+                  },
+                ),
+              ],
+            ),
+            const Divider(height: 16, indent: 8),
+            Row(
+              children: [
+                const SizedBox(width: 8),
+                const Icon(
+                  Icons.g_translate,
+                  size: 20,
+                  color: StudyPalette.ink,
+                ),
+                const SizedBox(width: 8),
+                Text('目标语种', style: titleStyle(fontSize: 14)),
+                const Spacer(),
+                DropdownButton<String>(
+                  value: _targetLang,
+                  underline: const SizedBox(),
+                  items:
+                      _langs.map((opt) {
+                        return DropdownMenuItem(
+                          value: opt.$1,
+                          child: Text(
+                            opt.$2,
+                            style: const TextStyle(
+                              color: StudyPalette.ink,
+                              fontSize: 14,
+                            ),
+                          ),
+                        );
+                      }).toList(),
+                  onChanged: (v) {
+                    if (v != null) _saveTargetLang(v);
+                  },
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            const Padding(
+              padding: EdgeInsets.only(left: 8),
+              child: Text(
+                '源语种选「自动识别」时，App 会先检测原文语种再翻译',
+                style: TextStyle(fontSize: 12, color: StudyPalette.inkSoft),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -129,6 +241,9 @@ class _SettingsPageState extends State<SettingsPage> {
                 children: [
                   _buildSectionTitle('翻译引擎'),
                   _buildEngineSelector(),
+                  const SizedBox(height: 24),
+                  _buildSectionTitle('翻译语种'),
+                  _buildLanguageSelector(),
                   const SizedBox(height: 24),
                   _buildSectionTitle('离线翻译模型'),
                   _buildModelList(),
