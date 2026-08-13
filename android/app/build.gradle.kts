@@ -24,14 +24,6 @@ android {
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
         versionName = flutter.versionName
-
-        // [瘦身] 只打包 arm64-v8a 原生库。
-        // CI 命令的 --target-platform android-arm64 只过滤 Flutter 引擎本身，
-        // 第三方 AAR 依赖（Vosk/ML Kit/PDFBox/翻译）的 .so 仍会 3 个 ABI 全打，
-        // 导致 APK 冗余 ~77MB。此处 abiFilters 统一收口到 arm64-v8a（项目既定规格）。
-        ndk {
-            abiFilters += "arm64-v8a"
-        }
     }
 
     signingConfigs {
@@ -96,4 +88,18 @@ dependencies {
     // 与 speak_reader feat/mlkit-offline 同栈（google_mlkit_translation 0.13.0 底层即此库）。
     implementation("com.google.mlkit:translate:17.0.3")
     implementation("com.google.mlkit:language-id:17.0.6")
+}
+
+// [瘦身] 只打包 arm64-v8a 原生库。
+// 根因：Flutter 插件的 configureAbiWithoutSplits() 在配置期会无条件
+// abiFilters.clear() + addAll(全部支持 ABI)，覆盖写在 defaultConfig 里的设置，
+// 导致第三方 AAR 依赖（Vosk/ML Kit/PDFBox/翻译）的 .so 仍 3 个 ABI 全打。
+// 正确做法：用 afterEvaluate 在插件配置完成后强制重设为只留 arm64-v8a（项目既定规格）。
+project.afterEvaluate {
+    extensions.configure<com.android.build.api.dsl.ApplicationExtension>("android") {
+        defaultConfig.ndk {
+            abiFilters.clear()
+            abiFilters.add("arm64-v8a")
+        }
+    }
 }
