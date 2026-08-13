@@ -27,19 +27,26 @@ class ProfilePage extends StatelessWidget {
                   CircleAvatar(
                     radius: 36,
                     backgroundColor: StudyPalette.emberSoft,
-                    child: const Icon(Icons.person,
-                        size: 40, color: StudyPalette.ember),
+                    child: const Icon(
+                      Icons.person,
+                      size: 40,
+                      color: StudyPalette.ember,
+                    ),
                   ),
                   const SizedBox(height: 10),
-                  const Text('小读者',
-                      style: TextStyle(
-                          fontSize: 18,
-                          fontWeight: FontWeight.w600,
-                          color: StudyPalette.ink)),
+                  const Text(
+                    '小读者',
+                    style: TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.w600,
+                      color: StudyPalette.ink,
+                    ),
+                  ),
                   const SizedBox(height: 4),
-                  const Text('坚持学习，天天向上',
-                      style:
-                          TextStyle(fontSize: 13, color: StudyPalette.inkSoft)),
+                  const Text(
+                    '坚持学习，天天向上',
+                    style: TextStyle(fontSize: 13, color: StudyPalette.inkSoft),
+                  ),
                 ],
               ),
             ),
@@ -54,10 +61,12 @@ class ProfilePage extends StatelessWidget {
                     icon: Icons.menu_book_outlined,
                     title: '生词本',
                     subtitle: '查看和管理不熟悉的词语',
-                    onTap: () => Navigator.of(context).push(
-                      MaterialPageRoute(
-                          builder: (_) => const WordBookPage()),
-                    ),
+                    onTap:
+                        () => Navigator.of(context).push(
+                          MaterialPageRoute(
+                            builder: (_) => const WordBookPage(),
+                          ),
+                        ),
                   ),
                   const Divider(height: 1, indent: 56),
                   _buildEntry(
@@ -66,9 +75,9 @@ class ProfilePage extends StatelessWidget {
                     title: '学习统计',
                     subtitle: '学习记录与进度',
                     onTap: () {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(content: Text('学习统计即将推出')),
-                      );
+                      ScaffoldMessenger.of(
+                        context,
+                      ).showSnackBar(const SnackBar(content: Text('学习统计即将推出')));
                     },
                   ),
                   const Divider(height: 1, indent: 56),
@@ -77,10 +86,10 @@ class ProfilePage extends StatelessWidget {
                     icon: Icons.bug_report_outlined,
                     title: '运行日志',
                     subtitle: '查看应用运行日志',
-                    onTap: () => Navigator.of(context).push(
-                      MaterialPageRoute(
-                          builder: (_) => const LogPage()),
-                    ),
+                    onTap:
+                        () => Navigator.of(context).push(
+                          MaterialPageRoute(builder: (_) => const LogPage()),
+                        ),
                   ),
                   const Divider(height: 1, indent: 56),
                   _buildEntry(
@@ -88,10 +97,12 @@ class ProfilePage extends StatelessWidget {
                     icon: Icons.settings_outlined,
                     title: '设置',
                     subtitle: '翻译引擎、朗读参数、AI 配置',
-                    onTap: () => Navigator.of(context).push(
-                      MaterialPageRoute(
-                          builder: (_) => const SettingsPage()),
-                    ),
+                    onTap:
+                        () => Navigator.of(context).push(
+                          MaterialPageRoute(
+                            builder: (_) => const SettingsPage(),
+                          ),
+                        ),
                   ),
                 ],
               ),
@@ -111,11 +122,17 @@ class ProfilePage extends StatelessWidget {
   }) {
     return ListTile(
       leading: Icon(icon, color: StudyPalette.ember, size: 24),
-      title: Text(title,
-          style: const TextStyle(
-              fontWeight: FontWeight.w600, color: StudyPalette.ink)),
-      subtitle: Text(subtitle,
-          style: const TextStyle(fontSize: 12, color: StudyPalette.inkSoft)),
+      title: Text(
+        title,
+        style: const TextStyle(
+          fontWeight: FontWeight.w600,
+          color: StudyPalette.ink,
+        ),
+      ),
+      subtitle: Text(
+        subtitle,
+        style: const TextStyle(fontSize: 12, color: StudyPalette.inkSoft),
+      ),
       trailing: const Icon(Icons.chevron_right, color: StudyPalette.inkSoft),
       onTap: onTap,
     );

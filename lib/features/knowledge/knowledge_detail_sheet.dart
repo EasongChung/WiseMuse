@@ -88,13 +88,9 @@ class _KnowledgeDetailSheetState extends State<KnowledgeDetailSheet> {
           // 类型标签 + 内容
           Row(
             children: [
-              Icon(_typeIcon(_kp.type),
-                  color: _typeColor(_kp.type), size: 28),
+              Icon(_typeIcon(_kp.type), color: _typeColor(_kp.type), size: 28),
               const SizedBox(width: 10),
-              Expanded(
-                child: Text(_kp.text,
-                    style: titleStyle(fontSize: 20)),
-              ),
+              Expanded(child: Text(_kp.text, style: titleStyle(fontSize: 20))),
             ],
           ),
           const SizedBox(height: 12),
@@ -102,13 +98,18 @@ class _KnowledgeDetailSheetState extends State<KnowledgeDetailSheet> {
           // 掌握度
           Row(
             children: [
-              const Icon(Icons.school_outlined,
-                  size: 16, color: StudyPalette.inkSoft),
+              const Icon(
+                Icons.school_outlined,
+                size: 16,
+                color: StudyPalette.inkSoft,
+              ),
               const SizedBox(width: 6),
               Text(
                 '掌握度：${_kp.mastery}/5  |  答错：${_kp.wrongCount} 次',
                 style: const TextStyle(
-                    fontSize: 13, color: StudyPalette.inkSoft),
+                  fontSize: 13,
+                  color: StudyPalette.inkSoft,
+                ),
               ),
             ],
           ),
@@ -116,29 +117,37 @@ class _KnowledgeDetailSheetState extends State<KnowledgeDetailSheet> {
 
           // 释义
           if (_kp.definition != null && _kp.definition!.isNotEmpty) ...[
-            const Text('释义',
-                style: TextStyle(
-                    fontWeight: FontWeight.w600,
-                    fontSize: 13,
-                    color: StudyPalette.ink)),
+            const Text(
+              '释义',
+              style: TextStyle(
+                fontWeight: FontWeight.w600,
+                fontSize: 13,
+                color: StudyPalette.ink,
+              ),
+            ),
             const SizedBox(height: 4),
-            Text(_kp.definition!,
-                style: const TextStyle(
-                    fontSize: 14, color: StudyPalette.ink)),
+            Text(
+              _kp.definition!,
+              style: const TextStyle(fontSize: 14, color: StudyPalette.ink),
+            ),
             const SizedBox(height: 12),
           ],
 
           // 附加信息
           if (_kp.extra != null && _kp.extra!.isNotEmpty) ...[
-            const Text('附加',
-                style: TextStyle(
-                    fontWeight: FontWeight.w600,
-                    fontSize: 13,
-                    color: StudyPalette.ink)),
+            const Text(
+              '附加',
+              style: TextStyle(
+                fontWeight: FontWeight.w600,
+                fontSize: 13,
+                color: StudyPalette.ink,
+              ),
+            ),
             const SizedBox(height: 4),
-            Text(_kp.extra!,
-                style: const TextStyle(
-                    fontSize: 13, color: StudyPalette.inkSoft)),
+            Text(
+              _kp.extra!,
+              style: const TextStyle(fontSize: 13, color: StudyPalette.inkSoft),
+            ),
             const SizedBox(height: 12),
           ],
 
@@ -195,10 +204,7 @@ class _KnowledgeDetailSheetState extends State<KnowledgeDetailSheet> {
 
   Future<void> _edit() async {
     Navigator.pop(context); // 关闭详情
-    final result = await KnowledgeEditSheet.show(
-      context,
-      initial: _kp,
-    );
+    final result = await KnowledgeEditSheet.show(context, initial: _kp);
     if (result != null && context.mounted) {
       try {
         final db = await DatabaseProvider.database;
@@ -217,20 +223,21 @@ class _KnowledgeDetailSheetState extends State<KnowledgeDetailSheet> {
   Future<void> _delete() async {
     final confirmed = await showDialog<bool>(
       context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('删除知识点'),
-        content: Text('确定删除「${_kp.text}」吗？'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('取消'),
+      builder:
+          (context) => AlertDialog(
+            title: const Text('删除知识点'),
+            content: Text('确定删除「${_kp.text}」吗？'),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context, false),
+                child: const Text('取消'),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.pop(context, true),
+                child: const Text('删除'),
+              ),
+            ],
           ),
-          FilledButton(
-            onPressed: () => Navigator.pop(context, true),
-            child: const Text('删除'),
-          ),
-        ],
-      ),
     );
     if (confirmed == true) {
       try {
@@ -257,9 +264,9 @@ class _KnowledgeDetailSheetState extends State<KnowledgeDetailSheet> {
       await WordEntryDao(db).upsert(entry);
       AppLog.d('kp_detail', '加入生词本: ${_kp.text}');
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('已加入生词本：${_kp.text}')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('已加入生词本：${_kp.text}')));
     } catch (e, s) {
       AppLog.e('kp_detail', '加入生词本失败: $e\n$s');
     }

@@ -104,15 +104,16 @@ class _KnowledgePageState extends State<KnowledgePage> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(title: const Text('知识库')),
-      body: _loading
-          ? const Center(child: CircularProgressIndicator())
-          : Column(
-              children: [
-                _buildFilterChips(),
-                const Divider(height: 1),
-                Expanded(child: _buildKnowledgeList()),
-              ],
-            ),
+      body:
+          _loading
+              ? const Center(child: CircularProgressIndicator())
+              : Column(
+                children: [
+                  _buildFilterChips(),
+                  const Divider(height: 1),
+                  Expanded(child: _buildKnowledgeList()),
+                ],
+              ),
       floatingActionButton: FloatingActionButton.extended(
         onPressed: _showAddMenu,
         icon: const Icon(Icons.add),
@@ -167,23 +168,32 @@ class _KnowledgePageState extends State<KnowledgePage> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(Icons.psychology_outlined,
-                size: 48, color: StudyPalette.inkSoft),
+            Icon(
+              Icons.psychology_outlined,
+              size: 48,
+              color: StudyPalette.inkSoft,
+            ),
             const SizedBox(height: 12),
-            const Text('知识库暂无内容',
-                style: TextStyle(color: StudyPalette.inkSoft)),
+            const Text(
+              '知识库暂无内容',
+              style: TextStyle(color: StudyPalette.inkSoft),
+            ),
             const SizedBox(height: 4),
-            const Text('通过「添加」手动录入或使用 AI 提取',
-                style: TextStyle(fontSize: 12, color: StudyPalette.inkSoft)),
+            const Text(
+              '通过「添加」手动录入或使用 AI 提取',
+              style: TextStyle(fontSize: 12, color: StudyPalette.inkSoft),
+            ),
           ],
         ),
       );
     }
 
-    final sortedBooks = _books.where((b) => _bookPoints.containsKey(b.id)).toList();
+    final sortedBooks =
+        _books.where((b) => _bookPoints.containsKey(b.id)).toList();
     // 未关联教材的知识点（bookId=''或不在 _books 中）
-    final orphanKeys =
-        _bookPoints.keys.where((k) => k.isEmpty || !_books.any((b) => b.id == k));
+    final orphanKeys = _bookPoints.keys.where(
+      (k) => k.isEmpty || !_books.any((b) => b.id == k),
+    );
 
     return ListView(
       padding: const EdgeInsets.fromLTRB(12, 4, 12, 96),
@@ -219,7 +229,9 @@ class _KnowledgePageState extends State<KnowledgePage> {
                 child: Text(
                   '${points.length}',
                   style: const TextStyle(
-                      fontSize: 12, color: StudyPalette.inkSoft),
+                    fontSize: 12,
+                    color: StudyPalette.inkSoft,
+                  ),
                 ),
               ),
             ],
@@ -241,10 +253,16 @@ class _KnowledgePageState extends State<KnowledgePage> {
           padding: const EdgeInsets.symmetric(vertical: 8),
           child: Row(
             children: [
-              Icon(Icons.bookmark_border,
-                  size: 18, color: StudyPalette.inkSoft),
+              Icon(
+                Icons.bookmark_border,
+                size: 18,
+                color: StudyPalette.inkSoft,
+              ),
               const SizedBox(width: 6),
-              Text('其他', style: titleStyle(fontSize: 15, color: StudyPalette.inkSoft)),
+              Text(
+                '其他',
+                style: titleStyle(fontSize: 15, color: StudyPalette.inkSoft),
+              ),
             ],
           ),
         ),
@@ -259,18 +277,30 @@ class _KnowledgePageState extends State<KnowledgePage> {
       margin: const EdgeInsets.only(bottom: 4),
       child: ListTile(
         dense: true,
-        leading: Icon(_typeIcon(kp.type),
-            color: _typeIconColor(kp.type), size: 22),
-        title: Text(kp.text,
-            style: const TextStyle(
-                fontWeight: FontWeight.w600, color: StudyPalette.ink)),
-        subtitle: kp.definition != null && kp.definition!.isNotEmpty
-            ? Text(kp.definition!,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(
-                    fontSize: 12, color: StudyPalette.inkSoft))
-            : null,
+        leading: Icon(
+          _typeIcon(kp.type),
+          color: _typeIconColor(kp.type),
+          size: 22,
+        ),
+        title: Text(
+          kp.text,
+          style: const TextStyle(
+            fontWeight: FontWeight.w600,
+            color: StudyPalette.ink,
+          ),
+        ),
+        subtitle:
+            kp.definition != null && kp.definition!.isNotEmpty
+                ? Text(
+                  kp.definition!,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    fontSize: 12,
+                    color: StudyPalette.inkSoft,
+                  ),
+                )
+                : null,
         trailing: Container(
           padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
           decoration: BoxDecoration(
@@ -295,32 +325,33 @@ class _KnowledgePageState extends State<KnowledgePage> {
   void _showAddMenu() {
     showModalBottomSheet(
       context: context,
-      builder: (context) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            ListTile(
-              leading: const Icon(Icons.auto_awesome),
-              title: const Text('AI 提取知识点'),
-              subtitle: const Text('从已有教材中自动提取'),
-              onTap: () {
-                Navigator.pop(context);
-                _showAiExtract();
-              },
+      builder:
+          (context) => SafeArea(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                ListTile(
+                  leading: const Icon(Icons.auto_awesome),
+                  title: const Text('AI 提取知识点'),
+                  subtitle: const Text('从已有教材中自动提取'),
+                  onTap: () {
+                    Navigator.pop(context);
+                    _showAiExtract();
+                  },
+                ),
+                const Divider(height: 1, indent: 16),
+                ListTile(
+                  leading: const Icon(Icons.edit),
+                  title: const Text('手动添加'),
+                  subtitle: const Text('自行录入词语/成语/单词/诗词'),
+                  onTap: () {
+                    Navigator.pop(context);
+                    _showManualAdd();
+                  },
+                ),
+              ],
             ),
-            const Divider(height: 1, indent: 16),
-            ListTile(
-              leading: const Icon(Icons.edit),
-              title: const Text('手动添加'),
-              subtitle: const Text('自行录入词语/成语/单词/诗词'),
-              onTap: () {
-                Navigator.pop(context);
-                _showManualAdd();
-              },
-            ),
-          ],
-        ),
-      ),
+          ),
     );
   }
 
@@ -328,9 +359,9 @@ class _KnowledgePageState extends State<KnowledgePage> {
     // TODO(S4+): 选书 → 调用 KnowledgeExtractionService.extractBook → 刷新
     // MVP 暂跳选书弹窗，提示功能开发中
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('AI 提取功能即将推出')),
-    );
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(const SnackBar(content: Text('AI 提取功能即将推出')));
   }
 
   Future<void> _showManualAdd() async {
@@ -344,9 +375,9 @@ class _KnowledgePageState extends State<KnowledgePage> {
       } catch (e, s) {
         AppLog.e(_tag, '添加知识点失败: $e\n$s');
         if (!mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('添加失败：$e')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('添加失败：$e')));
       }
     }
   }

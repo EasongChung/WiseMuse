@@ -416,7 +416,9 @@ class _SettingsPageState extends State<SettingsPage> {
                 Text(
                   '${_ttsRate.toStringAsFixed(1)}x',
                   style: const TextStyle(
-                      fontWeight: FontWeight.w600, color: StudyPalette.ember),
+                    fontWeight: FontWeight.w600,
+                    color: StudyPalette.ember,
+                  ),
                 ),
               ],
             ),
@@ -443,28 +445,31 @@ class _SettingsPageState extends State<SettingsPage> {
                   children: [
                     IconButton(
                       icon: const Icon(Icons.remove_circle_outline),
-                      onPressed: _ttsRepeatCount > 1
-                          ? () {
-                              setState(() => _ttsRepeatCount--);
-                              _settings.setTtsRepeatCount(_ttsRepeatCount);
-                            }
-                          : null,
+                      onPressed:
+                          _ttsRepeatCount > 1
+                              ? () {
+                                setState(() => _ttsRepeatCount--);
+                                _settings.setTtsRepeatCount(_ttsRepeatCount);
+                              }
+                              : null,
                     ),
                     Text(
                       '$_ttsRepeatCount',
                       style: const TextStyle(
-                          fontSize: 18,
-                          fontWeight: FontWeight.w600,
-                          color: StudyPalette.ember),
+                        fontSize: 18,
+                        fontWeight: FontWeight.w600,
+                        color: StudyPalette.ember,
+                      ),
                     ),
                     IconButton(
                       icon: const Icon(Icons.add_circle_outline),
-                      onPressed: _ttsRepeatCount < 5
-                          ? () {
-                              setState(() => _ttsRepeatCount++);
-                              _settings.setTtsRepeatCount(_ttsRepeatCount);
-                            }
-                          : null,
+                      onPressed:
+                          _ttsRepeatCount < 5
+                              ? () {
+                                setState(() => _ttsRepeatCount++);
+                                _settings.setTtsRepeatCount(_ttsRepeatCount);
+                              }
+                              : null,
                     ),
                   ],
                 ),
@@ -475,15 +480,20 @@ class _SettingsPageState extends State<SettingsPage> {
             // 句间停顿
             Row(
               children: [
-                const Icon(Icons.timer_outlined,
-                    size: 20, color: StudyPalette.ink),
+                const Icon(
+                  Icons.timer_outlined,
+                  size: 20,
+                  color: StudyPalette.ink,
+                ),
                 const SizedBox(width: 8),
                 Text('句间停顿', style: titleStyle(fontSize: 14)),
                 const Spacer(),
                 Text(
                   '${_ttsPauseMs}ms',
                   style: const TextStyle(
-                      fontWeight: FontWeight.w600, color: StudyPalette.ember),
+                    fontWeight: FontWeight.w600,
+                    color: StudyPalette.ember,
+                  ),
                 ),
               ],
             ),

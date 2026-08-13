@@ -25,12 +25,13 @@ class KnowledgeEditSheet extends StatefulWidget {
     return showModalBottomSheet<KnowledgePoint>(
       context: context,
       isScrollControlled: true,
-      builder: (_) => Padding(
-        padding: EdgeInsets.only(
-          bottom: MediaQuery.of(context).viewInsets.bottom,
-        ),
-        child: KnowledgeEditSheet(initial: initial, books: books),
-      ),
+      builder:
+          (_) => Padding(
+            padding: EdgeInsets.only(
+              bottom: MediaQuery.of(context).viewInsets.bottom,
+            ),
+            child: KnowledgeEditSheet(initial: initial, books: books),
+          ),
     );
   }
 
@@ -124,7 +125,10 @@ class _KnowledgeEditSheetState extends State<KnowledgeEditSheet> {
                 segments: const [
                   ButtonSegment(value: KnowledgeType.word, label: Text('词语')),
                   ButtonSegment(value: KnowledgeType.idiom, label: Text('成语')),
-                  ButtonSegment(value: KnowledgeType.english, label: Text('英语')),
+                  ButtonSegment(
+                    value: KnowledgeType.english,
+                    label: Text('英语'),
+                  ),
                   ButtonSegment(value: KnowledgeType.poem, label: Text('诗词')),
                 ],
                 selected: {_type},
@@ -166,8 +170,7 @@ class _KnowledgeEditSheetState extends State<KnowledgeEditSheet> {
                         hintText: '如 1',
                       ),
                       initialValue: _page?.toString() ?? '',
-                      onChanged: (v) =>
-                          _page = int.tryParse(v),
+                      onChanged: (v) => _page = int.tryParse(v),
                     ),
                   ),
                   const SizedBox(width: 12),
@@ -179,8 +182,7 @@ class _KnowledgeEditSheetState extends State<KnowledgeEditSheet> {
                         hintText: '如 1',
                       ),
                       initialValue: _chapter?.toString() ?? '',
-                      onChanged: (v) =>
-                          _chapter = int.tryParse(v),
+                      onChanged: (v) => _chapter = int.tryParse(v),
                     ),
                   ),
                 ],
@@ -191,8 +193,8 @@ class _KnowledgeEditSheetState extends State<KnowledgeEditSheet> {
               TextFormField(
                 controller: _textCtrl,
                 decoration: const InputDecoration(labelText: '内容 *'),
-                validator: (v) =>
-                    (v == null || v.trim().isEmpty) ? '请输入内容' : null,
+                validator:
+                    (v) => (v == null || v.trim().isEmpty) ? '请输入内容' : null,
               ),
               const SizedBox(height: 10),
 
