@@ -6,6 +6,7 @@ import '../../core/storage/database.dart';
 import '../../core/storage/word_entry_dao.dart';
 import '../../core/theme/app_theme.dart';
 import '../../widgets/review_card.dart';
+import '../stats/stats_page.dart';
 
 /// [v0.1.0] 生词本页面：查看、复习、管理已标记的词语。
 ///
@@ -101,6 +102,15 @@ class _WordBookPageState extends State<WordBookPage> {
       appBar: AppBar(
         title: const Text('生词本'),
         actions: [
+          IconButton(
+            tooltip: '学习统计',
+            icon: const Icon(Icons.insights_outlined),
+            onPressed: () {
+              Navigator.of(context).push(
+                MaterialPageRoute<void>(builder: (_) => const StatsPage()),
+              );
+            },
+          ),
           if (_words.isNotEmpty)
             IconButton(
               tooltip: '复习',
