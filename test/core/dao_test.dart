@@ -1,11 +1,15 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 import 'package:wisemuse/core/models/book.dart';
+import 'package:wisemuse/core/models/knowledge_point.dart';
 import 'package:wisemuse/core/models/learning_record.dart';
+import 'package:wisemuse/core/models/quiz_attempt.dart';
 import 'package:wisemuse/core/models/word_entry.dart';
 import 'package:wisemuse/core/storage/book_dao.dart';
 import 'package:wisemuse/core/storage/database.dart';
+import 'package:wisemuse/core/storage/knowledge_point_dao.dart';
 import 'package:wisemuse/core/storage/learning_record_dao.dart';
+import 'package:wisemuse/core/storage/quiz_attempt_dao.dart';
 import 'package:wisemuse/core/storage/word_entry_dao.dart';
 
 void main() {
@@ -134,6 +138,154 @@ void main() {
       expect(recent.first.id, r1.id);
       await recordDao.delete(r1.id);
       expect(await recordDao.countByType(LearningType.review), 0);
+    });
+  });
+
+  group('KnowledgePointDao', () {
+    late KnowledgePointDao kpDao;
+
+    setUp(() async {
+      kpDao = KnowledgePointDao(db);
+    });
+
+    test('insert + getAll + type 筛选', () async {
+      final a = KnowledgePoint.create(type: KnowledgeType.word, text: '学习');
+      final b = KnowledgePoint.create(type: KnowledgeType.idiom, text: '画蛇添足');
+      await kpDao.insert(a);
+      await kpDao.insert(b);
+
+      expect((await kpDao.getAll()).length, 2);
+      expect((await kpDao.getAll(type: KnowledgeType.word)).length, 1);
+    });
+
+    test('upsertByText 幂等去重', () async {
+      final id = await kpDao.upsertByText(
+        'b1',
+        KnowledgeType.word,
+        '苹果',
+        page: 1,
+        definition: '一种水果',
+      );
+      final dup = await kpDao.upsertByText(
+        'b1',
+        KnowledgeType.word,
+        '苹果',
+        page: 2,
+        definition: '水果之一',
+      );
+      expect(dup, id, reason: '幂等应返回原 id');
+      final found = await kpDao.findByBookTypeText(
+        'b1',
+        KnowledgeType.word,
+        '苹果',
+      );
+      expect(found!.page, 2, reason: '幂等应更新 page');
+      expect(found.definition, '水果之一', reason: '幂等应更新 definition');
+    });
+
+    test('getByPage / getByChapter 过滤正确', () async {
+      await kpDao.insert(
+        KnowledgePoint.create(
+          bookId: 'b1',
+          page: 1,
+          chapter: 0,
+          type: KnowledgeType.word,
+          text: '页1词',
+        ),
+      );
+      await kpDao.insert(
+        KnowledgePoint.create(
+          bookId: 'b1',
+          page: 2,
+          chapter: 0,
+          type: KnowledgeType.word,
+          text: '页2词',
+        ),
+      );
+
+      expect((await kpDao.getByPage('b1', 1)).length, 1);
+      expect((await kpDao.getByPage('b1', 1)).first.text, '页1词');
+      expect((await kpDao.getByChapter('b1', 0)).length, 2);
+    });
+
+    test('deleteByBook 级联清理', () async {
+      await kpDao.insert(
+        KnowledgePoint.create(
+          bookId: 'b1',
+          type: KnowledgeType.word,
+          text: '测试',
+        ),
+      );
+      await kpDao.insert(
+        KnowledgePoint.create(
+          bookId: 'b2',
+          type: KnowledgeType.word,
+          text: '其他书',
+        ),
+      );
+      await kpDao.deleteByBook('b1');
+      expect(await kpDao.countByBook('b1'), 0);
+      expect(await kpDao.countByBook('b2'), 1);
+    });
+  });
+
+  group('QuizAttemptDao', () {
+    late QuizAttemptDao quizDao;
+
+    setUp(() async {
+      quizDao = QuizAttemptDao(db);
+    });
+
+    test('insert + getByChapter', () async {
+      await quizDao.insert(
+        QuizAttempt.create(
+          bookId: 'b1',
+          chapter: 1,
+          totalScore: 85,
+          questionCount: 10,
+          correctCount: 7,
+        ),
+      );
+      final list = await quizDao.getByChapter('b1', 1);
+      expect(list.length, 1);
+      expect(list.first.totalScore, 85);
+    });
+
+    test('bestByChapter 取最高分', () async {
+      await quizDao.insert(
+        QuizAttempt.create(
+          bookId: 'b1',
+          chapter: 1,
+          totalScore: 60,
+          questionCount: 5,
+          correctCount: 3,
+        ),
+      );
+      await quizDao.insert(
+        QuizAttempt.create(
+          bookId: 'b1',
+          chapter: 1,
+          totalScore: 95,
+          questionCount: 10,
+          correctCount: 9,
+        ),
+      );
+      final best = await quizDao.bestByChapter('b1', 1);
+      expect(best!.totalScore, 95);
+    });
+
+    test('deleteByBook 级联清理', () async {
+      await quizDao.insert(
+        QuizAttempt.create(
+          bookId: 'b1',
+          chapter: 1,
+          totalScore: 80,
+          questionCount: 5,
+          correctCount: 4,
+        ),
+      );
+      await quizDao.deleteByBook('b1');
+      expect(await quizDao.getByBook('b1'), isEmpty);
     });
   });
 }

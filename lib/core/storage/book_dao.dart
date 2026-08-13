@@ -56,6 +56,9 @@ class BookDao {
       whereArgs: [id],
     );
     await SentenceDao(db).deleteByBook(id);
+    // 知识库与测验级联（v3）
+    await db.delete('knowledge_points', where: 'book_id = ?', whereArgs: [id]);
+    await db.delete('quiz_attempts', where: 'book_id = ?', whereArgs: [id]);
     return db.delete(_table, where: 'id = ?', whereArgs: [id]);
   }
 }

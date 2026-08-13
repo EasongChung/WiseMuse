@@ -11,7 +11,10 @@ enum LearningType {
   dictation('听写'),
 
   /// 生词复习。
-  review('复习');
+  review('复习'),
+
+  /// 章节测验（逐题流水，聚合在 quiz_attempts）。
+  quiz('测验');
 
   const LearningType(this.label);
   final String label;

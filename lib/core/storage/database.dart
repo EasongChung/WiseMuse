@@ -10,7 +10,7 @@ class DatabaseProvider {
   DatabaseProvider._();
 
   static const String dbName = 'wisemuse.db';
-  static const int dbVersion = 2;
+  static const int dbVersion = 3;
 
   static Database? _db;
 
@@ -43,6 +43,52 @@ class DatabaseProvider {
   static const String _createSentenceIndexesSql = '''
       CREATE INDEX idx_sentences_book ON sentences(book_id);
       CREATE INDEX idx_sentences_book_page ON sentences(book_id, page);
+    ''';
+
+  // ===== knowledge_points / quiz_attempts 表 SQL（v3 新增，_onCreate/_onUpgrade 共用）=====
+
+  static const String _createKnowledgePointsSql = '''
+      CREATE TABLE knowledge_points (
+        id TEXT PRIMARY KEY,
+        book_id TEXT,
+        page INTEGER,
+        chapter INTEGER,
+        type TEXT NOT NULL,
+        text TEXT NOT NULL,
+        definition TEXT,
+        extra TEXT,
+        source TEXT NOT NULL DEFAULT 'ai',
+        mastery INTEGER NOT NULL DEFAULT 0,
+        wrong_count INTEGER NOT NULL DEFAULT 0,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL
+      )
+    ''';
+
+  static const String _createKnowledgePointIndexesSql = '''
+      CREATE INDEX idx_kp_book ON knowledge_points(book_id);
+      CREATE INDEX idx_kp_book_page ON knowledge_points(book_id, page);
+      CREATE INDEX idx_kp_book_chapter ON knowledge_points(book_id, chapter);
+      CREATE INDEX idx_kp_type ON knowledge_points(type);
+    ''';
+
+  static const String _createQuizAttemptsSql = '''
+      CREATE TABLE quiz_attempts (
+        id TEXT PRIMARY KEY,
+        book_id TEXT NOT NULL,
+        chapter INTEGER NOT NULL DEFAULT 0,
+        page INTEGER,
+        total_score REAL NOT NULL,
+        question_count INTEGER NOT NULL DEFAULT 0,
+        correct_count INTEGER NOT NULL DEFAULT 0,
+        detail TEXT,
+        at INTEGER NOT NULL
+      )
+    ''';
+
+  static const String _createQuizAttemptIndexesSql = '''
+      CREATE INDEX idx_quiz_book ON quiz_attempts(book_id);
+      CREATE INDEX idx_quiz_book_chapter ON quiz_attempts(book_id, chapter);
     ''';
 
   /// 建表（版本 1）。
@@ -92,6 +138,11 @@ class DatabaseProvider {
     // 教材句（Phase 2：导入时按页/句切好的文本骨架 + 图片 OCR 几何）
     await db.execute(_createSentencesSql);
     await db.execute(_createSentenceIndexesSql);
+    // 知识库与章节测验（v3）
+    await db.execute(_createKnowledgePointsSql);
+    await db.execute(_createKnowledgePointIndexesSql);
+    await db.execute(_createQuizAttemptsSql);
+    await db.execute(_createQuizAttemptIndexesSql);
   }
 
   /// 数据库迁移（版本升级时）。只做增量，不删旧数据。
@@ -104,6 +155,13 @@ class DatabaseProvider {
       // v1 → v2：新增 sentences 表（复用 _onCreate 的 SQL 常量）
       await db.execute(_createSentencesSql);
       await db.execute(_createSentenceIndexesSql);
+    }
+    if (oldVersion < 3) {
+      // v2 → v3：新增 knowledge_points / quiz_attempts 表
+      await db.execute(_createKnowledgePointsSql);
+      await db.execute(_createKnowledgePointIndexesSql);
+      await db.execute(_createQuizAttemptsSql);
+      await db.execute(_createQuizAttemptIndexesSql);
     }
   }
 
