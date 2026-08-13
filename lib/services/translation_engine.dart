@@ -1,11 +1,8 @@
-import 'dart:convert';
-
-import 'package:http/http.dart' as http;
-
 import '../core/debug/app_log.dart';
 import '../core/settings/settings_service.dart';
 import 'llm_service.dart';
 import 'mlkit_translation_service.dart';
+import 'openai_client.dart';
 
 /// 翻译引擎类型。
 ///
@@ -55,6 +52,7 @@ class TranslationEngine {
 
   final MlKitTranslationService _mlkit = MlKitTranslationService();
   final LlmService _llm = LlmService();
+  final OpenAiClient _client = OpenAiClient();
 
   /// 根据 [engineType] 翻译 [text] 从 [source] 到 [target]。
   ///
@@ -199,60 +197,17 @@ class TranslationEngine {
   /// 云端 OpenAI 兼容 API 翻译（需在设置页配好 API 参数）。
   Future<String?> _tryCloud(String text, String source, String target) async {
     AppLog.d(_tag, '尝试云端翻译');
-    try {
-      final settings = SettingsService.instance;
-      final baseUrl = await settings.getApiBaseUrl();
-      final apiKey = await settings.getApiKey();
-      final model = await settings.getApiModel();
-      if (baseUrl == null ||
-          baseUrl.isEmpty ||
-          apiKey == null ||
-          apiKey.isEmpty) {
-        AppLog.d(_tag, '云端未配置 API，跳过');
-        return null;
-      }
-      final url =
-          '${baseUrl.endsWith('/') ? baseUrl : '$baseUrl/'}chat/completions';
-      final src = _langName(source);
-      final tgt = _langName(target);
-      final prompt =
-          'Translate the following $src text to $tgt. Output only the translation, no explanation.\n\n$text';
-      final resp = await http
-          .post(
-            Uri.parse(url),
-            headers: {
-              'Content-Type': 'application/json',
-              'Authorization': 'Bearer $apiKey',
-            },
-            body: jsonEncode({
-              'model': model,
-              'messages': [
-                {'role': 'system', 'content': 'You are a translation engine.'},
-                {'role': 'user', 'content': prompt},
-              ],
-              'temperature': 0.3,
-              'max_tokens': 1024,
-            }),
-          )
-          .timeout(const Duration(seconds: 30));
-      if (resp.statusCode == 200) {
-        final json = jsonDecode(resp.body) as Map<String, dynamic>;
-        final choices = json['choices'] as List?;
-        if (choices != null && choices.isNotEmpty) {
-          final msg = choices[0] as Map<String, dynamic>;
-          final content = msg['message']?['content'] as String?;
-          if (content != null && content.trim().isNotEmpty) {
-            AppLog.d(_tag, '云端翻译成功');
-            return content.trim();
-          }
-        }
-      } else {
-        AppLog.e(_tag, '云端翻译 HTTP ${resp.statusCode}: ${resp.body}');
-      }
-    } catch (e) {
-      AppLog.e(_tag, '云端翻译异常: $e');
+    final src = _langName(source);
+    final tgt = _langName(target);
+    final result = await _client.chat(
+      system: 'You are a translation engine.',
+      user:
+          'Translate the following $src text to $tgt. Output only the translation, no explanation.\n\n$text',
+    );
+    if (result != null) {
+      AppLog.d(_tag, '云端翻译成功');
     }
-    return null;
+    return result;
   }
 
   /// BCP-47 语言代码 → 英文名称（供 LLM prompt 使用）。

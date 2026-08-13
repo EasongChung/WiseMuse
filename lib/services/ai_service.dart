@@ -1,0 +1,137 @@
+import '../core/debug/app_log.dart';
+import '../core/settings/settings_service.dart';
+import 'llm_service.dart';
+import 'openai_client.dart';
+
+/// [v0.3.0] AI 服务：云端 OpenAI 兼容 API 优先 + 本地 llama 回落双引擎。
+///
+/// 按 [SettingsService.preferOffline] 决定尝试顺序：
+/// - false（默认）：cloud → local
+/// - true：local → cloud
+///
+/// 失败静默回落（AppLog 记每级错误），全部失败返回 null。
+/// 供 知识提取 / 测验生成 / 助教 三方复用。
+class AiService {
+  AiService({LlmService? llm, OpenAiClient? client})
+    : _llm = llm ?? LlmService(),
+      _client = client ?? OpenAiClient();
+
+  final LlmService _llm;
+  final OpenAiClient _client;
+  static const _tag = 'ai';
+
+  /// 获取 AI 引擎按策略尝试的顺序。
+  Future<List<AiEngine>> _getEngineOrder() async {
+    final preferOffline = await SettingsService.instance.getPreferOffline();
+    return preferOffline
+        ? [AiEngine.local, AiEngine.cloud]
+        : [AiEngine.cloud, AiEngine.local];
+  }
+
+  /// 调用 AI 完成文本生成，返回首个成功结果或 null。
+  ///
+  /// [prompt] 用户 prompt；[predictLength] 本地 llama 最大生成 token；
+  /// [jsonObject] 云端传 response_format，本地 llama 仅在 prompt 追加约束。
+  Future<AiResult?> complete(
+    String prompt, {
+    int predictLength = 2048,
+    bool jsonObject = false,
+  }) async {
+    final order = await _getEngineOrder();
+    for (final engine in order) {
+      final result = await _tryEngine(
+        engine,
+        prompt,
+        predictLength,
+        jsonObject,
+      );
+      if (result != null) return result;
+    }
+    return null;
+  }
+
+  /// 尝试单个引擎。
+  Future<AiResult?> _tryEngine(
+    AiEngine engine,
+    String prompt,
+    int predictLength,
+    bool jsonObject,
+  ) async {
+    AppLog.d(_tag, '尝试 ${engine.label}');
+    try {
+      switch (engine) {
+        case AiEngine.cloud:
+          final text = await _client.chat(
+            user: prompt,
+            jsonObject: jsonObject,
+            maxTokens: predictLength,
+          );
+          if (text != null && text.isNotEmpty) {
+            return AiResult(text: text, engine: engine);
+          }
+          break;
+        case AiEngine.local:
+          // 本地 llama 不支持 response_format，jsonObject 时 prompt 追加约束
+          var localPrompt = prompt;
+          if (jsonObject) {
+            localPrompt = '$prompt\n\nOutput ONLY valid JSON, no explanation.';
+          }
+          final available = await _llm.isAvailable();
+          if (!available) {
+            AppLog.d(_tag, '本地 llama 不可用，跳过');
+            break;
+          }
+          if (!_llm.isLoaded) {
+            AppLog.d(_tag, '本地 llama 未加载模型，跳过');
+            break;
+          }
+          final text = await _llm.chat(
+            localPrompt,
+            predictLength: predictLength,
+          );
+          if (text.isNotEmpty) {
+            return AiResult(text: text, engine: engine);
+          }
+          break;
+      }
+    } catch (e) {
+      AppLog.e(_tag, '${engine.label} 异常: $e');
+    }
+    return null;
+  }
+
+  /// 云端是否已配置可用。
+  Future<bool> isCloudReady() => SettingsService.instance.isApiConfigured();
+
+  /// 本地引擎是否可用且模型已加载。
+  Future<bool> isLocalReady() async {
+    try {
+      return await _llm.isAvailable() && _llm.isLoaded;
+    } catch (_) {
+      return false;
+    }
+  }
+}
+
+/// AI 引擎类型。
+enum AiEngine {
+  /// 云端 OpenAI 兼容 API。
+  cloud('云端'),
+
+  /// 本地 llama。
+  local('本地');
+
+  const AiEngine(this.label);
+  final String label;
+}
+
+/// AI 完成结果。
+class AiResult {
+  const AiResult({required this.text, required this.engine});
+
+  /// 生成的文本。
+  final String text;
+
+  /// 实际使用的引擎。
+  final AiEngine engine;
+}
