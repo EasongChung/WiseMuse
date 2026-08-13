@@ -2,8 +2,10 @@ import 'package:flutter/material.dart';
 
 import '../../core/debug/app_log.dart';
 import '../../core/models/knowledge_point.dart';
+import '../../core/models/word_entry.dart';
 import '../../core/storage/database.dart';
 import '../../core/storage/knowledge_point_dao.dart';
+import '../../core/storage/word_entry_dao.dart';
 import '../../core/theme/app_theme.dart';
 import 'knowledge_edit_sheet.dart';
 
@@ -147,6 +149,21 @@ class _KnowledgeDetailSheetState extends State<KnowledgeDetailSheet> {
           ),
           const Divider(height: 20),
 
+          // 加入生词本
+          SizedBox(
+            width: double.infinity,
+            child: OutlinedButton.icon(
+              onPressed: _addToWordbook,
+              icon: const Icon(Icons.bookmark_add_outlined, size: 18),
+              label: const Text('加入生词本'),
+              style: OutlinedButton.styleFrom(
+                foregroundColor: StudyPalette.ember,
+                side: const BorderSide(color: StudyPalette.ember),
+              ),
+            ),
+          ),
+          const SizedBox(height: 10),
+
           // 操作按钮
           Row(
             children: [
@@ -226,6 +243,25 @@ class _KnowledgeDetailSheetState extends State<KnowledgeDetailSheet> {
       } catch (e, s) {
         AppLog.e('kp_detail', '删除失败: $e\n$s');
       }
+    }
+  }
+
+  Future<void> _addToWordbook() async {
+    try {
+      final entry = WordEntry.create(
+        word: _kp.text,
+        lang: _kp.type == KnowledgeType.english ? 'en' : 'zh',
+        fromBookId: _kp.bookId,
+      );
+      final db = await DatabaseProvider.database;
+      await WordEntryDao(db).upsert(entry);
+      AppLog.d('kp_detail', '加入生词本: ${_kp.text}');
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('已加入生词本：${_kp.text}')),
+      );
+    } catch (e, s) {
+      AppLog.e('kp_detail', '加入生词本失败: $e\n$s');
     }
   }
 }
