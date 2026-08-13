@@ -21,6 +21,8 @@ class LearningStats {
     required this.followAvg,
     required this.dictationCount,
     required this.dictationAvg,
+    required this.quizCount,
+    required this.quizAvg,
     required this.reviewCount,
     required this.reviewAvg,
     required this.topWrongWords,
@@ -50,6 +52,10 @@ class LearningStats {
   /// 复习次数与平均分。
   final int reviewCount;
   final double reviewAvg;
+
+  /// 测验次数与平均分。
+  final int quizCount;
+  final double quizAvg;
 
   /// 错词分布（按 wrongCount 降序 Top10，仅含错次>0）。
   final List<WordEntry> topWrongWords;
@@ -92,6 +98,8 @@ class StatisticsService {
     );
     final reviewCount = await recordDao.countByType(LearningType.review);
     final reviewAvg = await recordDao.avgResultByType(LearningType.review);
+    final quizCount = await recordDao.countByType(LearningType.quiz);
+    final quizAvg = await recordDao.avgResultByType(LearningType.quiz);
 
     final topWrongWords =
         words.where((w) => w.wrongCount > 0).toList()
@@ -112,6 +120,8 @@ class StatisticsService {
       dictationAvg: dictationAvg,
       reviewCount: reviewCount,
       reviewAvg: reviewAvg,
+      quizCount: quizCount,
+      quizAvg: quizAvg,
       topWrongWords: topWrong,
       dailyActivity: daily,
     );

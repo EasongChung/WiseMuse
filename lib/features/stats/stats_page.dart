@@ -171,6 +171,8 @@ class _StatsPageState extends State<StatsPage> {
           _recordRow('听写', s.dictationCount, s.dictationAvg),
           const Divider(height: 1, indent: 16),
           _recordRow('复习', s.reviewCount, s.reviewAvg),
+          const Divider(height: 1, indent: 16),
+          _recordRow('测验', s.quizCount, s.quizAvg),
         ],
       ),
     );

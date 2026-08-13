@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../core/theme/app_theme.dart';
 import '../dictation/dictation_page.dart';
 import '../follow/follow_page.dart';
+import '../quiz/quiz_hub_page.dart';
 
 /// [v0.3.0] 练习页：跟读/听写/章节测验三入口卡片。
 ///
@@ -30,10 +31,10 @@ class PracticePage extends StatelessWidget {
               color: StudyPalette.ember,
               title: '跟读练习',
               subtitle: '播放原文 → 跟读录音 → AI 评分',
-              onTap: () => Navigator.of(context).push(
-                MaterialPageRoute(
-                    builder: (_) => const FollowPage()),
-              ),
+              onTap:
+                  () => Navigator.of(
+                    context,
+                  ).push(MaterialPageRoute(builder: (_) => const FollowPage())),
             ),
             const SizedBox(height: 12),
 
@@ -44,10 +45,10 @@ class PracticePage extends StatelessWidget {
               color: StudyPalette.spinePdf,
               title: '听写',
               subtitle: '听原文 → 默写 → 自动批改',
-              onTap: () => Navigator.of(context).push(
-                MaterialPageRoute(
-                    builder: (_) => const DictationPage()),
-              ),
+              onTap:
+                  () => Navigator.of(context).push(
+                    MaterialPageRoute(builder: (_) => const DictationPage()),
+                  ),
             ),
             const SizedBox(height: 12),
 
@@ -58,11 +59,10 @@ class PracticePage extends StatelessWidget {
               color: StudyPalette.spineWord,
               title: '章节测验',
               subtitle: '三题型：朗读评分 / 听音选字 / AI 选择题',
-              onTap: () {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('章节测验即将推出')),
-                );
-              },
+              onTap:
+                  () => Navigator.of(context).push(
+                    MaterialPageRoute(builder: (_) => const QuizHubPage()),
+                  ),
             ),
           ],
         ),

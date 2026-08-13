@@ -2,15 +2,15 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
-import 'package:wisemuse/services/mastery_service.dart';
-
 import '../../core/debug/app_log.dart';
+import '../../widgets/char_select_grid.dart';
 import '../../core/models/learning_record.dart';
 import '../../core/storage/database.dart';
 import '../../core/storage/learning_record_dao.dart';
 import '../../core/storage/word_entry_dao.dart';
 import '../../core/theme/app_theme.dart';
 import '../../services/dictation_engine.dart';
+import '../../services/mastery_service.dart';
 import '../../services/native_tts_service.dart';
 import '../../services/tts_service.dart';
 import '../follow/follow_page.dart';
@@ -374,115 +374,14 @@ class _DictationPageState extends State<DictationPage> {
 
   Widget _buildCharSelect() {
     final q = _questions[_currentIndex];
-    final options = q.options ?? [];
-
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        // 提示
-        const Text(
-          '听发音，选正确的字',
-          style: TextStyle(fontSize: 14, color: StudyPalette.inkSoft),
-        ),
-        const SizedBox(height: 12),
-
-        // 重新播放
-        IconButton(
-          icon: Icon(
-            _ttsPlaying ? Icons.volume_up : Icons.volume_up_outlined,
-            size: 48,
-            color: StudyPalette.ember,
-          ),
-          onPressed: _ttsPlaying ? null : _playCurrent,
-          tooltip: '再听一遍',
-        ),
-        const SizedBox(height: 24),
-
-        // 选项网格
-        Wrap(
-          spacing: 12,
-          runSpacing: 12,
-          alignment: WrapAlignment.center,
-          children: List.generate(options.length, (i) {
-            final opt = options[i];
-            final isSelected = _selectedOption == opt;
-            Color bg;
-            Color fg;
-            if (_showResult) {
-              if (opt == q.word) {
-                bg = StudyPalette.moss.withValues(alpha: 0.2);
-                fg = StudyPalette.moss;
-              } else if (isSelected) {
-                bg = StudyPalette.ember.withValues(alpha: 0.15);
-                fg = StudyPalette.ember;
-              } else {
-                bg = Colors.white.withValues(alpha: 0.6);
-                fg = StudyPalette.inkSoft;
-              }
-            } else if (isSelected) {
-              bg = StudyPalette.emberSoft;
-              fg = StudyPalette.ember;
-            } else {
-              bg = Colors.white.withValues(alpha: 0.6);
-              fg = StudyPalette.ink;
-            }
-
-            return SizedBox(
-              width: 72,
-              height: 72,
-              child: Material(
-                color: bg,
-                borderRadius: BorderRadius.circular(16),
-                child: InkWell(
-                  borderRadius: BorderRadius.circular(16),
-                  onTap: _showResult ? null : () => _submitCharSelect(opt),
-                  child: Center(
-                    child: Text(
-                      opt,
-                      style: TextStyle(
-                        fontSize: 28,
-                        fontWeight: FontWeight.w700,
-                        color: fg,
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-            );
-          }),
-        ),
-
-        const SizedBox(height: 32),
-
-        // 结果反馈 + 下一题
-        if (_showResult)
-          Column(
-            children: [
-              Icon(
-                _lastCorrect ? Icons.check_circle : Icons.cancel,
-                size: 40,
-                color: _lastCorrect ? StudyPalette.moss : StudyPalette.ember,
-              ),
-              const SizedBox(height: 4),
-              Text(
-                _lastCorrect ? '正确！' : '答案是「${q.word}」',
-                style: TextStyle(
-                  fontSize: 18,
-                  fontWeight: FontWeight.w600,
-                  color: _lastCorrect ? StudyPalette.moss : StudyPalette.ember,
-                ),
-              ),
-              const SizedBox(height: 16),
-              FilledButton.icon(
-                onPressed: _submitting ? null : _next,
-                icon: const Icon(Icons.arrow_forward),
-                label: Text(
-                  _currentIndex + 1 >= _questions.length ? '完成' : '下一题',
-                ),
-              ),
-            ],
-          ),
-      ],
+    return CharSelectGrid(
+      options: q.options ?? [],
+      correctAnswer: q.word,
+      selectedOption: _selectedOption,
+      showResult: _showResult,
+      isPlaying: _ttsPlaying,
+      onReplay: _ttsPlaying ? null : _playCurrent,
+      onSelect: _submitCharSelect,
     );
   }
 
