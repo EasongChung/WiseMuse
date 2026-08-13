@@ -24,6 +24,14 @@ android {
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
         versionName = flutter.versionName
+
+        // [瘦身] 只打包 arm64-v8a 原生库。
+        // CI 命令的 --target-platform android-arm64 只过滤 Flutter 引擎本身，
+        // 第三方 AAR 依赖（Vosk/ML Kit/PDFBox/翻译）的 .so 仍会 3 个 ABI 全打，
+        // 导致 APK 冗余 ~77MB。此处 abiFilters 统一收口到 arm64-v8a（项目既定规格）。
+        ndk {
+            abiFilters += "arm64-v8a"
+        }
     }
 
     signingConfigs {
