@@ -9,6 +9,7 @@ import '../../services/book_import_service.dart';
 import '../../services/picker_service.dart';
 import '../../widgets/import_sheet.dart';
 import '../debug/log_page.dart';
+import '../dictation/dictation_page.dart';
 import '../follow/follow_page.dart';
 import '../reader/reader_page.dart';
 import '../settings/settings_page.dart';
@@ -133,12 +134,23 @@ class _HomePageState extends State<HomePage> {
     ).push(MaterialPageRoute<void>(builder: (_) => const WordBookPage()));
   }
 
+  void _openDictation() {
+    Navigator.of(
+      context,
+    ).push(MaterialPageRoute<void>(builder: (_) => const DictationPage()));
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
         title: const Text('我的书架'),
         actions: [
+          IconButton(
+            tooltip: '听写',
+            icon: const Icon(Icons.edit_note_outlined),
+            onPressed: _openDictation,
+          ),
           IconButton(
             tooltip: '生词本',
             icon: const Icon(Icons.menu_book_outlined),
