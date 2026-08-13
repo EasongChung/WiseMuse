@@ -34,6 +34,14 @@ class _SettingsPageState extends State<SettingsPage> {
   final _apiKeyCtrl = TextEditingController();
   final _modelCtrl = TextEditingController();
 
+  // 朗读参数
+  double _ttsRate = 0.9;
+  int _ttsRepeatCount = 1;
+  int _ttsPauseMs = 300;
+
+  // AI 离线优先
+  bool _preferOffline = false;
+
   bool _initDone = false;
 
   // 源语种选项（含自动识别）
@@ -80,6 +88,10 @@ class _SettingsPageState extends State<SettingsPage> {
     _baseUrlCtrl.text = (await _settings.getApiBaseUrl()) ?? '';
     _apiKeyCtrl.text = (await _settings.getApiKey()) ?? '';
     _modelCtrl.text = (await _settings.getApiModel()) ?? '';
+    _ttsRate = await _settings.getTtsRate();
+    _ttsRepeatCount = await _settings.getTtsRepeatCount();
+    _ttsPauseMs = await _settings.getTtsPauseMs();
+    _preferOffline = await _settings.getPreferOffline();
     // 检查常用语言模型下载状态
     for (final (code, _) in _langs) {
       final ok = await _mlkit.isModelDownloaded(code);
@@ -245,10 +257,16 @@ class _SettingsPageState extends State<SettingsPage> {
                   _buildSectionTitle('翻译语种'),
                   _buildLanguageSelector(),
                   const SizedBox(height: 24),
+                  _buildSectionTitle('朗读参数'),
+                  _buildTtsParams(),
+                  const SizedBox(height: 24),
                   _buildSectionTitle('离线翻译模型'),
                   _buildModelList(),
                   const SizedBox(height: 24),
-                  _buildSectionTitle('云端 API（回落兜底）'),
+                  _buildSectionTitle('AI 离线优先'),
+                  _buildOfflineToggle(),
+                  const SizedBox(height: 24),
+                  _buildSectionTitle('云端 AI 配置（知识提取/翻译/测验兜底）'),
                   _buildApiConfig(),
                 ],
               )
@@ -378,6 +396,128 @@ class _SettingsPageState extends State<SettingsPage> {
         ),
         if (!isLast) const Divider(height: 1, indent: 16),
       ],
+    );
+  }
+
+  Widget _buildTtsParams() {
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // 语速
+            Row(
+              children: [
+                const Icon(Icons.speed, size: 20, color: StudyPalette.ink),
+                const SizedBox(width: 8),
+                Text('语速', style: titleStyle(fontSize: 14)),
+                const Spacer(),
+                Text(
+                  '${_ttsRate.toStringAsFixed(1)}x',
+                  style: const TextStyle(
+                      fontWeight: FontWeight.w600, color: StudyPalette.ember),
+                ),
+              ],
+            ),
+            Slider(
+              value: _ttsRate,
+              min: 0.5,
+              max: 2.0,
+              divisions: 15,
+              label: '${_ttsRate.toStringAsFixed(1)}x',
+              activeColor: StudyPalette.ember,
+              onChanged: (v) => setState(() => _ttsRate = v),
+              onChangeEnd: (v) => _settings.setTtsRate(v),
+            ),
+            const Divider(height: 8),
+
+            // 重复遍数
+            Row(
+              children: [
+                const Icon(Icons.repeat, size: 20, color: StudyPalette.ink),
+                const SizedBox(width: 8),
+                Text('重复遍数', style: titleStyle(fontSize: 14)),
+                const Spacer(),
+                Row(
+                  children: [
+                    IconButton(
+                      icon: const Icon(Icons.remove_circle_outline),
+                      onPressed: _ttsRepeatCount > 1
+                          ? () {
+                              setState(() => _ttsRepeatCount--);
+                              _settings.setTtsRepeatCount(_ttsRepeatCount);
+                            }
+                          : null,
+                    ),
+                    Text(
+                      '$_ttsRepeatCount',
+                      style: const TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.w600,
+                          color: StudyPalette.ember),
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.add_circle_outline),
+                      onPressed: _ttsRepeatCount < 5
+                          ? () {
+                              setState(() => _ttsRepeatCount++);
+                              _settings.setTtsRepeatCount(_ttsRepeatCount);
+                            }
+                          : null,
+                    ),
+                  ],
+                ),
+              ],
+            ),
+            const Divider(height: 8),
+
+            // 句间停顿
+            Row(
+              children: [
+                const Icon(Icons.timer_outlined,
+                    size: 20, color: StudyPalette.ink),
+                const SizedBox(width: 8),
+                Text('句间停顿', style: titleStyle(fontSize: 14)),
+                const Spacer(),
+                Text(
+                  '${_ttsPauseMs}ms',
+                  style: const TextStyle(
+                      fontWeight: FontWeight.w600, color: StudyPalette.ember),
+                ),
+              ],
+            ),
+            Slider(
+              value: _ttsPauseMs.toDouble(),
+              min: 0,
+              max: 1000,
+              divisions: 10,
+              label: '${_ttsPauseMs}ms',
+              activeColor: StudyPalette.ember,
+              onChanged: (v) => setState(() => _ttsPauseMs = v.round()),
+              onChangeEnd: (v) => _settings.setTtsPauseMs(v.round()),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildOfflineToggle() {
+    return Card(
+      child: SwitchListTile(
+        title: const Text('优先使用离线 AI'),
+        subtitle: const Text(
+          '开启后 AI 知识提取/翻译/测验优先走本地模型，\n云端仅作兜底',
+          style: TextStyle(fontSize: 12, color: StudyPalette.inkSoft),
+        ),
+        value: _preferOffline,
+        activeThumbColor: StudyPalette.ember,
+        onChanged: (v) {
+          setState(() => _preferOffline = v);
+          _settings.setPreferOffline(v);
+        },
+      ),
     );
   }
 

@@ -8,16 +8,11 @@ import '../../core/theme/app_theme.dart';
 import '../../services/book_import_service.dart';
 import '../../services/picker_service.dart';
 import '../../widgets/import_sheet.dart';
-import '../debug/log_page.dart';
-import '../dictation/dictation_page.dart';
-import '../follow/follow_page.dart';
 import '../reader/reader_page.dart';
-import '../settings/settings_page.dart';
-import '../wordbook/wordbook_page.dart';
 
-/// [v0.3.0] 书架首页：教材书架 + 导入入口（「暖色书房」设计）。
+/// [v0.3.0] 书架 Tab body（HomeShell 的 Tab 0）。
 ///
-/// - AppBar：标题「我的书架」+ 跟读练习 / 日志入口
+/// - AppBar：标题「我的书架」
 /// - body：书本形态卡片网格（书脊色按来源区分，点击进 ReaderPage）
 /// - FAB：导入 → ImportSheet 三分支
 class HomePage extends StatefulWidget {
@@ -116,67 +111,10 @@ class _HomePageState extends State<HomePage> {
     }
   }
 
-  void _openFollow() {
-    Navigator.of(
-      context,
-    ).push(MaterialPageRoute<void>(builder: (_) => const FollowPage()));
-  }
-
-  void _openLog() {
-    Navigator.of(
-      context,
-    ).push(MaterialPageRoute<void>(builder: (_) => const LogPage()));
-  }
-
-  void _openWordBook() {
-    Navigator.of(
-      context,
-    ).push(MaterialPageRoute<void>(builder: (_) => const WordBookPage()));
-  }
-
-  void _openDictation() {
-    Navigator.of(
-      context,
-    ).push(MaterialPageRoute<void>(builder: (_) => const DictationPage()));
-  }
-
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('我的书架'),
-        actions: [
-          IconButton(
-            tooltip: '听写',
-            icon: const Icon(Icons.edit_note_outlined),
-            onPressed: _openDictation,
-          ),
-          IconButton(
-            tooltip: '生词本',
-            icon: const Icon(Icons.menu_book_outlined),
-            onPressed: _openWordBook,
-          ),
-          IconButton(
-            tooltip: '跟读练习',
-            icon: const Icon(Icons.record_voice_over_outlined),
-            onPressed: _openFollow,
-          ),
-          IconButton(
-            tooltip: '设置',
-            icon: const Icon(Icons.settings_outlined),
-            onPressed: () {
-              Navigator.of(
-                context,
-              ).push(MaterialPageRoute(builder: (_) => const SettingsPage()));
-            },
-          ),
-          IconButton(
-            tooltip: '运行日志',
-            icon: const Icon(Icons.bug_report_outlined),
-            onPressed: _openLog,
-          ),
-        ],
-      ),
+      appBar: AppBar(title: const Text('我的书架')),
       body: Stack(
         children: [_buildBody(), if (_importing) _buildImportOverlay()],
       ),
