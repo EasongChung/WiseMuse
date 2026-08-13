@@ -30,7 +30,13 @@ import '../debug/llm_demo_page.dart';
 /// 4. 自动评分（[FollowScorer]），逐字标色反馈
 /// 5. 分 <80 时整句写入生词本 + 学习记录
 class FollowPage extends StatefulWidget {
-  const FollowPage({super.key});
+  const FollowPage({super.key, this.initialSentence, this.bookId});
+
+  /// 从阅读页跳入时可预填句子。
+  final String? initialSentence;
+
+  /// 来源教材 id（可选，用于生词关联）。
+  final String? bookId;
 
   @override
   State<FollowPage> createState() => _FollowPageState();
@@ -67,7 +73,7 @@ class _FollowPageState extends State<FollowPage> with WidgetsBindingObserver {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    _sentenceController.text = _sampleSentences.first;
+    _sentenceController.text = widget.initialSentence ?? _sampleSentences.first;
   }
 
   @override

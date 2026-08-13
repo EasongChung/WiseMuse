@@ -7,9 +7,14 @@ import 'package:flutter/material.dart';
 
 import '../../core/debug/app_log.dart';
 import '../../core/models/book.dart';
+import '../../core/models/knowledge_point.dart';
 import '../../core/models/sentence.dart';
+import '../../core/models/word_entry.dart';
+import '../../core/settings/settings_service.dart';
 import '../../core/storage/database.dart';
+import '../../core/storage/knowledge_point_dao.dart';
 import '../../core/storage/sentence_dao.dart';
+import '../../core/storage/word_entry_dao.dart';
 import '../../core/theme/app_theme.dart';
 import '../../services/docx_html_converter.dart';
 import '../../services/native_tts_service.dart';
@@ -18,9 +23,8 @@ import '../../services/ocr_service.dart';
 import '../../services/pdf_service.dart';
 import '../../services/text_position_service.dart';
 import '../../services/translation_engine.dart';
-import '../../core/models/word_entry.dart';
-import '../../core/storage/word_entry_dao.dart';
 import '../../vendor/flutter_pdfview/flutter_pdfview.dart';
+import '../follow/follow_page.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 
 /// [v0.2.0] 阅读页：按来源类型切换四种模式。
@@ -71,6 +75,13 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
 
   // 文本模式（TXT / Word 文本视图 / PDF 文本模式共用）：当前朗读句索引（高亮）
   int? _textHighlightIndex;
+
+  // 文本模式：页码导航
+  int _textPageIndex = 0;
+  List<List<Sentence>> _textPages = const [];
+
+  // 自动连读状态
+  bool _autoPlaying = false;
 
   // 页面级朗读代次：每次点击、模式切换或 dispose 自增。耗时 PDF/OCR
   // 任务完成后必须校验代次，旧任务不得晚到发声。
@@ -128,7 +139,29 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
   Future<void> _loadSentences() async {
     final db = await DatabaseProvider.database;
     final list = await SentenceDao(db).getByBook(widget.book.id);
-    if (mounted) setState(() => _sentences = list);
+    if (mounted) {
+      setState(() {
+        _sentences = list;
+        _computeTextPages(list);
+      });
+    }
+  }
+
+  /// 文本模式：按 page 分组，生成虚拟页。
+  void _computeTextPages(List<Sentence> sentences) {
+    if (sentences.isEmpty) {
+      _textPages = const [];
+      _textPageIndex = 0;
+      return;
+    }
+    final grouped = <int, List<Sentence>>{};
+    for (final s in sentences) {
+      grouped.putIfAbsent(s.page, () => []).add(s);
+    }
+    final sorted =
+        grouped.entries.toList()..sort((a, b) => a.key.compareTo(b.key));
+    _textPages = sorted.map((e) => e.value).toList();
+    _textPageIndex = _textPageIndex.clamp(0, _textPages.length - 1);
   }
 
   // ===== PDF =====
@@ -781,78 +814,303 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
   }
 
   Widget _buildTextView() {
-    // 文本模式：显示全部句子（虚拟分页/页导航为后续增强，当前一次展示）
+    // 文本模式：按页分组 + 页导航 + 连读 + 跟读入口
     if (_sentences.isEmpty) {
       return const Center(child: Text('暂无句子内容'));
     }
-    return ListView.separated(
-      padding: const EdgeInsets.all(16),
-      itemCount: _sentences.length,
-      separatorBuilder: (_, _) => const SizedBox(height: 8),
-      itemBuilder: (context, index) {
-        final s = _sentences[index];
-        final highlighted = _textHighlightIndex == index;
-        return Material(
-          color:
-              highlighted
-                  ? StudyPalette.emberSoft
-                  : Colors.white.withValues(alpha: 0.6),
-          borderRadius: BorderRadius.circular(12),
-          child: InkWell(
-            borderRadius: BorderRadius.circular(12),
-            onTap: () {
-              setState(() => _textHighlightIndex = index);
-              _speak(s.text);
-            },
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 12,
-                        vertical: 8,
-                      ),
-                      child: Text(
-                        s.text,
-                        style: TextStyle(
-                          fontSize: 18,
-                          height: 1.6,
-                          color:
-                              highlighted
-                                  ? StudyPalette.ember
-                                  : StudyPalette.ink,
-                          fontWeight:
-                              highlighted ? FontWeight.w600 : FontWeight.w400,
+    if (_textPages.isEmpty) {
+      return const Center(child: Text('无有效页'));
+    }
+
+    final pageSentences = _textPages[_textPageIndex];
+    final totalPages = _textPages.length;
+
+    return Column(
+      children: [
+        // 页控件
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+          child: Row(children: [const Spacer(), _buildPageBar(totalPages)]),
+        ),
+
+        // 句子列表
+        Expanded(
+          child: ListView.separated(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+            itemCount: pageSentences.length,
+            separatorBuilder: (_, _) => const SizedBox(height: 6),
+            itemBuilder: (context, index) {
+              final s = pageSentences[index];
+              final highlighted = _textHighlightIndex == index;
+              return Material(
+                color:
+                    highlighted
+                        ? StudyPalette.emberSoft
+                        : Colors.white.withValues(alpha: 0.6),
+                borderRadius: BorderRadius.circular(12),
+                child: InkWell(
+                  borderRadius: BorderRadius.circular(12),
+                  onTap: () {
+                    setState(() => _textHighlightIndex = index);
+                    _speak(s.text);
+                  },
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 4,
+                      vertical: 6,
+                    ),
+                    child: Row(
+                      children: [
+                        // 序号
+                        SizedBox(
+                          width: 24,
+                          child: Text(
+                            '${index + 1}',
+                            style: const TextStyle(
+                              fontSize: 12,
+                              color: StudyPalette.inkSoft,
+                            ),
+                          ),
                         ),
-                      ),
+                        // 句子文本
+                        Expanded(
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 8,
+                              vertical: 4,
+                            ),
+                            child: Text(
+                              s.text,
+                              style: TextStyle(
+                                fontSize: 18,
+                                height: 1.6,
+                                color:
+                                    highlighted
+                                        ? StudyPalette.ember
+                                        : StudyPalette.ink,
+                                fontWeight:
+                                    highlighted
+                                        ? FontWeight.w600
+                                        : FontWeight.w400,
+                              ),
+                            ),
+                          ),
+                        ),
+                        // 跟读入口
+                        IconButton(
+                          icon: const Icon(
+                            Icons.record_voice_over_outlined,
+                            size: 18,
+                            color: StudyPalette.ember,
+                          ),
+                          tooltip: '跟读此句',
+                          onPressed: () => _openFollow(s.text),
+                        ),
+                        // 翻译
+                        IconButton(
+                          icon: const Icon(
+                            Icons.translate,
+                            size: 18,
+                            color: StudyPalette.inkSoft,
+                          ),
+                          tooltip: '翻译',
+                          onPressed: () => _translate(s.text),
+                        ),
+                        // 标记生词
+                        IconButton(
+                          icon: const Icon(
+                            Icons.bookmark_add_outlined,
+                            size: 18,
+                            color: StudyPalette.inkSoft,
+                          ),
+                          tooltip: '标记生词',
+                          onPressed: () => _markWord(s.text),
+                        ),
+                      ],
                     ),
                   ),
-                  IconButton(
-                    icon: const Icon(
-                      Icons.translate,
-                      size: 20,
-                      color: StudyPalette.inkSoft,
-                    ),
-                    tooltip: '翻译',
-                    onPressed: () => _translate(s.text),
-                  ),
-                  IconButton(
-                    icon: const Icon(
-                      Icons.bookmark_add_outlined,
-                      size: 20,
-                      color: StudyPalette.inkSoft,
-                    ),
-                    tooltip: '标记生词',
-                    onPressed: () => _markWord(s.text),
-                  ),
-                ],
-              ),
+                ),
+              );
+            },
+          ),
+        ),
+      ],
+    );
+  }
+
+  /// 页导航控件（上一页/页码/下一页/连读/知识点）。
+  Widget _buildPageBar(int totalPages) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        color: StudyPalette.parchmentDeep.withValues(alpha: 0.6),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          IconButton(
+            icon: const Icon(Icons.chevron_left, size: 20),
+            onPressed:
+                _textPageIndex > 0
+                    ? () {
+                      _speechRequest++;
+                      unawaited(_tts.stop());
+                      setState(() => _textPageIndex--);
+                    }
+                    : null,
+            tooltip: '上一页',
+          ),
+          Text(
+            '${_textPageIndex + 1}/$totalPages',
+            style: const TextStyle(
+              fontSize: 13,
+              fontWeight: FontWeight.w600,
+              color: StudyPalette.ink,
             ),
           ),
-        );
-      },
+          IconButton(
+            icon: const Icon(Icons.chevron_right, size: 20),
+            onPressed:
+                _textPageIndex < totalPages - 1
+                    ? () {
+                      _speechRequest++;
+                      unawaited(_tts.stop());
+                      setState(() => _textPageIndex++);
+                    }
+                    : null,
+            tooltip: '下一页',
+          ),
+          const SizedBox(
+            height: 20,
+            child: VerticalDivider(width: 1, color: StudyPalette.linen),
+          ),
+          IconButton(
+            icon: Icon(
+              _autoPlaying
+                  ? Icons.stop_circle_outlined
+                  : Icons.play_circle_outline,
+              size: 20,
+              color: _autoPlaying ? StudyPalette.ember : null,
+            ),
+            onPressed: _autoPlaying ? _stopAutoPlay : _startAutoPlay,
+            tooltip: _autoPlaying ? '停止连读' : '连读本页',
+          ),
+          IconButton(
+            icon: const Icon(Icons.lightbulb_outline, size: 20),
+            onPressed: () => _showPageKnowledge(),
+            tooltip: '本页知识点',
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ===== 文本模式：自动连读 =====
+
+  Future<void> _startAutoPlay() async {
+    if (_autoPlaying) return;
+    setState(() => _autoPlaying = true);
+    final request = ++_speechRequest;
+    try {
+      final sentences = _textPages[_textPageIndex];
+      for (var i = 0; i < sentences.length && request == _speechRequest; i++) {
+        if (!mounted) return;
+        setState(() => _textHighlightIndex = i);
+        await _tts.speak(sentences[i].text);
+        if (request != _speechRequest) return;
+        // 句间停顿（读取设置）
+        final pauseMs = await SettingsService.instance.getTtsPauseMs();
+        if (request != _speechRequest) return;
+        await Future.delayed(Duration(milliseconds: pauseMs));
+      }
+    } finally {
+      if (mounted) setState(() => _autoPlaying = false);
+    }
+  }
+
+  void _stopAutoPlay() {
+    _speechRequest++;
+    unawaited(_tts.stop());
+    if (mounted) setState(() => _autoPlaying = false);
+  }
+
+  // ===== 文本模式：本页知识点 =====
+
+  Future<void> _showPageKnowledge() async {
+    final currentPage = _textPages[_textPageIndex];
+    if (currentPage.isEmpty) return;
+    final page = currentPage.first.page;
+    final db = await DatabaseProvider.database;
+    final dao = KnowledgePointDao(db);
+    final points = await dao.getByPage(widget.book.id, page);
+    if (!mounted) return;
+
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: StudyPalette.parchment,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(18)),
+      ),
+      builder:
+          (context) => Padding(
+            padding: const EdgeInsets.all(20),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Center(
+                  child: Container(
+                    width: 32,
+                    height: 4,
+                    margin: const EdgeInsets.only(bottom: 12),
+                    decoration: BoxDecoration(
+                      color: StudyPalette.linen,
+                      borderRadius: BorderRadius.circular(2),
+                    ),
+                  ),
+                ),
+                Text('第 ${page + 1} 页知识点', style: titleStyle(fontSize: 16)),
+                const SizedBox(height: 12),
+                if (points.isEmpty)
+                  const Text(
+                    '本页暂无知识点',
+                    style: TextStyle(color: StudyPalette.inkSoft),
+                  ),
+                ...points.map(
+                  (p) => ListTile(
+                    dense: true,
+                    leading: Icon(
+                      p.type == KnowledgeType.word
+                          ? Icons.text_fields
+                          : p.type == KnowledgeType.idiom
+                          ? Icons.auto_awesome
+                          : p.type == KnowledgeType.english
+                          ? Icons.translate
+                          : Icons.auto_stories,
+                      size: 20,
+                      color: StudyPalette.ember,
+                    ),
+                    title: Text(p.text),
+                    subtitle: p.definition != null ? Text(p.definition!) : null,
+                  ),
+                ),
+              ],
+            ),
+          ),
+    );
+  }
+
+  // ===== 文本模式：跟读入口 =====
+
+  void _openFollow(String text) {
+    _speechRequest++;
+    unawaited(_tts.stop());
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder:
+            (_) => FollowPage(initialSentence: text, bookId: widget.book.id),
+      ),
     );
   }
 }

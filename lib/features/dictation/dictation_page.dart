@@ -2,6 +2,8 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
+import 'package:wisemuse/services/mastery_service.dart';
+
 import '../../core/debug/app_log.dart';
 import '../../core/models/learning_record.dart';
 import '../../core/storage/database.dart';
@@ -253,6 +255,8 @@ class _DictationPageState extends State<DictationPage> {
           result: correct ? 100.0 : 0.0,
         ),
       );
+      // 闭环断点①：写回生词本掌握度
+      await MasteryService.applyWordResult(q.word, correct: correct);
       AppLog.d(_tag, '听写 ${correct ? "✓" : "✗"}: ${q.word}');
     } catch (e) {
       AppLog.e(_tag, '记录听写结果失败: $e');

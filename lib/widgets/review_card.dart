@@ -2,9 +2,8 @@ import 'package:flutter/material.dart';
 
 import '../core/debug/app_log.dart';
 import '../core/models/word_entry.dart';
-import '../core/storage/database.dart';
-import '../core/storage/word_entry_dao.dart';
 import '../core/theme/app_theme.dart';
+import '../services/mastery_service.dart';
 
 /// [v0.1.0] 复习卡片：逐个展示生词，点「掌握」增加 mastery。
 ///
@@ -37,10 +36,7 @@ class _ReviewCardState extends State<ReviewCard> {
     setState(() => _saving = true);
     try {
       final entry = _words[_index];
-      entry.mastery = (entry.mastery + 1).clamp(0, 5);
-      entry.lastReviewAt = DateTime.now().microsecondsSinceEpoch;
-      final db = await DatabaseProvider.database;
-      await WordEntryDao(db).update(entry);
+      await MasteryService.recordReview(entry);
       AppLog.d(_tag, '复习: ${entry.word} mastery=${entry.mastery}');
       _next();
     } catch (e) {
