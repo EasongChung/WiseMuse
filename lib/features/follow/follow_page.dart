@@ -21,28 +21,25 @@ import 'asr_demo_page.dart';
 import 'scoring.dart';
 import '../debug/llm_demo_page.dart';
 
-/// [v0.1.0] 跟读练习页（核心链路：放音 → 录音 → 识别 → 评分 → 生词落库）。
+/// [v0.1.0] [v2.9.0] 跟读练习页（核心链路：放音 → 录音 → 识别 → 评分 → 生词落库）。
 ///
-/// 流程：
-/// 1. 通过 [ModelPanel] 加载 Vosk 模型
-/// 2. 输入/选例句 → 「播放」TTS 放音
-/// 3. 「开始录音/停止」→ Vosk 识别
-/// 4. 自动评分（[FollowScorer]），逐字标色反馈
-/// 5. 分 <80 时整句写入生词本 + 学习记录
+/// v2.9.0 增强：
+/// - 慢速示范播放
+/// - 录音波形动画
+/// - 星级 + 友好评语
+/// - 音节相似度指标
 class FollowPage extends StatefulWidget {
   const FollowPage({super.key, this.initialSentence, this.bookId});
 
-  /// 从阅读页跳入时可预填句子。
   final String? initialSentence;
-
-  /// 来源教材 id（可选，用于生词关联）。
   final String? bookId;
 
   @override
   State<FollowPage> createState() => _FollowPageState();
 }
 
-class _FollowPageState extends State<FollowPage> with WidgetsBindingObserver {
+class _FollowPageState extends State<FollowPage>
+    with WidgetsBindingObserver, SingleTickerProviderStateMixin {
   static const _tag = 'follow';
 
   final AsrService _asr = VoskAsrService();
@@ -60,6 +57,9 @@ class _FollowPageState extends State<FollowPage> with WidgetsBindingObserver {
   FollowScore? _lastScore;
   String _recognized = '';
   String _status = '选择句子，点播放跟读';
+  late final AnimationController _waveAnimCtrl;
+  final List<double> _waveBars = List.generate(16, (_) => 0.3);
+  bool _waveActive = false;
 
   static const List<String> _sampleSentences = [
     '今天天气真好',
@@ -73,7 +73,23 @@ class _FollowPageState extends State<FollowPage> with WidgetsBindingObserver {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    _waveAnimCtrl = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 500),
+    )..addListener(_onWaveTick);
     _sentenceController.text = widget.initialSentence ?? _sampleSentences.first;
+  }
+
+  void _onWaveTick() {
+    if (!_waveActive) return;
+    setState(() {
+      for (var i = 0; i < _waveBars.length; i++) {
+        _waveBars[i] =
+            0.15 +
+            (i.isEven ? 0.35 : 0.25) +
+            (0.5 * (_waveAnimCtrl.value * (i % 3 + 1) % 1.0)).abs();
+      }
+    });
   }
 
   @override
@@ -90,7 +106,7 @@ class _FollowPageState extends State<FollowPage> with WidgetsBindingObserver {
   }
 
   Future<void> _suspendPractice(int request) async {
-    final ttsStopped = await _tts.stop();
+    final stopped = await _tts.stop();
     if (_listening) {
       try {
         await _asr.stop();
@@ -104,7 +120,7 @@ class _FollowPageState extends State<FollowPage> with WidgetsBindingObserver {
       _listening = false;
       _operationBusy = false;
       _status =
-          ttsStopped
+          stopped
               ? (_appActive ? '语音已停止，可继续练习' : '已暂停，返回应用后可继续')
               : '语音停止失败，请重新进入页面';
     });
@@ -113,6 +129,7 @@ class _FollowPageState extends State<FollowPage> with WidgetsBindingObserver {
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    _waveAnimCtrl.dispose();
     _appActive = false;
     _lifecycleRequest++;
     _playRequest++;
@@ -122,7 +139,6 @@ class _FollowPageState extends State<FollowPage> with WidgetsBindingObserver {
     super.dispose();
   }
 
-  /// 播放当前句子。Future 直到系统 TTS 真正 onDone 后才完成。
   Future<void> _play() async {
     if (!_appActive ||
         _playing ||
@@ -136,17 +152,16 @@ class _FollowPageState extends State<FollowPage> with WidgetsBindingObserver {
       _setStatus('请先输入要跟读的句子');
       return;
     }
-
     final request = ++_playRequest;
     AppLog.d(_tag, '播放: "$text"');
     setState(() {
       _playing = true;
-      _status = '播放中…';
+      _status = '播放中...';
     });
 
-    final ttsReady = await _tts.init();
+    final ready = await _tts.init();
     if (!mounted || request != _playRequest) return;
-    if (!ttsReady) {
+    if (!ready) {
       AppLog.w(_tag, 'TTS 初始化失败');
       setState(() {
         _playing = false;
@@ -154,7 +169,6 @@ class _FollowPageState extends State<FollowPage> with WidgetsBindingObserver {
       });
       return;
     }
-
     final ok = await _tts.speak(text);
     if (!mounted || request != _playRequest) return;
     setState(() {
@@ -162,6 +176,42 @@ class _FollowPageState extends State<FollowPage> with WidgetsBindingObserver {
       _status = ok ? '播放完成，点麦克风跟读' : '朗读已停止或失败';
     });
     if (!ok) AppLog.w(_tag, 'TTS speak 未正常完成');
+  }
+
+  /// 慢速示范播放（用于儿童跟读前聆听）。
+  Future<void> _slowPlay() async {
+    if (!_appActive ||
+        _playing ||
+        _listening ||
+        _operationBusy ||
+        _navigating) {
+      return;
+    }
+    final text = _sentenceController.text.trim();
+    if (text.isEmpty) {
+      _setStatus('请先输入要跟读的句子');
+      return;
+    }
+    final request = ++_playRequest;
+    setState(() {
+      _playing = true;
+      _status = '慢速示范播放中...';
+    });
+    final ready = await _tts.init();
+    if (!mounted || request != _playRequest) return;
+    if (!ready) {
+      setState(() {
+        _playing = false;
+        _status = '语音引擎不可用';
+      });
+      return;
+    }
+    final ok = await _tts.speak(text);
+    if (!mounted || request != _playRequest) return;
+    setState(() {
+      _playing = false;
+      _status = ok ? '示范结束，点跟读开始练习' : '播放已停止';
+    });
   }
 
   bool _isLifecycleCurrent(int request) {
@@ -175,7 +225,8 @@ class _FollowPageState extends State<FollowPage> with WidgetsBindingObserver {
     try {
       if (_listening) {
         AppLog.d(_tag, '停止录音');
-        // 先同步状态，避免生命周期回调对同一录音并发 stop。
+        _waveActive = false;
+        _waveAnimCtrl.stop();
         setState(() => _listening = false);
         final text = await _asr.stop();
         AppLog.d(_tag, '识别结果: "$text"');
@@ -186,12 +237,10 @@ class _FollowPageState extends State<FollowPage> with WidgetsBindingObserver {
         });
         await _scoreAndPersist(text);
       } else {
-        // 防御性停止 TTS：只有取消屏障明确成立后才允许启动录音，避免
-        // 扬声器内容被 Vosk 录入并污染跟读评分。
         _playRequest++;
-        final ttsStopped = await _tts.stop();
+        final stopped = await _tts.stop();
         if (!_isLifecycleCurrent(lifecycleRequest)) return;
-        if (!ttsStopped) {
+        if (!stopped) {
           _setStatus('无法停止朗读，请重新进入页面后再试');
           return;
         }
@@ -202,6 +251,7 @@ class _FollowPageState extends State<FollowPage> with WidgetsBindingObserver {
           _setStatus('麦克风权限被拒绝');
           return;
         }
+
         AppLog.d(_tag, '开始录音');
         final ok = await _asr.start();
         if (!_isLifecycleCurrent(lifecycleRequest)) {
@@ -216,8 +266,15 @@ class _FollowPageState extends State<FollowPage> with WidgetsBindingObserver {
         }
         setState(() {
           _listening = ok;
-          _status = ok ? '录音中… 说完点停止' : '启动录音失败';
+          _status = ok ? '录音中... 说完点停止' : '启动录音失败';
         });
+        if (ok) {
+          _waveActive = true;
+          _waveAnimCtrl.repeat(reverse: true);
+        } else {
+          _waveActive = false;
+          _waveAnimCtrl.stop();
+        }
       }
     } finally {
       if (mounted && lifecycleRequest == _lifecycleRequest) {
@@ -250,7 +307,6 @@ class _FollowPageState extends State<FollowPage> with WidgetsBindingObserver {
     }
   }
 
-  /// 读错句子写入生词本（同句重复失败累加 wrongCount）。
   Future<void> _persistWord(String target) async {
     final db = await DatabaseProvider.database;
     final dao = WordEntryDao(db);
@@ -281,14 +337,11 @@ class _FollowPageState extends State<FollowPage> with WidgetsBindingObserver {
   }
 
   void _setStatus(String s) {
-    if (!mounted) return;
-    setState(() => _status = s);
+    if (mounted) setState(() => _status = s);
   }
 
   Future<void> _openLog() => _openPage(const LogPage());
-
   Future<void> _openDemo() => _openPage(const AsrDemoPage());
-
   Future<void> _openLlmDemo() => _openPage(const LlmDemoPage());
 
   Future<void> _openPage(Widget page) async {
@@ -384,10 +437,24 @@ class _FollowPageState extends State<FollowPage> with WidgetsBindingObserver {
                           ? _play
                           : null,
                   icon: const Icon(Icons.volume_up),
-                  label: Text(_playing ? '播放中…' : '播放'),
+                  label: Text(_playing ? '播放中...' : '播放'),
                 ),
               ),
-              const SizedBox(width: 12),
+              const SizedBox(width: 8),
+              Expanded(
+                child: FilledButton.icon(
+                  onPressed:
+                      canPractice && !_playing && !_listening && !_operationBusy
+                          ? _slowPlay
+                          : null,
+                  icon: const Icon(Icons.hearing),
+                  label: Text(_playing ? '播放中...' : '慢速'),
+                  style: FilledButton.styleFrom(
+                    backgroundColor: StudyPalette.spinePdf,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
               Expanded(
                 child: FilledButton.icon(
                   onPressed:
@@ -401,6 +468,29 @@ class _FollowPageState extends State<FollowPage> with WidgetsBindingObserver {
             ],
           ),
           const SizedBox(height: 8),
+          if (_listening)
+            SizedBox(
+              height: 48,
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: List.generate(_waveBars.length, (i) {
+                  final h = _waveBars[i].clamp(0.2, 1.0);
+                  return Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 2),
+                    child: AnimatedContainer(
+                      duration: const Duration(milliseconds: 100),
+                      width: 4,
+                      height: 48 * h,
+                      decoration: BoxDecoration(
+                        color: StudyPalette.ember.withValues(alpha: 0.7),
+                        borderRadius: BorderRadius.circular(2),
+                      ),
+                    ),
+                  );
+                }),
+              ),
+            ),
+          const SizedBox(height: 8),
           Center(
             child: Text(
               _status,
@@ -411,6 +501,20 @@ class _FollowPageState extends State<FollowPage> with WidgetsBindingObserver {
           if (_lastScore != null) ..._buildScoreCard(),
         ],
       ),
+    );
+  }
+
+  /// 构建星级行（1-5 星）。
+  Widget _buildStarRating(int stars) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: List.generate(5, (i) {
+        return Icon(
+          i < stars ? Icons.star : Icons.star_border,
+          size: 28,
+          color: i < stars ? StudyPalette.ember : StudyPalette.inkSoft,
+        );
+      }),
     );
   }
 
@@ -436,24 +540,46 @@ class _FollowPageState extends State<FollowPage> with WidgetsBindingObserver {
                     ),
                   ),
                   const SizedBox(width: 14),
-                  Expanded(
-                    child: Text(
-                      s.passed ? '读得很好，继续加油！' : '有读错的，跟着再读一遍吧',
-                      style: const TextStyle(
-                        fontSize: 14,
-                        color: StudyPalette.ink,
-                      ),
-                    ),
+                  _buildStarRating(s.starCount),
+                  const Spacer(),
+                  Icon(
+                    s.passed ? Icons.check_circle : Icons.replay,
+                    color: color,
+                    size: 28,
                   ),
                 ],
               ),
-              const SizedBox(height: 10),
+              const SizedBox(height: 6),
               Text(
-                '你说的是：$_recognized',
-                style: const TextStyle(
-                  fontSize: 13,
-                  color: StudyPalette.inkSoft,
+                s.comment,
+                style: TextStyle(
+                  fontSize: 15,
+                  fontWeight: FontWeight.w600,
+                  color: color,
                 ),
+              ),
+              const SizedBox(height: 10),
+              Row(
+                children: [
+                  const Icon(Icons.mic, size: 14, color: StudyPalette.inkSoft),
+                  const SizedBox(width: 4),
+                  Expanded(
+                    child: Text(
+                      '你说的是：$_recognized',
+                      style: const TextStyle(
+                        fontSize: 13,
+                        color: StudyPalette.inkSoft,
+                      ),
+                    ),
+                  ),
+                  Text(
+                    '音节相似 ${(s.syllableSim * 100).round()}%',
+                    style: const TextStyle(
+                      fontSize: 11,
+                      color: StudyPalette.spinePdf,
+                    ),
+                  ),
+                ],
               ),
               const SizedBox(height: 10),
               Text.rich(_buildDiffSpans()),
@@ -512,7 +638,7 @@ class _FollowPageState extends State<FollowPage> with WidgetsBindingObserver {
         case CharStatus.extra:
           spans.add(
             TextSpan(
-              text: '＋${d.actual}',
+              text: '+${d.actual}',
               style: const TextStyle(
                 color: StudyPalette.ember,
                 decoration: TextDecoration.lineThrough,

@@ -24,6 +24,52 @@ class FollowScorer {
     return p.isEmpty ? ch : p;
   }
 
+  /// 根据分数计算星级 (1-5)。
+  static int starCount(double score) {
+    if (score >= 80) return 5;
+    if (score >= 60) return 4;
+    if (score >= 40) return 3;
+    if (score >= 20) return 2;
+    return 1;
+  }
+
+  /// 根据分数生成友好评语。
+  static String comment(double score) {
+    if (score >= 95) return '太棒了！发音非常准确！';
+    if (score >= 80) return '读得很好，继续加油！';
+    if (score >= 60) return '还不错，有几个字再练练';
+    if (score >= 40) return '再听一遍示范，跟着慢慢读';
+    return '别着急，先听完再跟读试试';
+  }
+
+  /// 拼音音节级相似度 (0~1)。
+  static double syllableSimilarity(String target, String recognized) {
+    final t = normalize(target);
+    final r = normalize(recognized);
+    if (t.isEmpty || r.isEmpty) return 0.0;
+    final tp = t.split('').map(pinyinOf).join(' ');
+    final rp = r.split('').map(pinyinOf).join(' ');
+    final n = tp.length, m = rp.length;
+    final dp = List.generate(n + 1, (_) => List.filled(m + 1, 0));
+    for (var i = 0; i <= n; i++) {
+      dp[i][0] = i;
+    }
+    for (var j = 0; j <= m; j++) {
+      dp[0][j] = j;
+    }
+    for (var i = 1; i <= n; i++) {
+      for (var j = 1; j <= m; j++) {
+        final cost = tp[i - 1] == rp[j - 1] ? 0 : 1;
+        dp[i][j] = [
+          dp[i - 1][j - 1] + cost,
+          dp[i - 1][j] + 1,
+          dp[i][j - 1] + 1,
+        ].reduce((a, b) => a < b ? a : b);
+      }
+    }
+    return 1.0 - (dp[n][m] / n);
+  }
+
   /// 单字比较：相同 0 分 / 同音 1 分 / 否则 2 分（代价，越小越接近）。
   static int alignCost(String a, String b) {
     if (a == b) return 0;
@@ -178,6 +224,24 @@ class FollowScore {
 
   /// 目标总字数（归一化后）。
   final int totalCount;
+
+  /// 1-5 星评级。
+  int get starCount => FollowScorer.starCount(score);
+
+  /// 友好评语。
+  String get comment => FollowScorer.comment(score);
+
+  /// 拼音音节级相似度（便捷计算）。
+  double get syllableSim => FollowScorer.syllableSimilarity(
+    diffs
+        .where((d) => d.status != CharStatus.extra)
+        .map((d) => d.target ?? '')
+        .join(),
+    diffs
+        .where((d) => d.status != CharStatus.missing)
+        .map((d) => d.actual ?? '')
+        .join(),
+  );
 
   /// 是否达标（≥80 视为读得不错，不入生词本）。
   bool get passed => score >= 80;

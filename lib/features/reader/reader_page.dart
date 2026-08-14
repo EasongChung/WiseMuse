@@ -102,6 +102,10 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
   // [v2.9.0] 文本选区——选中文字后弹出查词栏
   String? _selectedText;
 
+  // [v2.9.0] 当前朗读/选中句索引（用于底栏操作条）
+  int? _activeSentenceIndex;
+  String? _activeSentenceText;
+
   // [v2.9.0] 知识点按页查询 LRU 缓存（max 20 页），翻页不重复查 DB。
   static const int _kKnowledgeCacheMax = 20;
   final LinkedHashMap<String, List<KnowledgePoint>> _knowledgePageCache =
@@ -722,6 +726,23 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
               ),
               onPressed: _switchingMode ? null : _switchViewMode,
             ),
+          // [v2.9.0] 文本模式：连读本页 + 本页知识点（原文模式在底部面板）
+          if (!_useOriginal)
+            IconButton(
+              tooltip: _autoPlaying ? '停止连读' : '连读本页',
+              icon: Icon(
+                _autoPlaying
+                    ? Icons.stop_circle_outlined
+                    : Icons.play_circle_outline,
+              ),
+              onPressed: _autoPlaying ? _stopAutoPlay : _startAutoPlay,
+            ),
+          if (!_useOriginal)
+            IconButton(
+              tooltip: '本页知识点',
+              icon: const Icon(Icons.lightbulb_outline),
+              onPressed: _showPageKnowledge,
+            ),
         ],
       ),
       body: IgnorePointer(ignoring: _switchingMode, child: _buildBody()),
@@ -900,7 +921,7 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
   }
 
   Widget _buildTextView() {
-    // 文本模式：按页分组 + 页导航 + 连读 + 跟读入口
+    // 文本模式：按页分组 + 左右滑翻页 + 句底操作条
     if (_sentences.isEmpty) {
       return const Center(child: Text('暂无句子内容'));
     }
@@ -911,24 +932,37 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
     final pageSentences = _textPages[_textPageIndex];
     final totalPages = _textPages.length;
 
+    Widget pageContent = Column(
+      children: [
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+          child: Row(children: [const Spacer(), _buildPageBar(totalPages)]),
+        ),
+        Expanded(child: _buildSwipeableSentenceList(pageSentences)),
+      ],
+    );
+
+    // [v2.9.0] 多页 → 左右滑翻页，translucent 不拦截子手势
+    if (_isMultiPage) {
+      pageContent = GestureDetector(
+        behavior: HitTestBehavior.translucent,
+        onHorizontalDragEnd: _onTextSwipePage,
+        child: pageContent,
+      );
+    }
+
     return Stack(
       children: [
-        Column(
-          children: [
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-              child: Row(children: [const Spacer(), _buildPageBar(totalPages)]),
-            ),
-            Expanded(child: _buildSwipeableSentenceList(pageSentences)),
-          ],
-        ),
-        // [v2.9.0] 浮底查词栏
+        pageContent,
+        // 浮底查词栏或句操作栏（二者互斥）
         if (_selectedText != null && _selectedText!.isNotEmpty)
+          Positioned(left: 8, right: 8, bottom: 8, child: _buildWordLookupBar())
+        else if (_activeSentenceText != null && _activeSentenceText!.isNotEmpty)
           Positioned(
             left: 8,
             right: 8,
             bottom: 8,
-            child: _buildWordLookupBar(),
+            child: _buildSentenceActionsBar(),
           ),
       ],
     );
@@ -963,7 +997,11 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
             child: InkWell(
               borderRadius: BorderRadius.circular(12),
               onTap: () {
-                setState(() => _textHighlightIndex = index);
+                setState(() {
+                  _textHighlightIndex = index;
+                  _activeSentenceIndex = index;
+                  _activeSentenceText = s.text;
+                });
                 _speak(s.text);
               },
               child: Padding(
@@ -1003,47 +1041,6 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
                         ),
                       ),
                     ),
-                    // 跟读入口
-                    IconButton(
-                      icon: const Icon(
-                        Icons.record_voice_over_outlined,
-                        size: 18,
-                        color: StudyPalette.ember,
-                      ),
-                      tooltip: '跟读此句',
-                      onPressed: () => _openFollow(s.text),
-                    ),
-                    // 翻译
-                    IconButton(
-                      icon: const Icon(
-                        Icons.translate,
-                        size: 18,
-                        color: StudyPalette.inkSoft,
-                      ),
-                      tooltip: '翻译',
-                      onPressed: () => _translate(s.text),
-                    ),
-                    // 标记生词
-                    IconButton(
-                      icon: const Icon(
-                        Icons.bookmark_add_outlined,
-                        size: 18,
-                        color: StudyPalette.inkSoft,
-                      ),
-                      tooltip: '标记生词',
-                      onPressed: () => _markWord(s.text),
-                    ),
-                    // AI 讲解
-                    IconButton(
-                      icon: const Icon(
-                        Icons.auto_awesome,
-                        size: 18,
-                        color: StudyPalette.moss,
-                      ),
-                      tooltip: 'AI 讲解',
-                      onPressed:
-                          () => KnowledgeExplainSheet.show(context, s.text),
-                    ),
                   ],
                 ),
               ),
@@ -1052,15 +1049,10 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
         },
       ),
     );
-    if (!_isMultiPage) return content;
-    return GestureDetector(
-      behavior: HitTestBehavior.opaque,
-      onHorizontalDragEnd: _onTextSwipePage,
-      child: content,
-    );
+    return content;
   }
 
-  /// 页导航控件（上一页/页码/下一页/连读/知识点）。
+  /// 页导航控件（上一页/页码/下一页）。
   Widget _buildPageBar(int totalPages) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
@@ -1092,26 +1084,6 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
                     ? () => _syncPage(_textPageIndex + 1)
                     : null,
             tooltip: '下一页',
-          ),
-          const SizedBox(
-            height: 20,
-            child: VerticalDivider(width: 1, color: StudyPalette.linen),
-          ),
-          IconButton(
-            icon: Icon(
-              _autoPlaying
-                  ? Icons.stop_circle_outlined
-                  : Icons.play_circle_outline,
-              size: 20,
-              color: _autoPlaying ? StudyPalette.ember : null,
-            ),
-            onPressed: _autoPlaying ? _stopAutoPlay : _startAutoPlay,
-            tooltip: _autoPlaying ? '停止连读' : '连读本页',
-          ),
-          IconButton(
-            icon: const Icon(Icons.lightbulb_outline, size: 20),
-            onPressed: () => _showPageKnowledge(),
-            tooltip: '本页知识点',
           ),
         ],
       ),
@@ -1335,6 +1307,13 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
                     const Divider(height: 1),
                     // 当前页句子列表
                     Expanded(child: _buildSheetSentences()),
+                    // [v2.9.0] 浮底句操作栏（与文本模式一致）
+                    if (_activeSentenceText != null &&
+                        _activeSentenceText!.isNotEmpty)
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(8, 4, 8, 8),
+                        child: _buildSentenceActionsBar(),
+                      ),
                   ],
                 ),
               );
@@ -1439,23 +1418,11 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
               s.text,
               style: const TextStyle(fontSize: 15, color: StudyPalette.ink),
             ),
-            trailing: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                _compactIcon(
-                  Icons.record_voice_over_outlined,
-                  '跟读',
-                  () => _openFollow(s.text),
-                ),
-                _compactIcon(
-                  Icons.bookmark_add_outlined,
-                  '标记生词',
-                  () => _markWord(s.text),
-                ),
-              ],
-            ),
             onTap: () {
               _textHighlightIndex = index;
+              _activeSentenceIndex = index;
+              _activeSentenceText = s.text;
+              _sheetRebuild?.call();
               _speak(s.text);
             },
           );
@@ -1592,6 +1559,96 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
               ),
               child: const Text('取消', style: TextStyle(fontSize: 13)),
               onPressed: () => setState(() => _selectedText = null),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// [v2.9.0] 浮底句操作栏：朗读当前句 + 跟读/翻译/标记/AI 讲解。
+  Widget _buildSentenceActionsBar() {
+    final text = _activeSentenceText ?? '';
+    return Material(
+      elevation: 4,
+      borderRadius: BorderRadius.circular(14),
+      color: StudyPalette.parchment,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
+        child: Row(
+          children: [
+            // 朗读当前句
+            IconButton(
+              icon: const Icon(Icons.play_arrow, size: 20),
+              tooltip: '朗读',
+              color: StudyPalette.ember,
+              onPressed: () {
+                if (_activeSentenceIndex != null) {
+                  setState(() => _textHighlightIndex = _activeSentenceIndex);
+                }
+                _speak(text);
+              },
+            ),
+            // 停止朗读
+            IconButton(
+              icon: const Icon(Icons.stop, size: 20),
+              tooltip: '停止',
+              color: StudyPalette.inkSoft,
+              onPressed: () {
+                _speechRequest++;
+                unawaited(_tts.stop());
+              },
+            ),
+            // 跟读
+            IconButton(
+              icon: const Icon(Icons.record_voice_over_outlined, size: 20),
+              tooltip: '跟读此句',
+              color: StudyPalette.ember,
+              onPressed: () {
+                setState(() => _activeSentenceText = null);
+                _openFollow(text);
+              },
+            ),
+            // 翻译
+            IconButton(
+              icon: const Icon(Icons.translate, size: 20),
+              tooltip: '翻译',
+              color: StudyPalette.inkSoft,
+              onPressed: () {
+                setState(() => _activeSentenceText = null);
+                _translate(text);
+              },
+            ),
+            // 标记生词
+            IconButton(
+              icon: const Icon(Icons.bookmark_add_outlined, size: 20),
+              tooltip: '标记生词',
+              color: StudyPalette.inkSoft,
+              onPressed: () {
+                _markWord(text);
+                setState(() => _activeSentenceText = null);
+              },
+            ),
+            // AI 讲解
+            IconButton(
+              icon: const Icon(Icons.auto_awesome, size: 20),
+              tooltip: 'AI 讲解',
+              color: StudyPalette.moss,
+              onPressed: () {
+                setState(() => _activeSentenceText = null);
+                KnowledgeExplainSheet.show(context, text);
+              },
+            ),
+            const Spacer(),
+            // 关闭
+            IconButton(
+              icon: const Icon(Icons.close, size: 18),
+              tooltip: '关闭',
+              color: StudyPalette.inkSoft,
+              onPressed: () {
+                setState(() => _activeSentenceText = null);
+                _sheetRebuild?.call();
+              },
             ),
           ],
         ),

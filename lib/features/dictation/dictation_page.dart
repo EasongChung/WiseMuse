@@ -14,6 +14,7 @@ import '../../services/mastery_service.dart';
 import '../../services/native_tts_service.dart';
 import '../../services/tts_service.dart';
 import '../follow/follow_page.dart';
+import 'sentence_dictation_page.dart';
 
 /// [v0.1.0] 听写页面：中文听音选字 / 英文拼写 / 语音跟读 三种模式。
 ///
@@ -86,11 +87,29 @@ class _DictationPageState extends State<DictationPage> {
   }
 
   void _start(List<String> words) async {
-    final mode = await _showModeDialog();
-    if (mode == null || !mounted) {
+    final modeStr = await _showModeDialog();
+    if (modeStr == null || !mounted) {
       if (mounted) Navigator.of(context).pop();
       return;
     }
+
+    // 句子默写模式
+    if (modeStr == 'sentence') {
+      if (mounted) {
+        Navigator.of(context).pushReplacement(
+          MaterialPageRoute<void>(
+            builder:
+                (_) => SentenceDictationPage(
+                  sentences: words.where((w) => w.length >= 4).toList(),
+                  bookId: null,
+                ),
+          ),
+        );
+      }
+      return;
+    }
+
+    final mode = DictationMode.values.firstWhere((m) => m.name == modeStr);
 
     // 语音跟读跳转到 FollowPage
     if (mode == DictationMode.voice) {
@@ -127,40 +146,55 @@ class _DictationPageState extends State<DictationPage> {
     _playCurrent();
   }
 
-  Future<DictationMode?> _showModeDialog() async {
-    return showDialog<DictationMode>(
+  Future<String?> _showModeDialog() async {
+    return showDialog<String>(
       context: context,
       builder:
           (context) => AlertDialog(
             title: const Text('选择听写模式'),
             content: Column(
               mainAxisSize: MainAxisSize.min,
-              children:
-                  DictationMode.values.map((mode) {
-                    return Padding(
-                      padding: const EdgeInsets.only(bottom: 8),
-                      child: ListTile(
-                        title: Text(
-                          mode.label,
-                          style: const TextStyle(fontWeight: FontWeight.w600),
-                        ),
-                        subtitle: Text(_modeDesc(mode)),
-                        leading: Icon(
-                          mode == DictationMode.charSelect
-                              ? Icons.text_fields
-                              : mode == DictationMode.spelling
-                              ? Icons.keyboard
-                              : Icons.record_voice_over,
-                          color: StudyPalette.ember,
-                        ),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(12),
-                          side: const BorderSide(color: StudyPalette.linen),
-                        ),
-                        onTap: () => Navigator.of(context).pop(mode),
+              children: [
+                ...DictationMode.values.map((mode) {
+                  return Padding(
+                    padding: const EdgeInsets.only(bottom: 8),
+                    child: ListTile(
+                      title: Text(
+                        mode.label,
+                        style: const TextStyle(fontWeight: FontWeight.w600),
                       ),
-                    );
-                  }).toList(),
+                      subtitle: Text(_modeDesc(mode)),
+                      leading: Icon(
+                        mode == DictationMode.charSelect
+                            ? Icons.text_fields
+                            : mode == DictationMode.spelling
+                            ? Icons.keyboard
+                            : Icons.record_voice_over,
+                        color: StudyPalette.ember,
+                      ),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                        side: const BorderSide(color: StudyPalette.linen),
+                      ),
+                      onTap: () => Navigator.of(context).pop(mode.name),
+                    ),
+                  );
+                }),
+                const Divider(height: 1),
+                ListTile(
+                  title: const Text(
+                    '句子默写',
+                    style: TextStyle(fontWeight: FontWeight.w600),
+                  ),
+                  subtitle: const Text('拼字积木 / 语音默写，逐句评分'),
+                  leading: const Icon(Icons.article, color: StudyPalette.ember),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.all(Radius.circular(12)),
+                    side: BorderSide(color: StudyPalette.linen),
+                  ),
+                  onTap: () => Navigator.of(context).pop('sentence'),
+                ),
+              ],
             ),
           ),
     );

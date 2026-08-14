@@ -79,14 +79,14 @@ class CharSelectGrid extends StatelessWidget {
                 bg = StudyPalette.ember.withValues(alpha: 0.15);
                 fg = StudyPalette.ember;
               } else {
-                bg = Colors.white.withValues(alpha: 0.6);
+                bg = StudyPalette.surfaceWithAlpha(context, alpha: 0.6);
                 fg = StudyPalette.inkSoft;
               }
             } else if (isSelected) {
               bg = StudyPalette.emberSoft;
               fg = StudyPalette.ember;
             } else {
-              bg = Colors.white.withValues(alpha: 0.6);
+              bg = StudyPalette.surfaceWithAlpha(context, alpha: 0.6);
               fg = StudyPalette.ink;
             }
 

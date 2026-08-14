@@ -7,6 +7,7 @@ import '../../core/storage/word_entry_dao.dart';
 import '../../core/theme/app_theme.dart';
 import '../../widgets/review_card.dart';
 import '../stats/stats_page.dart';
+import '../../services/spaced_repetition_service.dart';
 
 /// [v0.1.0] 生词本页面：查看、复习、管理已标记的词语。
 ///
@@ -23,6 +24,7 @@ class _WordBookPageState extends State<WordBookPage> {
   static const _tag = 'wordbook';
 
   List<WordEntry> _words = const [];
+  int _dueCount = 0;
   bool _loading = true;
 
   @override
@@ -35,9 +37,11 @@ class _WordBookPageState extends State<WordBookPage> {
     try {
       final db = await DatabaseProvider.database;
       final list = await WordEntryDao(db).getAll();
+      final due = await SpacedRepetitionService.getDueWords();
       if (!mounted) return;
       setState(() {
         _words = list;
+        _dueCount = due.length;
         _loading = false;
       });
     } catch (e, s) {
@@ -124,7 +128,9 @@ class _WordBookPageState extends State<WordBookPage> {
               ? const Center(child: CircularProgressIndicator())
               : _words.isEmpty
               ? _buildEmpty()
-              : _buildList(),
+              : Column(
+                children: [_buildDueCard(), Expanded(child: _buildList())],
+              ),
     );
   }
 
@@ -147,6 +153,54 @@ class _WordBookPageState extends State<WordBookPage> {
             textAlign: TextAlign.center,
           ),
         ],
+      ),
+    );
+  }
+
+  Widget _buildDueCard() {
+    if (_dueCount <= 0) return const SizedBox.shrink();
+    return Card(
+      margin: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+      color: StudyPalette.ember.withValues(alpha: 0.1),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(12),
+        onTap: _openReview,
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Row(
+            children: [
+              const Icon(Icons.autorenew, color: StudyPalette.ember, size: 28),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      '今日待复习',
+                      style: TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w600,
+                        color: StudyPalette.ember,
+                      ),
+                    ),
+                    Text(
+                      '$_dueCount 个词到期，点击开始复习',
+                      style: const TextStyle(
+                        fontSize: 13,
+                        color: StudyPalette.inkSoft,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const Icon(
+                Icons.arrow_forward_ios,
+                size: 16,
+                color: StudyPalette.ember,
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -181,7 +235,7 @@ class _WordCard extends StatelessWidget {
 
     return Card(
       margin: const EdgeInsets.only(bottom: 8),
-      color: Colors.white.withValues(alpha: 0.8),
+      color: StudyPalette.surfaceWithAlpha(context, alpha: 0.8),
       child: InkWell(
         borderRadius: BorderRadius.circular(12),
         onLongPress: onDelete,
