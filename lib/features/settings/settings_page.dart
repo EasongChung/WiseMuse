@@ -38,6 +38,7 @@ class _SettingsPageState extends State<SettingsPage> {
   double _ttsRate = 0.9;
   int _ttsRepeatCount = 1;
   int _ttsPauseMs = 300;
+  String _ttsVoice = '';
 
   // AI 离线优先
   bool _preferOffline = false;
@@ -91,6 +92,7 @@ class _SettingsPageState extends State<SettingsPage> {
     _ttsRate = await _settings.getTtsRate();
     _ttsRepeatCount = await _settings.getTtsRepeatCount();
     _ttsPauseMs = await _settings.getTtsPauseMs();
+    _ttsVoice = await _settings.getTtsVoice();
     _preferOffline = await _settings.getPreferOffline();
     // 检查常用语言模型下载状态
     for (final (code, _) in _langs) {
@@ -506,6 +508,62 @@ class _SettingsPageState extends State<SettingsPage> {
               activeColor: StudyPalette.ember,
               onChanged: (v) => setState(() => _ttsPauseMs = v.round()),
               onChangeEnd: (v) => _settings.setTtsPauseMs(v.round()),
+            ),
+            const Divider(height: 8),
+
+            // [v2.8.0] 音色选择
+            Row(
+              children: [
+                const Icon(
+                  Icons.record_voice_over,
+                  size: 20,
+                  color: StudyPalette.ink,
+                ),
+                const SizedBox(width: 8),
+                Text('音色', style: titleStyle(fontSize: 14)),
+                const Spacer(),
+                DropdownButton<String>(
+                  value: _ttsVoice.isEmpty ? 'default' : _ttsVoice,
+                  underline: const SizedBox(),
+                  items: const [
+                    DropdownMenuItem(value: 'default', child: Text('系统默认')),
+                    DropdownMenuItem(value: 'zh-CN', child: Text('中文女声')),
+                    DropdownMenuItem(
+                      value: 'zh-CN-x-xiaoxuan',
+                      child: Text('晓萱'),
+                    ),
+                    DropdownMenuItem(
+                      value: 'zh-CN-x-xiaochen',
+                      child: Text('晓辰'),
+                    ),
+                    DropdownMenuItem(
+                      value: 'zh-CN-x-xiaohan',
+                      child: Text('晓涵'),
+                    ),
+                    DropdownMenuItem(
+                      value: 'zh-CN-x-xiaomo',
+                      child: Text('晓墨'),
+                    ),
+                    DropdownMenuItem(
+                      value: 'zh-CN-x-xiaorui',
+                      child: Text('晓睿'),
+                    ),
+                    DropdownMenuItem(
+                      value: 'zh-CN-x-xiaoyou',
+                      child: Text('晓悠'),
+                    ),
+                    DropdownMenuItem(value: 'zh-HK', child: Text('粤语女声')),
+                    DropdownMenuItem(value: 'en-US', child: Text('英语美音')),
+                    DropdownMenuItem(value: 'en-GB', child: Text('英语英音')),
+                  ],
+                  onChanged: (v) {
+                    if (v == null) return;
+                    final voice = v == 'default' ? '' : v;
+                    setState(() => _ttsVoice = voice);
+                    _settings.setTtsVoice(voice);
+                  },
+                ),
+              ],
             ),
           ],
         ),

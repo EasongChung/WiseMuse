@@ -92,6 +92,7 @@ class TtsBridge : FlutterPlugin, MethodChannel.MethodCallHandler {
             "init" -> handleInit(result)
             "speak" -> handleSpeak(call, result)
             "stop" -> handleStop(result)
+            "setVoice" -> handleSetVoice(call, result)
             else -> result.notImplemented()
         }
     }
@@ -477,6 +478,36 @@ class TtsBridge : FlutterPlugin, MethodChannel.MethodCallHandler {
     }
 
     // ===== 工具 =====
+
+    /** 设置 TTS 音色（按名称匹配，空串=默认）。 */
+    private fun handleSetVoice(call: MethodCall, result: MethodChannel.Result) {
+        val name = call.argument<String>("name") ?: ""
+        val engine = tts ?: run {
+            result.success(false)
+            return
+        }
+        if (name.isEmpty()) {
+            // 空串=系统默认
+            setupChinese(engine)
+            Log.i(TAG, "音色已重置为系统默认")
+            result.success(true)
+            return
+        }
+        try {
+            val matched = engine.voices?.firstOrNull { it.name == name }
+            if (matched != null) {
+                engine.voice = matched
+                Log.i(TAG, "音色已设为: ${matched.name} / ${matched.locale}")
+                result.success(true)
+            } else {
+                Log.w(TAG, "未匹配到音色: $name，保留当前")
+                result.success(false)
+            }
+        } catch (t: Throwable) {
+            Log.e(TAG, "setVoice 异常", t)
+            result.success(false)
+        }
+    }
 
     /** 尽力将语言设为中文；失败不阻断引擎使用。 */
     private fun setupChinese(engine: TextToSpeech) {

@@ -60,4 +60,14 @@ class NativeTtsService implements TtsService {
       return false;
     }
   }
+
+  /// [v2.8.0] 设置音色（名称按系统 TTS 服务返回。空串=系统默认）。
+  @override
+  Future<void> setVoice(String name) async {
+    try {
+      await _channel.invokeMethod<void>('setVoice', {'name': name});
+    } catch (e) {
+      AppLog.e(_tag, 'setVoice 失败: $e');
+    }
+  }
 }

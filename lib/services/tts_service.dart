@@ -15,6 +15,9 @@ abstract class TtsService {
   /// 停止当前朗读，并使尚未完成的 [speak] 返回 false。
   ///
   /// 返回 true 表示取消屏障已经成立；返回 false 时，调用方不得继续执行
-  /// 依赖“已静音”的操作（例如启动跟读录音）。
+  /// 依赖”已静音”的操作（例如启动跟读录音）。
   Future<bool> stop();
+
+  /// [v2.8.0] 设置 TTS 音色（名称按系统 TTS 返回。空串=系统默认）。
+  Future<void> setVoice(String name);
 }

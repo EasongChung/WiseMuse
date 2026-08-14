@@ -17,6 +17,7 @@ class SettingsService {
   static const kTtsRate = 'tts_rate';
   static const kTtsRepeatCount = 'tts_repeat_count';
   static const kTtsPauseMs = 'tts_pause_ms';
+  static const kTtsVoice = 'tts_voice';
   static const kPreferOffline = 'prefer_offline';
 
   // ---- 翻译引擎 ----
@@ -73,6 +74,12 @@ class SettingsService {
       (await SharedPreferences.getInstance()).getInt(kTtsPauseMs) ?? 300;
   Future<void> setTtsPauseMs(int v) async =>
       (await SharedPreferences.getInstance()).setInt(kTtsPauseMs, v);
+
+  /// [v2.8.0] TTS 音色名称（空串=系统默认）。
+  Future<String> getTtsVoice() async =>
+      (await SharedPreferences.getInstance()).getString(kTtsVoice) ?? '';
+  Future<void> setTtsVoice(String v) async =>
+      (await SharedPreferences.getInstance()).setString(kTtsVoice, v);
 
   // ---- 离线开关 ----
   /// 是否优先离线（AI 助教/识别），默认 false（在线优先）。
