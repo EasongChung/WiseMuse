@@ -81,6 +81,13 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
   int _textPageIndex = 0;
   List<List<Sentence>> _textPages = const [];
 
+  // [v2.8.0] 底部文本面板独立刷新回调 & 可见性
+  int _pdfCurrentPage = 0;
+
+  // [v2.8.0] 底部文本面板独立刷新回调
+  VoidCallback? _sheetRebuild;
+  final ScrollController _sheetScrollController = ScrollController();
+
   // 自动连读状态
   bool _autoPlaying = false;
 
@@ -115,6 +122,7 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
     unawaited(_tts.stop());
     _pdfController = null;
     _imgTransformCtrl.dispose();
+    _sheetScrollController.dispose();
     super.dispose();
   }
 
@@ -163,6 +171,67 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
         grouped.entries.toList()..sort((a, b) => a.key.compareTo(b.key));
     _textPages = sorted.map((e) => e.value).toList();
     _textPageIndex = _textPageIndex.clamp(0, _textPages.length - 1);
+  }
+
+  // ===== [v2.8.0] 原文/文本分页同步 =====
+
+  /// 当前页文本（多页文档取 _pdfCurrentPage 对应页）。
+  String get _displayText {
+    final pages = _pageTexts;
+    if (pages.isEmpty) return _sentences.map((s) => s.text).join('\n');
+    final i = _pdfCurrentPage.clamp(0, pages.length - 1);
+    return pages[i];
+  }
+
+  /// 当前文档的分页文本列表（多页模式用）。
+  List<String> get _pageTexts {
+    if (_textPages.isEmpty) return [];
+    return _textPages
+        .map((page) => page.map((s) => s.text).join('\n'))
+        .toList();
+  }
+
+  /// 是否多页文档。
+  bool get _isMultiPage => _pageTexts.length > 1;
+
+  /// [v2.8.0] 统一翻页同步：更新共享页码、清除旧状态。
+  /// 所有翻页操作（PDF onPageChanged / 文本翻页 / 目录跳页）最终调用此函数。
+  void _syncPage(int page) {
+    final total = _pageTexts.length;
+    if (total <= 1) return;
+    final next = page.clamp(0, total - 1);
+    if (next == _pdfCurrentPage) return;
+    _speechRequest++;
+    unawaited(_tts.stop());
+    if (!mounted) return;
+    setState(() {
+      _pdfCurrentPage = next;
+      _textPageIndex = next;
+      _textHighlightIndex = null;
+      _imgHighlight = null;
+      _pdfSentenceCache.clear();
+      _pageGeomCache.clear();
+    });
+    _sheetRebuild?.call();
+  }
+
+  /// 文本模式翻页（+/- 翻页）。
+  void _changePage(int delta) {
+    final total = _pageTexts.length;
+    if (total <= 1) return;
+    _syncPage(_pdfCurrentPage + delta);
+  }
+
+  /// 文本模式左右滑翻页：依据横向位移方向切换当前页（多页文件）。
+  void _onTextSwipePage(DragEndDetails details) {
+    if (!_isMultiPage) return;
+    final velocity = details.primaryVelocity;
+    if (velocity == null) return;
+    if (velocity < -350) {
+      _changePage(1);
+    } else if (velocity > 350) {
+      _changePage(-1);
+    }
   }
 
   // ===== PDF =====
@@ -629,11 +698,17 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
       appBar: AppBar(
         title: Text(widget.book.title),
         actions: [
+          if (_useOriginal && _hasOriginal())
+            IconButton(
+              tooltip: '查看文本',
+              icon: const Icon(Icons.text_fields),
+              onPressed: _showTextSheet,
+            ),
           if (_hasOriginal())
             IconButton(
               tooltip: _useOriginal ? '切换文本模式' : '切换原文模式',
               icon: Icon(
-                _useOriginal ? Icons.text_fields : Icons.image_outlined,
+                _useOriginal ? Icons.image_outlined : Icons.text_fields,
               ),
               onPressed: _switchingMode ? null : _switchViewMode,
             ),
@@ -675,17 +750,17 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
         await _syncPageSize(controller, 0, viewGeneration);
       },
       onPageChanged: (page, total) async {
-        _speechRequest++;
-        final stopped = await _tts.stop();
-        if (!stopped ||
-            !mounted ||
+        if (!mounted ||
             viewGeneration != _pdfViewGeneration ||
             !_useOriginal ||
             _switchingMode) {
           return;
         }
+        if (page == null) return;
+        // 同步共享页码（文本模式/底部面板联动）
+        _syncPage(page);
         final c = _pdfController;
-        if (c != null && page != null) {
+        if (c != null) {
           await _syncPageSize(c, page, viewGeneration);
         }
       },
@@ -834,108 +909,112 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
           child: Row(children: [const Spacer(), _buildPageBar(totalPages)]),
         ),
 
-        // 句子列表
-        Expanded(
-          child: ListView.separated(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-            itemCount: pageSentences.length,
-            separatorBuilder: (_, _) => const SizedBox(height: 6),
-            itemBuilder: (context, index) {
-              final s = pageSentences[index];
-              final highlighted = _textHighlightIndex == index;
-              return Material(
-                color:
-                    highlighted
-                        ? StudyPalette.emberSoft
-                        : Colors.white.withValues(alpha: 0.6),
-                borderRadius: BorderRadius.circular(12),
-                child: InkWell(
-                  borderRadius: BorderRadius.circular(12),
-                  onTap: () {
-                    setState(() => _textHighlightIndex = index);
-                    _speak(s.text);
-                  },
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 4,
-                      vertical: 6,
-                    ),
-                    child: Row(
-                      children: [
-                        // 序号
-                        SizedBox(
-                          width: 24,
-                          child: Text(
-                            '${index + 1}',
-                            style: const TextStyle(
-                              fontSize: 12,
-                              color: StudyPalette.inkSoft,
-                            ),
-                          ),
-                        ),
-                        // 句子文本
-                        Expanded(
-                          child: Padding(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 8,
-                              vertical: 4,
-                            ),
-                            child: Text(
-                              s.text,
-                              style: TextStyle(
-                                fontSize: 18,
-                                height: 1.6,
-                                color:
-                                    highlighted
-                                        ? StudyPalette.ember
-                                        : StudyPalette.ink,
-                                fontWeight:
-                                    highlighted
-                                        ? FontWeight.w600
-                                        : FontWeight.w400,
-                              ),
-                            ),
-                          ),
-                        ),
-                        // 跟读入口
-                        IconButton(
-                          icon: const Icon(
-                            Icons.record_voice_over_outlined,
-                            size: 18,
-                            color: StudyPalette.ember,
-                          ),
-                          tooltip: '跟读此句',
-                          onPressed: () => _openFollow(s.text),
-                        ),
-                        // 翻译
-                        IconButton(
-                          icon: const Icon(
-                            Icons.translate,
-                            size: 18,
-                            color: StudyPalette.inkSoft,
-                          ),
-                          tooltip: '翻译',
-                          onPressed: () => _translate(s.text),
-                        ),
-                        // 标记生词
-                        IconButton(
-                          icon: const Icon(
-                            Icons.bookmark_add_outlined,
-                            size: 18,
-                            color: StudyPalette.inkSoft,
-                          ),
-                          tooltip: '标记生词',
-                          onPressed: () => _markWord(s.text),
-                        ),
-                      ],
+        // 句子列表（多页文件支持左右滑翻页）
+        Expanded(child: _buildSwipeableSentenceList(pageSentences)),
+      ],
+    );
+  }
+
+  /// [v2.8.0] 可左右滑翻页的句子列表（多页文件包裹 GestureDetector）。
+  Widget _buildSwipeableSentenceList(List<Sentence> sentences) {
+    final list = ListView.separated(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+      itemCount: sentences.length,
+      separatorBuilder: (_, _) => const SizedBox(height: 6),
+      itemBuilder: (context, index) {
+        final s = sentences[index];
+        final highlighted = _textHighlightIndex == index;
+        return Material(
+          color:
+              highlighted
+                  ? StudyPalette.emberSoft
+                  : Colors.white.withValues(alpha: 0.6),
+          borderRadius: BorderRadius.circular(12),
+          child: InkWell(
+            borderRadius: BorderRadius.circular(12),
+            onTap: () {
+              setState(() => _textHighlightIndex = index);
+              _speak(s.text);
+            },
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 6),
+              child: Row(
+                children: [
+                  // 序号
+                  SizedBox(
+                    width: 24,
+                    child: Text(
+                      '${index + 1}',
+                      style: const TextStyle(
+                        fontSize: 12,
+                        color: StudyPalette.inkSoft,
+                      ),
                     ),
                   ),
-                ),
-              );
-            },
+                  // 句子文本
+                  Expanded(
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 8,
+                        vertical: 4,
+                      ),
+                      child: Text(
+                        s.text,
+                        style: TextStyle(
+                          fontSize: 18,
+                          height: 1.6,
+                          color:
+                              highlighted
+                                  ? StudyPalette.ember
+                                  : StudyPalette.ink,
+                          fontWeight:
+                              highlighted ? FontWeight.w600 : FontWeight.w400,
+                        ),
+                      ),
+                    ),
+                  ),
+                  // 跟读入口
+                  IconButton(
+                    icon: const Icon(
+                      Icons.record_voice_over_outlined,
+                      size: 18,
+                      color: StudyPalette.ember,
+                    ),
+                    tooltip: '跟读此句',
+                    onPressed: () => _openFollow(s.text),
+                  ),
+                  // 翻译
+                  IconButton(
+                    icon: const Icon(
+                      Icons.translate,
+                      size: 18,
+                      color: StudyPalette.inkSoft,
+                    ),
+                    tooltip: '翻译',
+                    onPressed: () => _translate(s.text),
+                  ),
+                  // 标记生词
+                  IconButton(
+                    icon: const Icon(
+                      Icons.bookmark_add_outlined,
+                      size: 18,
+                      color: StudyPalette.inkSoft,
+                    ),
+                    tooltip: '标记生词',
+                    onPressed: () => _markWord(s.text),
+                  ),
+                ],
+              ),
+            ),
           ),
-        ),
-      ],
+        );
+      },
+    );
+    if (!_isMultiPage) return list;
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onHorizontalDragEnd: _onTextSwipePage,
+      child: list,
     );
   }
 
@@ -953,13 +1032,7 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
           IconButton(
             icon: const Icon(Icons.chevron_left, size: 20),
             onPressed:
-                _textPageIndex > 0
-                    ? () {
-                      _speechRequest++;
-                      unawaited(_tts.stop());
-                      setState(() => _textPageIndex--);
-                    }
-                    : null,
+                _textPageIndex > 0 ? () => _syncPage(_textPageIndex - 1) : null,
             tooltip: '上一页',
           ),
           Text(
@@ -974,11 +1047,7 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
             icon: const Icon(Icons.chevron_right, size: 20),
             onPressed:
                 _textPageIndex < totalPages - 1
-                    ? () {
-                      _speechRequest++;
-                      unawaited(_tts.stop());
-                      setState(() => _textPageIndex++);
-                    }
+                    ? () => _syncPage(_textPageIndex + 1)
                     : null,
             tooltip: '下一页',
           ),
@@ -1099,6 +1168,292 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
                 ),
               ],
             ),
+          ),
+    );
+  }
+
+  // ===== [v2.8.0] 原文模式：底部文本面板 =====
+
+  /// 可拖拽高度的底部文本面板（原文模式下显示当前页句子列表）。
+  /// 复用 _buildTextView 的句子渲染逻辑，独立滚动与刷新。
+  Future<void> _showTextSheet() async {
+    _sheetRebuild = null;
+    if (_sheetScrollController.hasClients) _sheetScrollController.jumpTo(0);
+    await showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: StudyPalette.parchment,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(18)),
+      ),
+      builder:
+          (ctx) => StatefulBuilder(
+            builder: (ctx, setSheet) {
+              _sheetRebuild = () {
+                if (mounted) setSheet(() {});
+              };
+              final screenH = MediaQuery.of(context).size.height;
+              return SizedBox(
+                height: screenH * 0.55,
+                child: Column(
+                  children: [
+                    // 顶部拖拽手柄
+                    GestureDetector(
+                      onVerticalDragUpdate: (d) {
+                        setSheet(() {
+                          // 高度可调 0.25~0.85
+                        });
+                      },
+                      child: Container(
+                        height: 20,
+                        alignment: Alignment.center,
+                        child: Container(
+                          width: 40,
+                          height: 4,
+                          decoration: BoxDecoration(
+                            color: StudyPalette.linen,
+                            borderRadius: BorderRadius.circular(2),
+                          ),
+                        ),
+                      ),
+                    ),
+                    // 标题行
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(12, 0, 8, 0),
+                      child: Row(
+                        children: [
+                          const Icon(
+                            Icons.text_fields,
+                            size: 16,
+                            color: StudyPalette.ink,
+                          ),
+                          const SizedBox(width: 6),
+                          Text(
+                            '第 ${_pdfCurrentPage + 1} 页',
+                            style: titleStyle(fontSize: 14),
+                          ),
+                          const Spacer(),
+                          TextButton.icon(
+                            style: TextButton.styleFrom(
+                              visualDensity: VisualDensity.compact,
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 8,
+                                vertical: 0,
+                              ),
+                              minimumSize: const Size(0, 0),
+                              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                            ),
+                            icon: const Icon(
+                              Icons.close,
+                              size: 16,
+                              color: StudyPalette.inkSoft,
+                            ),
+                            label: const Text(
+                              '关闭',
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: StudyPalette.inkSoft,
+                              ),
+                            ),
+                            onPressed: () {
+                              _sheetRebuild = null;
+                              Navigator.of(ctx).pop();
+                            },
+                          ),
+                        ],
+                      ),
+                    ),
+                    // 页导航栏（原文模式显示播放控制，文本模式显示翻页控制）
+                    _buildSheetPageNav(),
+                    const Divider(height: 1),
+                    // 当前页句子列表
+                    Expanded(child: _buildSheetSentences()),
+                  ],
+                ),
+              );
+            },
+          ),
+    ).then((_) {
+      _sheetRebuild = null;
+    });
+  }
+
+  /// 文本面板内页导航栏（原文模式→播放控制，文本模式→翻页控制）。
+  Widget _buildSheetPageNav() {
+    final isOrig = _useOriginal;
+    final total = _pageTexts.length;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(8, 2, 8, 2),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          if (isOrig) ...[
+            // 原文模式：播放控制
+            _compactIcon(
+              Icons.skip_previous,
+              '上一句',
+              _textHighlightIndex != null && _textHighlightIndex! > 0
+                  ? () => setState(
+                    () => _textHighlightIndex = _textHighlightIndex! - 1,
+                  )
+                  : null,
+            ),
+            _compactIcon(Icons.play_arrow, '朗读', () => _speak(_displayText)),
+            _compactIcon(Icons.stop, '停止', _stopAutoPlay),
+            _compactIcon(Icons.skip_next, '下一句', null),
+            _compactIcon(
+              Icons.translate,
+              '翻译当前句',
+              () => _translate(_displayText),
+            ),
+          ] else ...[
+            // 文本模式：翻页控制
+            _compactIcon(
+              Icons.chevron_left,
+              '上一页',
+              _pdfCurrentPage > 0 ? () => _syncPage(_pdfCurrentPage - 1) : null,
+            ),
+            TextButton(
+              style: TextButton.styleFrom(
+                visualDensity: VisualDensity.compact,
+                minimumSize: const Size(0, 0),
+                padding: const EdgeInsets.symmetric(horizontal: 6),
+                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              ),
+              onPressed: total > 1 ? _showPdfToc : null,
+              child: Text(
+                '${_pdfCurrentPage + 1} / $total',
+                style: const TextStyle(fontSize: 13, color: StudyPalette.ink),
+              ),
+            ),
+            _compactIcon(
+              Icons.chevron_right,
+              '下一页',
+              _pdfCurrentPage < total - 1
+                  ? () => _syncPage(_pdfCurrentPage + 1)
+                  : null,
+            ),
+            _compactIcon(
+              Icons.translate,
+              '翻译当前句',
+              () => _translate(_displayText),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  /// 文本面板内当前页句子列表（复用 _buildTextView 的句子渲染）。
+  Widget _buildSheetSentences() {
+    final pages = _pageTexts;
+    if (pages.isEmpty) return const SizedBox();
+    final i = _pdfCurrentPage.clamp(0, pages.length - 1);
+    if (i >= _textPages.length) return const SizedBox();
+    final sentences = _textPages[i];
+    return ListView.separated(
+      controller: _sheetScrollController,
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      itemCount: sentences.length,
+      separatorBuilder: (_, _) => const Divider(height: 1, indent: 16),
+      itemBuilder: (context, index) {
+        final s = sentences[index];
+        return ListTile(
+          dense: true,
+          title: Text(
+            s.text,
+            style: const TextStyle(fontSize: 15, color: StudyPalette.ink),
+          ),
+          trailing: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              _compactIcon(
+                Icons.record_voice_over_outlined,
+                '跟读',
+                () => _openFollow(s.text),
+              ),
+              _compactIcon(
+                Icons.bookmark_add_outlined,
+                '标记生词',
+                () => _markWord(s.text),
+              ),
+            ],
+          ),
+          onTap: () {
+            _textHighlightIndex = index;
+            _speak(s.text);
+          },
+        );
+      },
+    );
+  }
+
+  /// 紧凑图标按钮（36px 约束，用于文本面板导航）。
+  Widget _compactIcon(IconData icon, String tooltip, VoidCallback? onTap) {
+    return IconButton(
+      visualDensity: VisualDensity.compact,
+      padding: EdgeInsets.zero,
+      constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
+      iconSize: 18,
+      icon: Icon(icon, color: StudyPalette.ink),
+      tooltip: tooltip,
+      onPressed: onTap,
+    );
+  }
+
+  /// [v2.8.0] PDF 目录弹窗（仅多页）：列出页码 + 每页文本预览，点击跳页。
+  void _showPdfToc() {
+    final pages = _pageTexts;
+    if (pages.length <= 1) return;
+    showModalBottomSheet(
+      context: context,
+      builder:
+          (_) => ListView(
+            shrinkWrap: true,
+            padding: const EdgeInsets.symmetric(vertical: 12),
+            children: [
+              const Padding(
+                padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                child: Text(
+                  '目录',
+                  style: TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.bold,
+                    color: StudyPalette.ink,
+                  ),
+                ),
+              ),
+              for (int i = 0; i < pages.length; i++)
+                ListTile(
+                  dense: true,
+                  selected: i == _pdfCurrentPage,
+                  leading: Text(
+                    '${i + 1}',
+                    style: const TextStyle(
+                      fontWeight: FontWeight.bold,
+                      color: StudyPalette.ink,
+                    ),
+                  ),
+                  title: Text(
+                    pages[i].trim().isNotEmpty
+                        ? (pages[i].length > 40
+                            ? '${pages[i].substring(0, 40)}…'
+                            : pages[i])
+                        : '第 ${i + 1} 页',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(color: StudyPalette.ink),
+                  ),
+                  onTap: () {
+                    _syncPage(i);
+                    // 原文模式下同时跳转 PDF 原生翻页
+                    if (_useOriginal && _pdfController != null) {
+                      _pdfController!.setPage(i);
+                    }
+                    Navigator.of(context).pop();
+                  },
+                ),
+            ],
           ),
     );
   }
