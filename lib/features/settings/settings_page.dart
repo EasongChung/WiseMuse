@@ -1,6 +1,9 @@
+import 'dart:async';
 import 'dart:io';
 
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
 
 import '../../core/debug/app_log.dart';
 import '../../core/settings/settings_service.dart';
@@ -8,6 +11,8 @@ import '../../core/theme/app_theme.dart';
 import '../../services/llm_service.dart';
 import '../../services/mlkit_translation_service.dart';
 import '../../services/model_store.dart';
+import '../../services/rag/embedding_service.dart';
+import '../../services/rag/rag_retrieval_service.dart';
 
 /// [v0.3.0] 设置页：翻译引擎配置 + 模型下载管理。
 ///
@@ -53,6 +58,17 @@ class _SettingsPageState extends State<SettingsPage> {
   bool _modelLoaded = false;
   bool _modelScanDone = false;
 
+  // [v2.10.0] Embedding 模型名（RAG 知识库）
+  String _embeddingModel = 'text-embedding-3-small';
+  final _embeddingCtrl = TextEditingController();
+
+  // [v2.10.0] RAG 知识库索引状态
+  List<String> _indexedBooks = const [];
+
+  // [v2.10.0] 本地模型管理
+  bool _autoLoadLocal = true;
+  String? _defaultLocalModel;
+
   bool _initDone = false;
 
   // 源语种选项（含自动识别）
@@ -89,6 +105,7 @@ class _SettingsPageState extends State<SettingsPage> {
     _baseUrlCtrl.dispose();
     _apiKeyCtrl.dispose();
     _modelCtrl.dispose();
+    _embeddingCtrl.dispose();
     super.dispose();
   }
 
@@ -108,6 +125,14 @@ class _SettingsPageState extends State<SettingsPage> {
     _localModels = await _scanLocalModels();
     _modelLoaded = LlmService.instance.isLoaded;
     _modelScanDone = true;
+
+    // [v2.10.0] RAG / 本地模型管理
+    _embeddingModel = await _settings.getEmbeddingModel();
+    _embeddingCtrl.text = _embeddingModel;
+    _autoLoadLocal = await _settings.getAutoLoadLocalModel();
+    _defaultLocalModel = await _settings.getDefaultLocalModel();
+    unawaited(_refreshRagStatus());
+
     // 检查常用语言模型下载状态
     for (final (code, _) in _langs) {
       final ok = await _mlkit.isModelDownloaded(code);
@@ -287,6 +312,14 @@ class _SettingsPageState extends State<SettingsPage> {
                   const SizedBox(height: 24),
                   _buildSectionTitle('云端 AI 配置（知识提取/翻译/测验兜底）'),
                   _buildApiConfig(),
+                  const SizedBox(height: 24),
+                  // [v2.10.0] RAG 知识库
+                  _buildSectionTitle('RAG 知识库'),
+                  _buildRagSection(),
+                  const SizedBox(height: 24),
+                  // [v2.10.0] 本地大模型管理
+                  _buildSectionTitle('本地大模型管理'),
+                  _buildLocalModelManager(),
                 ],
               )
               : const Center(child: CircularProgressIndicator()),
@@ -645,6 +678,263 @@ class _SettingsPageState extends State<SettingsPage> {
         ),
       ),
     );
+  }
+
+  // ===== [v2.10.0] RAG 知识库 =====
+
+  Future<void> _refreshRagStatus() async {
+    final indexed = await RagRetrievalService.instance.listIndexedBooks();
+    if (mounted) setState(() => _indexedBooks = indexed);
+  }
+
+  Widget _buildRagSection() {
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Embedding 模型名
+            Row(
+              children: [
+                const Icon(Icons.auto_awesome, size: 20, color: StudyPalette.ink),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: TextField(
+                    controller: _embeddingCtrl,
+                    decoration: const InputDecoration(
+                      labelText: 'Embedding 模型',
+                      hintText: 'text-embedding-3-small',
+                      isDense: true,
+                      contentPadding: EdgeInsets.symmetric(
+                        horizontal: 10,
+                        vertical: 8,
+                      ),
+                    ),
+                    onChanged: (v) {
+                      _embeddingModel = v.trim();
+                      _settings.setEmbeddingModel(_embeddingModel);
+                    },
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            // 测试 Embedding 按钮
+            SizedBox(
+              width: double.infinity,
+              child: OutlinedButton.icon(
+                icon: const Icon(Icons.play_arrow, size: 16),
+                label: const Text('测试 Embedding 连接'),
+                onPressed: () async {
+                  final ok = await EmbeddingService.instance.isCloudReady();
+                  if (!mounted) return;
+                  if (ok) {
+                    final result = await EmbeddingService.instance.embed('测试');
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        content: Text(
+                          result != null
+                              ? '✅ Embedding 连接正常（返回 ${result.length} 维向量）'
+                              : '❌ Embedding 调用失败，请检查 API 配置',
+                        ),
+                      ),
+                    );
+                  } else {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text('⚠️ 请先配置云端 API 地址与密钥')),
+                    );
+                  }
+                },
+              ),
+            ),
+            const SizedBox(height: 12),
+            // 索引状态
+            Row(
+              children: [
+                const Icon(Icons.storage, size: 18, color: StudyPalette.inkSoft),
+                const SizedBox(width: 8),
+                Text(
+                  '已索引 ${_indexedBooks.length} 本教材',
+                  style: const TextStyle(
+                    fontSize: 13,
+                    color: StudyPalette.inkSoft,
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // ===== [v2.10.0] 本地大模型管理 =====
+
+  /// 预设模型列表（魔塔镜像下载）。
+  static const _presetModels = [
+    ('Qwen3-0.6B Q4_K_M', 'qwen3-0.6b-instruct-q4_k_m.gguf'),
+    ('MiniCPM5-1B Q4_K_M', 'minicpm5-1b-q4_k_m.gguf'),
+  ];
+
+  Widget _buildLocalModelManager() {
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // 自动加载开关
+            SwitchListTile(
+              dense: true,
+              contentPadding: EdgeInsets.zero,
+              title: const Text('AI 对话时自动加载本地模型', style: TextStyle(fontSize: 14)),
+              subtitle: const Text(
+                '在线 API 故障时自动回落本地模型',
+                style: TextStyle(fontSize: 12, color: StudyPalette.inkSoft),
+              ),
+              value: _autoLoadLocal,
+              activeThumbColor: StudyPalette.ember,
+              onChanged: (v) {
+                setState(() => _autoLoadLocal = v);
+                _settings.setAutoLoadLocalModel(v);
+              },
+            ),
+            const Divider(height: 8),
+
+            // 默认模型下拉（从已扫描的本地模型中选择）
+            if (_localModels.isNotEmpty) ...[
+              Row(
+                children: [
+                  const Icon(Icons.model_training, size: 18, color: StudyPalette.ink),
+                  const SizedBox(width: 8),
+                  Text('默认模型', style: titleStyle(fontSize: 14)),
+                  const Spacer(),
+                  DropdownButton<String>(
+                    value: _defaultLocalModel,
+                    underline: const SizedBox(),
+                    hint: const Text('未设置', style: TextStyle(fontSize: 13)),
+                    items:
+                        _localModels.map((m) {
+                          return DropdownMenuItem(
+                            value: m.path,
+                            child: Text(m.name, style: const TextStyle(fontSize: 13)),
+                          );
+                        }).toList(),
+                    onChanged: (v) {
+                      if (v == null) return;
+                      setState(() => _defaultLocalModel = v);
+                      _settings.setDefaultLocalModel(v);
+                    },
+                  ),
+                ],
+              ),
+              const Divider(height: 8),
+            ],
+
+            // 预设模型下载
+            const Text(
+              '在线下载预设模型（魔塔镜像）',
+              style: TextStyle(fontSize: 12, color: StudyPalette.inkSoft),
+            ),
+            const SizedBox(height: 4),
+            for (final (name, filename) in _presetModels) ...[
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 2),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Text(name, style: const TextStyle(fontSize: 13)),
+                    ),
+                    SizedBox(
+                      height: 28,
+                      child: OutlinedButton(
+                        style: OutlinedButton.styleFrom(
+                          padding: const EdgeInsets.symmetric(horizontal: 10),
+                          textStyle: const TextStyle(fontSize: 11),
+                        ),
+                        onPressed: () => _downloadPresetModel(filename, name),
+                        child: const Text('下载'),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+            const Divider(height: 8),
+
+            // 从外部导入 GGUF
+            SizedBox(
+              width: double.infinity,
+              child: OutlinedButton.icon(
+                icon: const Icon(Icons.file_open, size: 16),
+                label: const Text('从文件导入 GGUF 模型'),
+                onPressed: () => _importGgufFromFile(),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// 下载模型文件到本地。
+  static Future<void> _downloadFile(String url, String savePath) async {
+    final resp = await http.get(Uri.parse(url));
+    if (resp.statusCode != 200) {
+      throw Exception('下载失败: HTTP ${resp.statusCode}');
+    }
+    await File(savePath).writeAsBytes(resp.bodyBytes, flush: true);
+  }
+
+  Future<void> _downloadPresetModel(String filename, String label) async {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('开始下载 $label…')),
+    );
+    try {
+      final url = 'https://modelscope.cn/models/qwen/Qwen3-0.6B-GGUF/resolve/master/$filename';
+      final dir = await ModelStore.llmModelsDir();
+      final savePath = '${dir.path}/$filename';
+      await _downloadFile(url, savePath);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('$label 下载完成')),
+        );
+        _localModels = await _scanLocalModels();
+        if (mounted) setState(() {});
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('下载失败: $e')),
+        );
+      }
+    }
+  }
+
+  Future<void> _importGgufFromFile() async {
+    // 直接使用 FilePicker 选择 .gguf 文件
+    final result = await FilePicker.pickFiles(
+      type: FileType.custom,
+      allowedExtensions: const ['gguf'],
+    );
+    if (result == null || result.files.isEmpty || !mounted) return;
+    final path = result.files.single.path;
+    if (path == null) return;
+    try {
+      await ModelStore.importGguf(path);
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('GGUF 模型导入成功')),
+      );
+      _localModels = await _scanLocalModels();
+      if (mounted) setState(() {});
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('导入失败: $e')),
+        );
+      }
+    }
   }
 
   // ===== [v2.9.0] 本地 AI 模型状态 =====

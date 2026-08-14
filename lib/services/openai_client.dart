@@ -97,8 +97,101 @@ class OpenAiClient {
     return null;
   }
 
+  /// 调用云端 Embedding API，返回向量列表。失败/未配置返回 null。
+  ///
+  /// [inputs] 文本列表；[model] 嵌入模型名（默认 text-embedding-3-small）；
+  /// [baseUrl]/[apiKey] 可显式传入覆写 settings 值。
+  /// [batchSize] 每批最大输入数（OpenAI 限制 2048，默认 16 保兼容）。
+  Future<List<List<double>>?> embeddings(
+    List<String> inputs, {
+    String? baseUrl,
+    String? apiKey,
+    String model = 'text-embedding-3-small',
+    int batchSize = 16,
+  }) async {
+    if (inputs.isEmpty) return const [];
+    final settings = SettingsService.instance;
+    final url = baseUrl ?? (await settings.getApiBaseUrl())?.trim() ?? '';
+    final key = apiKey ?? (await settings.getApiKey())?.trim() ?? '';
+
+    if (url.isEmpty || key.isEmpty) {
+      AppLog.d(_tag, 'embedding: 云端未配置（url/key 不全），跳过');
+      return null;
+    }
+
+    final fullUrl = '${url.endsWith('/') ? url : '$url/'}embeddings';
+    final allEmbeddings = <List<double>>[];
+
+    // 分批处理
+    for (var i = 0; i < inputs.length; i += batchSize) {
+      final batch = inputs.sublist(i, (i + batchSize).clamp(0, inputs.length));
+      try {
+        final resp = await _httpClient
+            .post(
+              Uri.parse(fullUrl),
+              headers: {
+                'Content-Type': 'application/json',
+                'Authorization': 'Bearer $key',
+              },
+              body: jsonEncode({
+                'model': model,
+                'input': batch,
+              }),
+            )
+            .timeout(const Duration(seconds: 60));
+
+        if (resp.statusCode != 200) {
+          AppLog.e(_tag, 'embedding HTTP ${resp.statusCode}: ${resp.body}');
+          return null;
+        }
+
+        final json = jsonDecode(resp.body) as Map<String, dynamic>;
+        final data = json['data'] as List?;
+        if (data == null || data.isEmpty) {
+          AppLog.w(_tag, 'embedding 返回空 data');
+          return null;
+        }
+
+        // 按 index 排序确保顺序一致
+        data.sort((a, b) => (a['index'] as int).compareTo(b['index'] as int));
+        for (final item in data) {
+          final emb = (item['embedding'] as List).cast<double>();
+          allEmbeddings.add(emb);
+        }
+      } catch (e) {
+        AppLog.e(_tag, 'embedding 调用异常: $e');
+        return null;
+      }
+    }
+
+    return allEmbeddings;
+  }
+
   /// 释放 HTTP 客户端资源。
   void dispose() {
     _httpClient.close();
   }
+}
+
+/// [v2.10.0] OpenAI 兼容 embedding API 的参数封装。
+class EmbeddingRequest {
+  const EmbeddingRequest({
+    required this.model,
+    required this.input,
+    this.baseUrl,
+    this.apiKey,
+  });
+
+  final String model;
+  final List<String> input;
+  final String? baseUrl;
+  final String? apiKey;
+}
+
+/// OpenAI 兼容 embedding API 响应中的向量条目。
+class EmbeddingData {
+  const EmbeddingData({required this.index, required this.embedding});
+
+  final int index;
+  final List<double> embedding;
 }

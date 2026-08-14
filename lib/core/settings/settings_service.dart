@@ -118,4 +118,34 @@ class SettingsService {
       'en';
   Future<void> setTranslationTarget(String v) async =>
       (await SharedPreferences.getInstance()).setString(kTranslationTarget, v);
+
+  // ---- [v2.10.0] RAG / Embedding ----
+
+  /// Embedding 模型名（默认 text-embedding-3-small）。
+  static const kEmbeddingModel = 'embedding_model';
+
+  Future<String> getEmbeddingModel() async =>
+      (await SharedPreferences.getInstance()).getString(kEmbeddingModel) ??
+      'text-embedding-3-small';
+  Future<void> setEmbeddingModel(String v) async =>
+      (await SharedPreferences.getInstance()).setString(kEmbeddingModel, v);
+
+  // ---- [v2.10.0] 本地模型管理 ----
+
+  /// 默认本地 LLM 模型文件路径（空=未设置）。
+  static const kDefaultLocalModel = 'default_local_model';
+
+  Future<String?> getDefaultLocalModel() async =>
+      (await SharedPreferences.getInstance()).getString(kDefaultLocalModel);
+  Future<void> setDefaultLocalModel(String v) async =>
+      (await SharedPreferences.getInstance()).setString(kDefaultLocalModel, v);
+
+  /// AI 对话时自动加载本地模型（默认 true）。
+  static const kAutoLoadLocalModel = 'auto_load_local_model';
+
+  Future<bool> getAutoLoadLocalModel() async =>
+      (await SharedPreferences.getInstance()).getBool(kAutoLoadLocalModel) ??
+      true;
+  Future<void> setAutoLoadLocalModel(bool v) async =>
+      (await SharedPreferences.getInstance()).setBool(kAutoLoadLocalModel, v);
 }

@@ -24,6 +24,7 @@ import '../../services/ocr_service.dart';
 import '../../services/pdf_service.dart';
 import '../../services/text_position_service.dart';
 import '../../services/translation_engine.dart';
+import '../../services/rag/rag_qa_service.dart';
 import '../../vendor/flutter_pdfview/flutter_pdfview.dart';
 import '../knowledge/knowledge_detail_sheet.dart';
 import '../assistant/knowledge_explain_sheet.dart';
@@ -1639,6 +1640,16 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
                 KnowledgeExplainSheet.show(context, text);
               },
             ),
+            // [v2.10.0] 问AI（RAG 问答）
+            IconButton(
+              icon: const Icon(Icons.psychology, size: 20),
+              tooltip: '问AI',
+              color: StudyPalette.spinePdf,
+              onPressed: () {
+                setState(() => _activeSentenceText = null);
+                _askRag(widget.book.id, text);
+              },
+            ),
             const Spacer(),
             // 关闭
             IconButton(
@@ -1653,6 +1664,39 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
           ],
         ),
       ),
+    );
+  }
+
+  /// [v2.10.0] RAG 问答：基于教材内容提问。
+  Future<void> _askRag(String bookId, String sentenceText) async {
+    if (bookId.isEmpty || sentenceText.trim().isEmpty) return;
+
+    // 检测 RAG 是否就绪；未就绪时引导构建
+    final ready = await RagQaService.instance.isReady(bookId);
+    if (!mounted) return;
+
+    if (!ready) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('该教材尚未构建知识库，请先在书架中构建')),
+      );
+      return;
+    }
+
+    // 弹出问答弹窗
+    if (!mounted) return;
+    _showRagQaSheet(bookId, sentenceText);
+  }
+
+  /// [v2.10.0] RAG 问答弹窗：输入问题 → AI 回答。
+  void _showRagQaSheet(String bookId, String sentenceText) {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: StudyPalette.parchment,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(18)),
+      ),
+      builder: (_) => _RagQaSheetContent(bookId: bookId, initialQuestion: sentenceText),
     );
   }
 
@@ -1839,4 +1883,277 @@ class _HighlightPainter extends CustomPainter {
   @override
   bool shouldRepaint(_HighlightPainter oldDelegate) =>
       oldDelegate.rects != rects;
+}
+
+/// [v2.10.0] RAG 问答弹窗内容：输入问题 → AI 基于教材回答。
+///
+/// 初始问题默认为当前句子，可修改。Markdown 渲染回答。
+class _RagQaSheetContent extends StatefulWidget {
+  const _RagQaSheetContent({
+    required this.bookId,
+    this.initialQuestion,
+  });
+
+  final String bookId;
+  final String? initialQuestion;
+
+  @override
+  State<_RagQaSheetContent> createState() => _RagQaSheetContentState();
+}
+
+class _RagQaSheetContentState extends State<_RagQaSheetContent> {
+  late final TextEditingController _controller;
+  String? _answer;
+  bool _loading = false;
+  bool _asked = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = TextEditingController(text: widget.initialQuestion ?? '');
+    // 有初始问题时自动提问
+    if (widget.initialQuestion != null && widget.initialQuestion!.trim().isNotEmpty) {
+      _ask();
+    }
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  Future<void> _ask() async {
+    final question = _controller.text.trim();
+    if (question.isEmpty) return;
+
+    setState(() {
+      _loading = true;
+      _answer = null;
+      _asked = true;
+    });
+
+    final answer = await RagQaService.instance.ask(widget.bookId, question);
+    if (mounted) {
+      setState(() {
+        _answer = answer;
+        _loading = false;
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return DraggableScrollableSheet(
+      initialChildSize: 0.6,
+      minChildSize: 0.4,
+      maxChildSize: 0.85,
+      expand: false,
+      builder: (context, scrollController) {
+        return Padding(
+          padding: const EdgeInsets.fromLTRB(20, 12, 20, 20),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // 拖拽手柄
+              Center(
+                child: Container(
+                  width: 32,
+                  height: 4,
+                  margin: const EdgeInsets.only(bottom: 12),
+                  decoration: BoxDecoration(
+                    color: StudyPalette.linen,
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+              ),
+              // 标题
+              Row(
+                children: [
+                  const Icon(Icons.psychology, size: 20, color: StudyPalette.spinePdf),
+                  const SizedBox(width: 8),
+                  Text('问AI', style: titleStyle(fontSize: 18)),
+                  const Spacer(),
+                  IconButton(
+                    icon: const Icon(Icons.close, size: 20, color: StudyPalette.inkSoft),
+                    onPressed: () => Navigator.of(context).pop(),
+                  ),
+                ],
+              ),
+              const Divider(height: 16),
+
+              // 输入区
+              Row(
+                children: [
+                  Expanded(
+                    child: TextField(
+                      controller: _controller,
+                      decoration: const InputDecoration(
+                        hintText: '输入关于这篇教材的问题…',
+                        isDense: true,
+                        contentPadding: EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 10,
+                        ),
+                        border: OutlineInputBorder(),
+                      ),
+                      textInputAction: TextInputAction.send,
+                      onSubmitted: (_) => _ask(),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  IconButton.filled(
+                    icon: _loading
+                        ? const SizedBox(
+                            width: 18,
+                            height: 18,
+                            child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                          )
+                        : const Icon(Icons.send, size: 18),
+                    style: IconButton.styleFrom(
+                      backgroundColor: StudyPalette.ember,
+                      foregroundColor: Colors.white,
+                    ),
+                    onPressed: _loading ? null : _ask,
+                  ),
+                ],
+              ),
+              const SizedBox(height: 16),
+
+              // 回答区
+              Expanded(
+                child: _buildAnswer(scrollController),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildAnswer(ScrollController scrollController) {
+    if (_loading) {
+      return const Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            CircularProgressIndicator(),
+            SizedBox(height: 12),
+            Text('正在思考…', style: TextStyle(color: StudyPalette.inkSoft)),
+          ],
+        ),
+      );
+    }
+
+    if (!_asked) {
+      return Center(
+        child: Text(
+          '输入你想了解的问题，AI 会结合教材内容回答',
+          style: TextStyle(color: StudyPalette.inkSoft, fontSize: 14),
+          textAlign: TextAlign.center,
+        ),
+      );
+    }
+
+    if (_answer == null) {
+      return const Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.info_outline, size: 40, color: StudyPalette.inkSoft),
+            SizedBox(height: 8),
+            Text(
+              '未能生成回答\n请检查 AI 引擎配置或重试',
+              style: TextStyle(color: StudyPalette.inkSoft, fontSize: 14),
+              textAlign: TextAlign.center,
+            ),
+          ],
+        ),
+      );
+    }
+
+    return SingleChildScrollView(
+      controller: scrollController,
+      child: _buildMarkdownContent(_answer!),
+    );
+  }
+
+  /// 简易 Markdown 渲染（同 KnowledgeExplainSheet）。
+  Widget _buildMarkdownContent(String md) {
+    final lines = md.split('\n');
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: lines.map((line) {
+        final t = line.trim();
+        if (t.isEmpty) return const SizedBox(height: 8);
+
+        // 标题
+        final headerMatch = RegExp(r'^#{1,3}\s+(.*)').firstMatch(t);
+        if (headerMatch != null) {
+          return Padding(
+            padding: const EdgeInsets.only(top: 12, bottom: 4),
+            child: Text(
+              headerMatch.group(1)!,
+              style: titleStyle(
+                fontSize: t.startsWith('###') ? 14 : t.startsWith('##') ? 16 : 18,
+              ),
+            ),
+          );
+        }
+
+        // 列表
+        if (t.startsWith('- ') || t.startsWith('* ')) {
+          return Padding(
+            padding: const EdgeInsets.only(left: 8, top: 2, bottom: 2),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text('•  ', style: TextStyle(color: StudyPalette.ember)),
+                Expanded(child: _buildRichText(t.substring(2))),
+              ],
+            ),
+          );
+        }
+
+        // 普通文本（含加粗）
+        return Padding(
+          padding: const EdgeInsets.symmetric(vertical: 2),
+          child: _buildRichText(t),
+        );
+      }).toList(),
+    );
+  }
+
+  /// 支持 **加粗** 标记的内联文本。
+  Widget _buildRichText(String text) {
+    final spans = <TextSpan>[];
+    final regex = RegExp(r'\*\*(.+?)\*\*');
+    var lastEnd = 0;
+    for (final match in regex.allMatches(text)) {
+      if (match.start > lastEnd) {
+        spans.add(TextSpan(text: text.substring(lastEnd, match.start)));
+      }
+      spans.add(TextSpan(
+        text: match.group(1),
+        style: const TextStyle(
+          fontWeight: FontWeight.bold,
+          color: StudyPalette.ink,
+        ),
+      ));
+      lastEnd = match.end;
+    }
+    if (lastEnd < text.length) {
+      spans.add(TextSpan(text: text.substring(lastEnd)));
+    }
+    return Text.rich(
+      TextSpan(
+        children: spans,
+        style: const TextStyle(
+          fontSize: 15,
+          color: StudyPalette.ink,
+          height: 1.6,
+        ),
+      ),
+    );
+  }
 }

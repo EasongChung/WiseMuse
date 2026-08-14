@@ -107,6 +107,7 @@ class ModelStore {
     return modelDir.path;
   }
 
+  /// 下载文件到本地路径（流式，HTTP GET）。
   static Future<void> _download(String url, String savePath) async {
     final resp = await http.get(Uri.parse(url));
     if (resp.statusCode != 200) {

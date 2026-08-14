@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../../core/debug/app_log.dart';
@@ -7,6 +9,7 @@ import '../../core/storage/database.dart';
 import '../../core/theme/app_theme.dart';
 import '../../services/book_import_service.dart';
 import '../../services/picker_service.dart';
+import '../../services/rag/rag_retrieval_service.dart';
 import '../../widgets/import_sheet.dart';
 import '../reader/reader_page.dart';
 
@@ -29,10 +32,41 @@ class _HomePageState extends State<HomePage> {
   bool _loading = true;
   bool _importing = false;
 
+  // [v2.10.0] RAG 知识库索引状态：bookId → isIndexed
+  Map<String, bool> _ragStatus = const {};
+
   @override
   void initState() {
     super.initState();
     _refresh();
+  }
+
+  Future<void> _refreshRagStatus() async {
+    if (_books.isEmpty) {
+      _ragStatus = const {};
+      return;
+    }
+    try {
+      final status = await RagRetrievalService.instance.getIndexStatus(_books);
+      if (mounted) setState(() => _ragStatus = status);
+    } catch (_) {}
+  }
+
+  Future<void> _buildRagIndex(Book book) async {
+    AppLog.d(_tag, '开始构建 RAG 索引: ${book.title}');
+    final count = await RagRetrievalService.instance.buildIndex(book);
+    if (mounted) {
+      if (count > 0) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('「${book.title}」知识库已构建完成（$count 个片段）')),
+        );
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('「${book.title}」无可索引内容，跳过')),
+        );
+      }
+      unawaited(_refreshRagStatus());
+    }
   }
 
   Future<void> _refresh() async {
@@ -44,6 +78,8 @@ class _HomePageState extends State<HomePage> {
         _books = list;
         _loading = false;
       });
+      // 刷新后同步 RAG 状态
+      unawaited(_refreshRagStatus());
     } catch (e, s) {
       AppLog.e(_tag, '加载书架失败: $e\n$s');
       if (!mounted) return;
@@ -62,18 +98,20 @@ class _HomePageState extends State<HomePage> {
       if (book == null || !mounted) return;
       AppLog.d(_tag, '导入成功: ${book.title}');
       await _refresh();
+      // [v2.10.0] 导入完成后异步构建 RAG 知识库
+      unawaited(_buildRagIndex(book));
       if (!mounted) return;
       // 打开阅读页
-      await Navigator.of(
-        context,
-      ).push(MaterialPageRoute<void>(builder: (_) => ReaderPage(book: book)));
+      await Navigator.of(context).push(
+        MaterialPageRoute<void>(builder: (_) => ReaderPage(book: book)),
+      );
       await _refresh();
     } catch (e, s) {
       AppLog.e(_tag, '导入失败: $e\n$s');
       if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text('导入失败：$e')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('导入失败：$e')),
+      );
     } finally {
       if (mounted) setState(() => _importing = false);
     }
@@ -104,6 +142,8 @@ class _HomePageState extends State<HomePage> {
     try {
       final db = await DatabaseProvider.database;
       await BookDao(db).delete(book.id);
+      // [v2.10.0] 同步删除 RAG 索引
+      unawaited(RagRetrievalService.instance.deleteIndex(book.id));
       AppLog.d(_tag, '删除教材: ${book.title}');
       await _refresh();
     } catch (e, s) {
@@ -178,8 +218,10 @@ class _HomePageState extends State<HomePage> {
       itemCount: _books.length,
       itemBuilder: (context, index) {
         final book = _books[index];
+        final isIndexed = _ragStatus[book.id] ?? false;
         return _BookCard(
           book: book,
+          isIndexed: isIndexed,
           onTap: () async {
             await Navigator.of(context).push(
               MaterialPageRoute<void>(builder: (_) => ReaderPage(book: book)),
@@ -187,6 +229,7 @@ class _HomePageState extends State<HomePage> {
             await _refresh();
           },
           onDelete: () => _deleteBook(book),
+          onBuildIndex: () => _buildRagIndex(book),
         );
       },
     );
@@ -223,20 +266,25 @@ class _HomePageState extends State<HomePage> {
   }
 }
 
-/// 书本形态卡片：书脊（来源色）+ 封面色 + 标题 + 副标题。
+/// 书本形态卡片：书脊（来源色）+ 封面色 + 标题 + RAG 索引状态。
 ///
 /// 整体观感像一本书立在书架上，来源类型映射为不同书脊色
 /// （PDF=靛蓝 / 图片=橙 / Word=苔绿 / TXT=灰紫，见 [StudyPalette.spineFor]）。
+/// [v2.10.0] 新增 RAG 索引状态指示和「构建知识库」按钮。
 class _BookCard extends StatelessWidget {
   const _BookCard({
     required this.book,
+    required this.isIndexed,
     required this.onTap,
     required this.onDelete,
+    required this.onBuildIndex,
   });
 
   final Book book;
+  final bool isIndexed;
   final VoidCallback onTap;
   final VoidCallback onDelete;
+  final VoidCallback onBuildIndex;
 
   @override
   Widget build(BuildContext context) {
@@ -298,7 +346,7 @@ class _BookCard extends StatelessWidget {
             ),
             // 标题区
             Padding(
-              padding: const EdgeInsets.fromLTRB(14, 10, 14, 12),
+              padding: const EdgeInsets.fromLTRB(14, 10, 14, 10),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
@@ -322,11 +370,49 @@ class _BookCard extends StatelessWidget {
                       color: StudyPalette.inkSoft,
                     ),
                   ),
+                  const SizedBox(height: 6),
+                  // [v2.10.0] RAG 知识库状态指示
+                  _buildRagStatus(),
                 ],
               ),
             ),
           ],
         ),
+      ),
+    );
+  }
+
+  /// [v2.10.0] RAG 知识库索引状态指示。
+  Widget _buildRagStatus() {
+    if (isIndexed) {
+      return Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const Icon(Icons.check_circle, size: 12, color: StudyPalette.moss),
+          const SizedBox(width: 4),
+          const Text(
+            '知识库就绪',
+            style: TextStyle(fontSize: 10, color: StudyPalette.moss),
+          ),
+        ],
+      );
+    }
+    return GestureDetector(
+      onTap: onBuildIndex,
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const Icon(Icons.auto_awesome, size: 12, color: StudyPalette.ember),
+          const SizedBox(width: 4),
+          const Text(
+            '构建知识库',
+            style: TextStyle(
+              fontSize: 10,
+              color: StudyPalette.ember,
+              decoration: TextDecoration.underline,
+            ),
+          ),
+        ],
       ),
     );
   }
