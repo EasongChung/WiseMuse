@@ -3,31 +3,29 @@ import 'package:sqflite/sqflite.dart';
 import '../models/word_entry.dart';
 
 /// [v0.1.0] 生词本（WordEntry）数据访问。
+/// [v2.9.0] 多孩子：构造传入 [profileId]，null=不过滤（家长模式）。
 
 class WordEntryDao {
-  WordEntryDao(this.db);
+  WordEntryDao(this.db, {this.profileId});
 
   final Database db;
+  final String? profileId;
 
   static const _table = 'word_entries';
 
   /// 插入生词；若同一词已存在则更新（幂等，去重按 word+lang）。
+  /// 自动关联当前 profileId。
   Future<String> upsert(WordEntry entry) async {
     final existing = await findByWord(entry.word, lang: entry.lang);
     if (existing != null) {
-      await db.update(
-        _table,
-        entry.toMap()..['id'] = existing.id,
-        where: 'id = ?',
-        whereArgs: [existing.id],
-      );
+      final data = entry.toMap()..['id'] = existing.id;
+      if (profileId != null) data['profile_id'] = profileId;
+      await db.update(_table, data, where: 'id = ?', whereArgs: [existing.id]);
       return existing.id;
     }
-    await db.insert(
-      _table,
-      entry.toMap(),
-      conflictAlgorithm: ConflictAlgorithm.replace,
-    );
+    final data = entry.toMap();
+    if (profileId != null) data['profile_id'] = profileId;
+    await db.insert(_table, data, conflictAlgorithm: ConflictAlgorithm.replace);
     return entry.id;
   }
 
@@ -42,9 +40,17 @@ class WordEntryDao {
     return rows.isEmpty ? null : WordEntry.fromMap(rows.first);
   }
 
-  /// 取全部（按掌握度升序 → 未掌握优先）。
+  /// 取全部（按掌握度升序 → 未掌握优先，当前孩子的）。
   Future<List<WordEntry>> getAll() async {
-    final rows = await db.query(_table, orderBy: 'mastery ASC, added_at DESC');
+    final rows =
+        profileId != null
+            ? await db.query(
+              _table,
+              where: 'profile_id = ?',
+              whereArgs: [profileId],
+              orderBy: 'mastery ASC, added_at DESC',
+            )
+            : await db.query(_table, orderBy: 'mastery ASC, added_at DESC');
     return rows.map(WordEntry.fromMap).toList();
   }
 
@@ -61,10 +67,13 @@ class WordEntryDao {
 
   /// 未掌握词（mastery < [threshold]），复习优先。
   Future<List<WordEntry>> getUnmastered({int threshold = 3}) async {
+    final where =
+        profileId != null ? 'profile_id = ? AND mastery < ?' : 'mastery < ?';
+    final args = profileId != null ? [profileId, threshold] : [threshold];
     final rows = await db.query(
       _table,
-      where: 'mastery < ?',
-      whereArgs: [threshold],
+      where: where,
+      whereArgs: args,
       orderBy: 'mastery ASC, wrong_count DESC',
     );
     return rows.map(WordEntry.fromMap).toList();
@@ -78,10 +87,13 @@ class WordEntryDao {
   Future<int> delete(String id) =>
       db.delete(_table, where: 'id = ?', whereArgs: [id]);
 
-  /// 生词总数。
-  Future<int> count() async =>
-      Sqflite.firstIntValue(
-        await db.rawQuery('SELECT COUNT(*) FROM $_table'),
-      ) ??
-      0;
+  /// 生词总数（当前孩子的）。
+  Future<int> count() async {
+    final sql =
+        profileId != null
+            ? 'SELECT COUNT(*) FROM $_table WHERE profile_id = ?'
+            : 'SELECT COUNT(*) FROM $_table';
+    final args = profileId != null ? [profileId] : null;
+    return Sqflite.firstIntValue(await db.rawQuery(sql, args)) ?? 0;
+  }
 }

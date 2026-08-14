@@ -4,27 +4,36 @@ import '../models/book.dart';
 import 'sentence_dao.dart';
 
 /// [v0.1.0] 教材（Book）数据访问。
+///
+/// [v2.9.0] 多孩子模式：构造时传入 [profileId]，null=家长模式不过滤。
 
 class BookDao {
-  BookDao(this.db);
+  BookDao(this.db, {this.profileId});
 
   final Database db;
+  final String? profileId;
 
   static const _table = 'books';
 
-  /// 插入新教材，返回 id。
+  /// 插入新教材，自动关联 profileId。
   Future<String> insert(Book book) async {
-    await db.insert(
-      _table,
-      book.toMap(),
-      conflictAlgorithm: ConflictAlgorithm.replace,
-    );
+    final map = book.toMap();
+    if (profileId != null) map['profile_id'] = profileId;
+    await db.insert(_table, map, conflictAlgorithm: ConflictAlgorithm.replace);
     return book.id;
   }
 
-  /// 按更新时间倒序取全部教材。
+  /// 按更新时间倒序取全部教材（当前孩子的）。
   Future<List<Book>> getAll() async {
-    final rows = await db.query(_table, orderBy: 'updated_at DESC');
+    final rows =
+        profileId != null
+            ? await db.query(
+              _table,
+              where: 'profile_id = ?',
+              whereArgs: [profileId],
+              orderBy: 'updated_at DESC',
+            )
+            : await db.query(_table, orderBy: 'updated_at DESC');
     return rows.map(Book.fromMap).toList();
   }
 

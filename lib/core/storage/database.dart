@@ -10,7 +10,7 @@ class DatabaseProvider {
   DatabaseProvider._();
 
   static const String dbName = 'wisemuse.db';
-  static const int dbVersion = 3;
+  static const int dbVersion = 4;
 
   static Database? _db;
 
@@ -26,11 +26,22 @@ class DatabaseProvider {
     return _db!;
   }
 
+  static const String _createProfilesSql = '''
+      CREATE TABLE profiles (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        avatar_emoji TEXT NOT NULL DEFAULT '👦',
+        is_parent INTEGER NOT NULL DEFAULT 0,
+        created_at INTEGER NOT NULL
+      )
+    ''';
+
   // ===== sentences 表 SQL（_onCreate 与 _onUpgrade 共用，杜绝双份漂移）=====
 
   static const String _createSentencesSql = '''
       CREATE TABLE sentences (
         id TEXT PRIMARY KEY,
+        profile_id TEXT NOT NULL DEFAULT 'default',
         book_id TEXT NOT NULL,
         page INTEGER NOT NULL DEFAULT 0,
         chapter INTEGER NOT NULL DEFAULT 0,
@@ -50,6 +61,7 @@ class DatabaseProvider {
   static const String _createKnowledgePointsSql = '''
       CREATE TABLE knowledge_points (
         id TEXT PRIMARY KEY,
+        profile_id TEXT NOT NULL DEFAULT 'default',
         book_id TEXT,
         page INTEGER,
         chapter INTEGER,
@@ -75,6 +87,7 @@ class DatabaseProvider {
   static const String _createQuizAttemptsSql = '''
       CREATE TABLE quiz_attempts (
         id TEXT PRIMARY KEY,
+        profile_id TEXT NOT NULL DEFAULT 'default',
         book_id TEXT NOT NULL,
         chapter INTEGER NOT NULL DEFAULT 0,
         page INTEGER,
@@ -97,6 +110,7 @@ class DatabaseProvider {
     await db.execute('''
       CREATE TABLE books (
         id TEXT PRIMARY KEY,
+        profile_id TEXT NOT NULL DEFAULT 'default',
         title TEXT NOT NULL,
         source TEXT NOT NULL,
         original_file_path TEXT,
@@ -109,6 +123,7 @@ class DatabaseProvider {
     await db.execute('''
       CREATE TABLE word_entries (
         id TEXT PRIMARY KEY,
+        profile_id TEXT NOT NULL DEFAULT 'default',
         word TEXT NOT NULL,
         lang TEXT NOT NULL,
         from_book_id TEXT,
@@ -122,6 +137,7 @@ class DatabaseProvider {
     await db.execute('''
       CREATE TABLE learning_records (
         id TEXT PRIMARY KEY,
+        profile_id TEXT NOT NULL DEFAULT 'default',
         type TEXT NOT NULL,
         target TEXT NOT NULL,
         result REAL NOT NULL,
@@ -143,6 +159,8 @@ class DatabaseProvider {
     await db.execute(_createKnowledgePointIndexesSql);
     await db.execute(_createQuizAttemptsSql);
     await db.execute(_createQuizAttemptIndexesSql);
+    // v4：档案（多孩子模式）
+    await db.execute(_createProfilesSql);
   }
 
   /// 数据库迁移（版本升级时）。只做增量，不删旧数据。
@@ -162,6 +180,36 @@ class DatabaseProvider {
       await db.execute(_createKnowledgePointIndexesSql);
       await db.execute(_createQuizAttemptsSql);
       await db.execute(_createQuizAttemptIndexesSql);
+    }
+    if (oldVersion < 4) {
+      // v3 → v4：档案表 + 各业务表增加 profile_id 列
+      await db.execute(_createProfilesSql);
+      // ALTER TABLE 可能因 shared CREATE TABLE 常量已含 profile_id 而失败，
+      // try/catch 安全忽略「已存在」错误。
+      for (final table in [
+        'books',
+        'word_entries',
+        'learning_records',
+        'sentences',
+        'knowledge_points',
+        'quiz_attempts',
+      ]) {
+        try {
+          await db.execute(
+            "ALTER TABLE $table ADD COLUMN profile_id TEXT NOT NULL DEFAULT 'default'",
+          );
+        } catch (_) {
+          // column already exists — skip
+        }
+      }
+      // profile_id 查询索引
+      await db.execute('CREATE INDEX idx_books_profile ON books(profile_id)');
+      await db.execute(
+        'CREATE INDEX idx_words_profile ON word_entries(profile_id)',
+      );
+      await db.execute(
+        'CREATE INDEX idx_records_profile ON learning_records(profile_id)',
+      );
     }
   }
 

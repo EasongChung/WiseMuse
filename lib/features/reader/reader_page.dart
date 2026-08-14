@@ -955,7 +955,10 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
             color:
                 highlighted
                     ? StudyPalette.emberSoft
-                    : Colors.white.withValues(alpha: 0.6),
+                    : (Theme.of(context).brightness == Brightness.dark
+                            ? StudyPalette.darkCard
+                            : Colors.white)
+                        .withValues(alpha: 0.6),
             borderRadius: BorderRadius.circular(12),
             child: InkWell(
               borderRadius: BorderRadius.circular(12),

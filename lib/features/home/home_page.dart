@@ -246,7 +246,10 @@ class _BookCard extends StatelessWidget {
       onLongPress: () => _confirmDelete(context),
       child: Container(
         decoration: BoxDecoration(
-          color: Colors.white.withValues(alpha: 0.75),
+          color: (Theme.of(context).brightness == Brightness.dark
+                  ? StudyPalette.darkCard
+                  : Colors.white)
+              .withValues(alpha: 0.75),
           borderRadius: BorderRadius.circular(14),
           border: Border.all(color: StudyPalette.linen),
           boxShadow: [
