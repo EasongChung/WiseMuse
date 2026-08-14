@@ -25,6 +25,7 @@ import '../../services/text_position_service.dart';
 import '../../services/translation_engine.dart';
 import '../../vendor/flutter_pdfview/flutter_pdfview.dart';
 import '../knowledge/knowledge_detail_sheet.dart';
+import '../assistant/knowledge_explain_sheet.dart';
 import '../follow/follow_page.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 
@@ -1002,6 +1003,17 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
                     ),
                     tooltip: '标记生词',
                     onPressed: () => _markWord(s.text),
+                  ),
+                  // AI 讲解
+                  IconButton(
+                    icon: const Icon(
+                      Icons.auto_awesome,
+                      size: 18,
+                      color: StudyPalette.moss,
+                    ),
+                    tooltip: 'AI 讲解',
+                    onPressed:
+                        () => KnowledgeExplainSheet.show(context, s.text),
                   ),
                 ],
               ),

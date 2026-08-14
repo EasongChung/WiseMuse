@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../core/theme/app_theme.dart';
+import '../assistant/tutor_panel.dart';
 import '../dictation/dictation_page.dart';
 import '../follow/follow_page.dart';
 import '../quiz/quiz_hub_page.dart';
@@ -62,6 +63,29 @@ class PracticePage extends StatelessWidget {
               onTap:
                   () => Navigator.of(context).push(
                     MaterialPageRoute(builder: (_) => const QuizHubPage()),
+                  ),
+            ),
+            const SizedBox(height: 12),
+
+            // AI 助教推荐
+            _buildEntryCard(
+              context,
+              icon: Icons.auto_awesome,
+              color: StudyPalette.moss,
+              title: 'AI 助教',
+              subtitle: '今日推荐复习知识点评讲',
+              onTap:
+                  () => Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder:
+                          (_) => Scaffold(
+                            appBar: AppBar(title: const Text('AI 助教')),
+                            body: const SingleChildScrollView(
+                              padding: EdgeInsets.all(16),
+                              child: TutorPanel(),
+                            ),
+                          ),
+                    ),
                   ),
             ),
           ],
