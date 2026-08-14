@@ -98,6 +98,9 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
   int _workGeneration = 0;
   bool _switchingMode = false;
 
+  // [v2.9.0] 文本选区——选中文字后弹出查词栏
+  String? _selectedText;
+
   @override
   void initState() {
     super.initState();
@@ -902,131 +905,149 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
     final pageSentences = _textPages[_textPageIndex];
     final totalPages = _textPages.length;
 
-    return Column(
+    return Stack(
       children: [
-        // 页控件
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-          child: Row(children: [const Spacer(), _buildPageBar(totalPages)]),
+        Column(
+          children: [
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+              child: Row(children: [const Spacer(), _buildPageBar(totalPages)]),
+            ),
+            Expanded(child: _buildSwipeableSentenceList(pageSentences)),
+          ],
         ),
-
-        // 句子列表（多页文件支持左右滑翻页）
-        Expanded(child: _buildSwipeableSentenceList(pageSentences)),
+        // [v2.9.0] 浮底查词栏
+        if (_selectedText != null && _selectedText!.isNotEmpty)
+          Positioned(
+            left: 8,
+            right: 8,
+            bottom: 8,
+            child: _buildWordLookupBar(),
+          ),
       ],
     );
   }
 
   /// [v2.8.0] 可左右滑翻页的句子列表（多页文件包裹 GestureDetector）。
+  /// [v2.9.0] 包裹 SelectionArea 支持长按选词。
   Widget _buildSwipeableSentenceList(List<Sentence> sentences) {
-    final list = ListView.separated(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-      itemCount: sentences.length,
-      separatorBuilder: (_, _) => const SizedBox(height: 6),
-      itemBuilder: (context, index) {
-        final s = sentences[index];
-        final highlighted = _textHighlightIndex == index;
-        return Material(
-          color:
-              highlighted
-                  ? StudyPalette.emberSoft
-                  : Colors.white.withValues(alpha: 0.6),
-          borderRadius: BorderRadius.circular(12),
-          child: InkWell(
+    final content = SelectionArea(
+      onSelectionChanged: (selected) {
+        final text = selected?.plainText.trim();
+        setState(
+          () => _selectedText = (text != null && text.isNotEmpty) ? text : null,
+        );
+      },
+      child: ListView.separated(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+        itemCount: sentences.length,
+        separatorBuilder: (_, _) => const SizedBox(height: 6),
+        itemBuilder: (context, index) {
+          final s = sentences[index];
+          final highlighted = _textHighlightIndex == index;
+          return Material(
+            color:
+                highlighted
+                    ? StudyPalette.emberSoft
+                    : Colors.white.withValues(alpha: 0.6),
             borderRadius: BorderRadius.circular(12),
-            onTap: () {
-              setState(() => _textHighlightIndex = index);
-              _speak(s.text);
-            },
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 6),
-              child: Row(
-                children: [
-                  // 序号
-                  SizedBox(
-                    width: 24,
-                    child: Text(
-                      '${index + 1}',
-                      style: const TextStyle(
-                        fontSize: 12,
-                        color: StudyPalette.inkSoft,
-                      ),
-                    ),
-                  ),
-                  // 句子文本
-                  Expanded(
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 8,
-                        vertical: 4,
-                      ),
+            child: InkWell(
+              borderRadius: BorderRadius.circular(12),
+              onTap: () {
+                setState(() => _textHighlightIndex = index);
+                _speak(s.text);
+              },
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 6),
+                child: Row(
+                  children: [
+                    // 序号
+                    SizedBox(
+                      width: 24,
                       child: Text(
-                        s.text,
-                        style: TextStyle(
-                          fontSize: 18,
-                          height: 1.6,
-                          color:
-                              highlighted
-                                  ? StudyPalette.ember
-                                  : StudyPalette.ink,
-                          fontWeight:
-                              highlighted ? FontWeight.w600 : FontWeight.w400,
+                        '${index + 1}',
+                        style: const TextStyle(
+                          fontSize: 12,
+                          color: StudyPalette.inkSoft,
                         ),
                       ),
                     ),
-                  ),
-                  // 跟读入口
-                  IconButton(
-                    icon: const Icon(
-                      Icons.record_voice_over_outlined,
-                      size: 18,
-                      color: StudyPalette.ember,
+                    // 句子文本
+                    Expanded(
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 8,
+                          vertical: 4,
+                        ),
+                        child: Text(
+                          s.text,
+                          style: TextStyle(
+                            fontSize: 18,
+                            height: 1.6,
+                            color:
+                                highlighted
+                                    ? StudyPalette.ember
+                                    : StudyPalette.ink,
+                            fontWeight:
+                                highlighted ? FontWeight.w600 : FontWeight.w400,
+                          ),
+                        ),
+                      ),
                     ),
-                    tooltip: '跟读此句',
-                    onPressed: () => _openFollow(s.text),
-                  ),
-                  // 翻译
-                  IconButton(
-                    icon: const Icon(
-                      Icons.translate,
-                      size: 18,
-                      color: StudyPalette.inkSoft,
+                    // 跟读入口
+                    IconButton(
+                      icon: const Icon(
+                        Icons.record_voice_over_outlined,
+                        size: 18,
+                        color: StudyPalette.ember,
+                      ),
+                      tooltip: '跟读此句',
+                      onPressed: () => _openFollow(s.text),
                     ),
-                    tooltip: '翻译',
-                    onPressed: () => _translate(s.text),
-                  ),
-                  // 标记生词
-                  IconButton(
-                    icon: const Icon(
-                      Icons.bookmark_add_outlined,
-                      size: 18,
-                      color: StudyPalette.inkSoft,
+                    // 翻译
+                    IconButton(
+                      icon: const Icon(
+                        Icons.translate,
+                        size: 18,
+                        color: StudyPalette.inkSoft,
+                      ),
+                      tooltip: '翻译',
+                      onPressed: () => _translate(s.text),
                     ),
-                    tooltip: '标记生词',
-                    onPressed: () => _markWord(s.text),
-                  ),
-                  // AI 讲解
-                  IconButton(
-                    icon: const Icon(
-                      Icons.auto_awesome,
-                      size: 18,
-                      color: StudyPalette.moss,
+                    // 标记生词
+                    IconButton(
+                      icon: const Icon(
+                        Icons.bookmark_add_outlined,
+                        size: 18,
+                        color: StudyPalette.inkSoft,
+                      ),
+                      tooltip: '标记生词',
+                      onPressed: () => _markWord(s.text),
                     ),
-                    tooltip: 'AI 讲解',
-                    onPressed:
-                        () => KnowledgeExplainSheet.show(context, s.text),
-                  ),
-                ],
+                    // AI 讲解
+                    IconButton(
+                      icon: const Icon(
+                        Icons.auto_awesome,
+                        size: 18,
+                        color: StudyPalette.moss,
+                      ),
+                      tooltip: 'AI 讲解',
+                      onPressed:
+                          () => KnowledgeExplainSheet.show(context, s.text),
+                    ),
+                  ],
+                ),
               ),
             ),
-          ),
-        );
-      },
+          );
+        },
+      ),
     );
-    if (!_isMultiPage) return list;
+    if (!_isMultiPage) return content;
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
       onHorizontalDragEnd: _onTextSwipePage,
-      child: list,
+      child: content,
     );
   }
 
@@ -1357,47 +1378,56 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
   }
 
   /// 文本面板内当前页句子列表（复用 _buildTextView 的句子渲染）。
+  /// [v2.9.0] 包裹 SelectionArea 支持长按选词。
   Widget _buildSheetSentences() {
     final pages = _pageTexts;
     if (pages.isEmpty) return const SizedBox();
     final i = _pdfCurrentPage.clamp(0, pages.length - 1);
     if (i >= _textPages.length) return const SizedBox();
     final sentences = _textPages[i];
-    return ListView.separated(
-      controller: _sheetScrollController,
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-      itemCount: sentences.length,
-      separatorBuilder: (_, _) => const Divider(height: 1, indent: 16),
-      itemBuilder: (context, index) {
-        final s = sentences[index];
-        return ListTile(
-          dense: true,
-          title: Text(
-            s.text,
-            style: const TextStyle(fontSize: 15, color: StudyPalette.ink),
-          ),
-          trailing: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              _compactIcon(
-                Icons.record_voice_over_outlined,
-                '跟读',
-                () => _openFollow(s.text),
-              ),
-              _compactIcon(
-                Icons.bookmark_add_outlined,
-                '标记生词',
-                () => _markWord(s.text),
-              ),
-            ],
-          ),
-          onTap: () {
-            _textHighlightIndex = index;
-            _speak(s.text);
-          },
+    return SelectionArea(
+      onSelectionChanged: (selected) {
+        final text = selected?.plainText.trim();
+        setState(
+          () => _selectedText = (text != null && text.isNotEmpty) ? text : null,
         );
       },
-    );
+      child: ListView.separated(
+        controller: _sheetScrollController,
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        itemCount: sentences.length,
+        separatorBuilder: (_, _) => const Divider(height: 1, indent: 16),
+        itemBuilder: (context, index) {
+          final s = sentences[index];
+          return ListTile(
+            dense: true,
+            title: Text(
+              s.text,
+              style: const TextStyle(fontSize: 15, color: StudyPalette.ink),
+            ),
+            trailing: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                _compactIcon(
+                  Icons.record_voice_over_outlined,
+                  '跟读',
+                  () => _openFollow(s.text),
+                ),
+                _compactIcon(
+                  Icons.bookmark_add_outlined,
+                  '标记生词',
+                  () => _markWord(s.text),
+                ),
+              ],
+            ),
+            onTap: () {
+              _textHighlightIndex = index;
+              _speak(s.text);
+            },
+          );
+        },
+      ), // ListView.separated
+    ); // SelectionArea
   }
 
   /// 紧凑图标按钮（36px 约束，用于文本面板导航）。
@@ -1466,6 +1496,195 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
                   },
                 ),
             ],
+          ),
+    );
+  }
+
+  // ===== [v2.9.0] 长按选词查词 =====
+
+  /// 浮底查词栏：选中文字后显示 [查词] / [加入生词本] / [取消]。
+  Widget _buildWordLookupBar() {
+    final word = _selectedText ?? '';
+    return Material(
+      elevation: 4,
+      borderRadius: BorderRadius.circular(14),
+      color: StudyPalette.parchment,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        child: Row(
+          children: [
+            // 选中文本预览（截断显示）
+            Flexible(
+              child: Text(
+                word.length > 24 ? '${word.substring(0, 24)}…' : word,
+                style: const TextStyle(
+                  fontSize: 15,
+                  fontWeight: FontWeight.w600,
+                  color: StudyPalette.ink,
+                ),
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+            const SizedBox(width: 8),
+            // 查词
+            TextButton.icon(
+              style: TextButton.styleFrom(
+                visualDensity: VisualDensity.compact,
+                foregroundColor: StudyPalette.ember,
+              ),
+              icon: const Icon(Icons.search, size: 18),
+              label: const Text('查词', style: TextStyle(fontSize: 13)),
+              onPressed: () => _lookupWord(word),
+            ),
+            // 加入生词本
+            TextButton.icon(
+              style: TextButton.styleFrom(
+                visualDensity: VisualDensity.compact,
+                foregroundColor: StudyPalette.ink,
+              ),
+              icon: const Icon(Icons.bookmark_add_outlined, size: 18),
+              label: const Text('加入生词本', style: TextStyle(fontSize: 13)),
+              onPressed: () {
+                _markWord(word);
+                setState(() => _selectedText = null);
+              },
+            ),
+            // 取消
+            TextButton(
+              style: TextButton.styleFrom(
+                visualDensity: VisualDensity.compact,
+                foregroundColor: StudyPalette.inkSoft,
+                padding: const EdgeInsets.symmetric(horizontal: 6),
+              ),
+              child: const Text('取消', style: TextStyle(fontSize: 13)),
+              onPressed: () => setState(() => _selectedText = null),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// 查词：调翻译引擎获取释义，以 BottomSheet 展示并支持加入生词本。
+  Future<void> _lookupWord(String word) async {
+    final trimmed = word.trim();
+    if (trimmed.isEmpty) return;
+    // 收起浮动查词栏
+    setState(() => _selectedText = null);
+
+    AppLog.d(_tag, '查词: "$trimmed"');
+    // 判断语言方向：含中文字符 zh→en，否则 en→zh
+    final hasCjk = RegExp(r'[一-鿿]').hasMatch(trimmed);
+    final sourceLang = hasCjk ? 'zh' : 'en';
+    final targetLang = hasCjk ? 'en' : 'zh';
+
+    String? trans;
+    try {
+      trans = await TranslationEngine.translate(
+        trimmed,
+        source: sourceLang,
+        target: targetLang,
+      );
+    } catch (e) {
+      AppLog.e(_tag, '查词翻译失败: $e');
+    }
+
+    if (!mounted) return;
+
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: StudyPalette.parchment,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(18)),
+      ),
+      builder:
+          (ctx) => Padding(
+            padding: const EdgeInsets.all(20),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // 标题行：单词 + 语言方向标签
+                Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        trimmed,
+                        style: const TextStyle(
+                          fontSize: 22,
+                          fontWeight: FontWeight.w700,
+                          color: StudyPalette.ink,
+                        ),
+                      ),
+                    ),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 8,
+                        vertical: 3,
+                      ),
+                      decoration: BoxDecoration(
+                        color: StudyPalette.emberSoft,
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Text(
+                        '$sourceLang → $targetLang',
+                        style: const TextStyle(
+                          fontSize: 11,
+                          color: StudyPalette.ember,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                // 释义
+                if (trans != null && trans.isNotEmpty)
+                  Text(
+                    trans,
+                    style: const TextStyle(
+                      fontSize: 18,
+                      color: StudyPalette.ember,
+                      fontWeight: FontWeight.w600,
+                      height: 1.5,
+                    ),
+                  )
+                else
+                  const Text(
+                    '暂无释义结果',
+                    style: TextStyle(fontSize: 16, color: StudyPalette.inkSoft),
+                  ),
+                const SizedBox(height: 16),
+                // 加入生词本
+                SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton.icon(
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: StudyPalette.ember,
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(vertical: 12),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                    ),
+                    icon: const Icon(Icons.bookmark_add, size: 20),
+                    label: const Text('加入生词本', style: TextStyle(fontSize: 15)),
+                    onPressed: () {
+                      _markWord(trimmed);
+                      Navigator.of(ctx).pop();
+                      if (mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            content: Text('已加入生词本：$trimmed'),
+                            duration: const Duration(seconds: 2),
+                          ),
+                        );
+                      }
+                    },
+                  ),
+                ),
+              ],
+            ),
           ),
     );
   }

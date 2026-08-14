@@ -11,6 +11,7 @@ import '../../core/storage/database.dart';
 import '../../core/storage/knowledge_point_dao.dart';
 import '../../core/storage/learning_record_dao.dart';
 import '../../core/storage/quiz_attempt_dao.dart';
+import '../../core/storage/word_entry_dao.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/utils/json_util.dart';
 import '../../services/ai_service.dart';
@@ -86,6 +87,7 @@ class _QuizPageState extends State<QuizPage> {
       final questions = QuizQuestionBuilder.buildQuestions(
         points,
         hasAi: hasAi,
+        wrongWords: await _loadWrongWords(),
       );
 
       setState(() {
@@ -100,6 +102,25 @@ class _QuizPageState extends State<QuizPage> {
     } catch (e, s) {
       AppLog.e(_tag, '测验初始化失败: $e\n$s');
       if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  /// [v2.8.0] 加载错词权重表 {word: wrongCount}，用于个性化出题。
+  Future<Map<String, int>> _loadWrongWords() async {
+    try {
+      final db = await DatabaseProvider.database;
+      final dao = WordEntryDao(db);
+      final words = await dao.getAll();
+      final result = <String, int>{};
+      for (final w in words) {
+        if (w.wrongCount > 0) {
+          result[w.word] = w.wrongCount;
+        }
+      }
+      return result;
+    } catch (e) {
+      AppLog.e('quiz', '加载错词失败: $e');
+      return const {};
     }
   }
 
