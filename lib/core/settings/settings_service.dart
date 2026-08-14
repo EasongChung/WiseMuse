@@ -148,4 +148,14 @@ class SettingsService {
       true;
   Future<void> setAutoLoadLocalModel(bool v) async =>
       (await SharedPreferences.getInstance()).setBool(kAutoLoadLocalModel, v);
+
+  // ---- [v2.11.0] Vosk 跟读模型路径 ----
+
+  /// Vosk 中文模型目录路径（在线下载或导入后保存），空=未配置。
+  static const kVoskModelPath = 'vosk_model_path';
+
+  Future<String?> getVoskModelPath() async =>
+      (await SharedPreferences.getInstance()).getString(kVoskModelPath);
+  Future<void> setVoskModelPath(String v) async =>
+      (await SharedPreferences.getInstance()).setString(kVoskModelPath, v);
 }

@@ -100,6 +100,11 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
   int _workGeneration = 0;
   bool _switchingMode = false;
 
+  // [v2.11.0] 播放状态追踪：_speakingStartedAt == _speechRequest 时表示 TTS 正在播放。
+  int _speakingStartedAt = 0;
+  bool get _ttsSpeaking =>
+      _speakingStartedAt > 0 && _speakingStartedAt == _speechRequest;
+
   // [v2.9.0] 文本选区——选中文字后弹出查词栏
   String? _selectedText;
 
@@ -531,8 +536,13 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
 
   Future<void> _speakRequest(String text, int request) async {
     if (text.trim().isEmpty || !_isSpeechRequestCurrent(request)) return;
+    _speakingStartedAt = request;
     AppLog.d(_tag, '朗读: "$text"');
     final ok = await _tts.speak(text);
+    // 如果当前请求仍是最新，重置播放状态
+    if (_isSpeechRequestCurrent(request)) {
+      _speakingStartedAt = 0;
+    }
     if (!ok && _isSpeechRequestCurrent(request)) {
       AppLog.w(_tag, 'TTS speak 未完成: "$text"');
     }
@@ -713,30 +723,13 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
       appBar: AppBar(
         title: Text(widget.book.title),
         actions: [
-          if (_useOriginal && _hasOriginal())
-            IconButton(
-              tooltip: '查看文本',
-              icon: const Icon(Icons.text_fields),
-              onPressed: _showTextSheet,
-            ),
           if (_hasOriginal())
             IconButton(
               tooltip: _useOriginal ? '切换文本模式' : '切换原文模式',
               icon: Icon(
-                _useOriginal ? Icons.image_outlined : Icons.text_fields,
+                _useOriginal ? Icons.text_fields : Icons.picture_as_pdf,
               ),
               onPressed: _switchingMode ? null : _switchViewMode,
-            ),
-          // [v2.9.0] 文本模式：连读本页 + 本页知识点（原文模式在底部面板）
-          if (!_useOriginal)
-            IconButton(
-              tooltip: _autoPlaying ? '停止连读' : '连读本页',
-              icon: Icon(
-                _autoPlaying
-                    ? Icons.stop_circle_outlined
-                    : Icons.play_circle_outline,
-              ),
-              onPressed: _autoPlaying ? _stopAutoPlay : _startAutoPlay,
             ),
           if (!_useOriginal)
             IconButton(
@@ -757,16 +750,30 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
 
   Widget _buildBody() {
     final source = widget.book.source;
+    Widget content;
     if (source == BookSource.pdf && _useOriginal) {
-      return _buildPdfView();
+      content = _buildPdfView();
+    } else if (source == BookSource.camera || source == BookSource.gallery) {
+      content = _buildImageView();
+    } else if (source == BookSource.word && _useOriginal) {
+      content = _buildWordView();
+    } else {
+      content = _buildTextView();
     }
-    if (source == BookSource.camera || source == BookSource.gallery) {
-      return _buildImageView();
+
+    // [v2.11.0] 原文模式：上滑唤出文本弹窗
+    if (_useOriginal && _hasOriginal()) {
+      content = GestureDetector(
+        behavior: HitTestBehavior.translucent,
+        onVerticalDragEnd: (d) {
+          if (d.primaryVelocity != null && d.primaryVelocity! < -350) {
+            _showTextSheet();
+          }
+        },
+        child: content,
+      );
     }
-    if (source == BookSource.word && _useOriginal) {
-      return _buildWordView();
-    }
-    return _buildTextView();
+    return content;
   }
 
   Widget _buildPdfView() {
@@ -776,6 +783,7 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
     return PDFView(
       filePath: path,
       enableSwipe: true,
+      defaultPage: _isMultiPage ? _pdfCurrentPage : 0,
       onViewCreated: (controller) async {
         if (!mounted || viewGeneration != _pdfViewGeneration) return;
         _pdfController = controller;
@@ -1325,41 +1333,24 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
     });
   }
 
-  /// 文本面板内页导航栏（原文模式→播放控制，文本模式→翻页控制）。
+  /// 文本面板内页导航栏（统一：翻页 + 连读 + 翻译 + 页码选择器）。
   Widget _buildSheetPageNav() {
-    final isOrig = _useOriginal;
     final total = _pageTexts.length;
     return Padding(
       padding: const EdgeInsets.fromLTRB(8, 2, 8, 2),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          if (isOrig) ...[
-            // 原文模式：播放控制
-            _compactIcon(
-              Icons.skip_previous,
-              '上一句',
-              _textHighlightIndex != null && _textHighlightIndex! > 0
-                  ? () => setState(
-                    () => _textHighlightIndex = _textHighlightIndex! - 1,
-                  )
-                  : null,
-            ),
-            _compactIcon(Icons.play_arrow, '朗读', () => _speak(_displayText)),
-            _compactIcon(Icons.stop, '停止', _stopAutoPlay),
-            _compactIcon(Icons.skip_next, '下一句', null),
-            _compactIcon(
-              Icons.translate,
-              '翻译当前句',
-              () => _translate(_displayText),
-            ),
-          ] else ...[
-            // 文本模式：翻页控制
-            _compactIcon(
-              Icons.chevron_left,
-              '上一页',
-              _pdfCurrentPage > 0 ? () => _syncPage(_pdfCurrentPage - 1) : null,
-            ),
+          // 上翻页
+          _compactIcon(
+            Icons.chevron_left,
+            '上一页',
+            _pdfCurrentPage > 0 && total > 1
+                ? () => _syncPage(_pdfCurrentPage - 1)
+                : null,
+          ),
+          // 页码选择器（弹出全宽页码列表）
+          if (total > 1)
             TextButton(
               style: TextButton.styleFrom(
                 visualDensity: VisualDensity.compact,
@@ -1367,27 +1358,153 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
                 padding: const EdgeInsets.symmetric(horizontal: 6),
                 tapTargetSize: MaterialTapTargetSize.shrinkWrap,
               ),
-              onPressed: total > 1 ? _showPdfToc : null,
-              child: Text(
-                '${_pdfCurrentPage + 1} / $total',
-                style: const TextStyle(fontSize: 13, color: StudyPalette.ink),
+              onPressed: _showPageSelector,
+              child: const Icon(
+                Icons.grid_view,
+                size: 16,
+                color: StudyPalette.ink,
               ),
             ),
-            _compactIcon(
-              Icons.chevron_right,
-              '下一页',
-              _pdfCurrentPage < total - 1
-                  ? () => _syncPage(_pdfCurrentPage + 1)
-                  : null,
+          Text(
+            '${_pdfCurrentPage + 1} / $total',
+            style: const TextStyle(
+              fontSize: 13,
+              fontWeight: FontWeight.w600,
+              color: StudyPalette.ink,
             ),
-            _compactIcon(
-              Icons.translate,
-              '翻译当前句',
-              () => _translate(_displayText),
+          ),
+          if (total > 1)
+            TextButton(
+              style: TextButton.styleFrom(
+                visualDensity: VisualDensity.compact,
+                minimumSize: const Size(0, 0),
+                padding: const EdgeInsets.symmetric(horizontal: 6),
+                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              ),
+              onPressed: _showPageSelector,
+              child: const Icon(
+                Icons.grid_view,
+                size: 16,
+                color: StudyPalette.ink,
+              ),
             ),
-          ],
+          // 下翻页
+          _compactIcon(
+            Icons.chevron_right,
+            '下一页',
+            _pdfCurrentPage < total - 1 && total > 1
+                ? () => _syncPage(_pdfCurrentPage + 1)
+                : null,
+          ),
+          // [v2.11.0] 连读/停止（替代 AppBar 中的全屏连读按钮）
+          if (_isMultiPage)
+            _compactIcon(
+              _autoPlaying
+                  ? Icons.stop_circle_outlined
+                  : Icons.play_circle_outline,
+              _autoPlaying ? '停止连读' : '连读本页',
+              _autoPlaying ? _stopAutoPlay : _startAutoPlay,
+            ),
+          _compactIcon(
+            Icons.translate,
+            '翻译当前页',
+            () => _translate(_displayText),
+          ),
         ],
       ),
+    );
+  }
+
+  /// [v2.11.0] 全宽页码选择器弹窗：列出所有页码，点击跳转。
+  void _showPageSelector() {
+    final pages = _pageTexts;
+    if (pages.length <= 1) return;
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: false,
+      backgroundColor: StudyPalette.parchment,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(18)),
+      ),
+      builder:
+          (_) => SizedBox(
+            height: MediaQuery.of(context).size.height * 0.55,
+            child: Column(
+              children: [
+                Center(
+                  child: Container(
+                    width: 32,
+                    height: 4,
+                    margin: const EdgeInsets.only(top: 12, bottom: 8),
+                    decoration: BoxDecoration(
+                      color: StudyPalette.linen,
+                      borderRadius: BorderRadius.circular(2),
+                    ),
+                  ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 16,
+                    vertical: 8,
+                  ),
+                  child: Row(
+                    children: [
+                      Text('选择页码', style: titleStyle(fontSize: 16)),
+                      const Spacer(),
+                      TextButton.icon(
+                        icon: const Icon(Icons.close, size: 16),
+                        label: const Text('关闭', style: TextStyle(fontSize: 12)),
+                        onPressed: () => Navigator.of(context).pop(),
+                      ),
+                    ],
+                  ),
+                ),
+                const Divider(height: 1),
+                Expanded(
+                  child: GridView.builder(
+                    padding: const EdgeInsets.all(12),
+                    gridDelegate:
+                        const SliverGridDelegateWithFixedCrossAxisCount(
+                          crossAxisCount: 5,
+                          mainAxisSpacing: 8,
+                          crossAxisSpacing: 8,
+                          childAspectRatio: 1.0,
+                        ),
+                    itemCount: pages.length,
+                    itemBuilder: (ctx, i) {
+                      final selected = i == _pdfCurrentPage;
+                      return Material(
+                        color:
+                            selected ? StudyPalette.ember : Colors.transparent,
+                        borderRadius: BorderRadius.circular(10),
+                        child: InkWell(
+                          borderRadius: BorderRadius.circular(10),
+                          onTap: () {
+                            _syncPage(i);
+                            if (_useOriginal && _pdfController != null) {
+                              _pdfController!.setPage(i);
+                            }
+                            Navigator.of(context).pop();
+                          },
+                          child: Center(
+                            child: Text(
+                              '${i + 1}',
+                              style: TextStyle(
+                                color:
+                                    selected ? Colors.white : StudyPalette.ink,
+                                fontSize: 18,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ),
+                        ),
+                      );
+                    },
+                  ),
+                ),
+              ],
+            ),
+          ),
     );
   }
 
@@ -1578,26 +1695,24 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
         padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
         child: Row(
           children: [
-            // 朗读当前句
+            // [v2.11.0] 朗读/停止合一：播放时显示停止图标，不播放时显示播放图标
             IconButton(
-              icon: const Icon(Icons.play_arrow, size: 20),
-              tooltip: '朗读',
-              color: StudyPalette.ember,
+              icon: Icon(
+                _ttsSpeaking ? Icons.stop : Icons.play_arrow,
+                size: 20,
+              ),
+              tooltip: _ttsSpeaking ? '停止' : '朗读',
+              color: _ttsSpeaking ? StudyPalette.inkSoft : StudyPalette.ember,
               onPressed: () {
-                if (_activeSentenceIndex != null) {
-                  setState(() => _textHighlightIndex = _activeSentenceIndex);
+                if (_ttsSpeaking) {
+                  _speechRequest++;
+                  unawaited(_tts.stop());
+                } else {
+                  if (_activeSentenceIndex != null) {
+                    setState(() => _textHighlightIndex = _activeSentenceIndex);
+                  }
+                  _speak(text);
                 }
-                _speak(text);
-              },
-            ),
-            // 停止朗读
-            IconButton(
-              icon: const Icon(Icons.stop, size: 20),
-              tooltip: '停止',
-              color: StudyPalette.inkSoft,
-              onPressed: () {
-                _speechRequest++;
-                unawaited(_tts.stop());
               },
             ),
             // 跟读
@@ -1676,9 +1791,9 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
     if (!mounted) return;
 
     if (!ready) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('该教材尚未构建知识库，请先在书架中构建')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('该教材尚未构建知识库，请先在书架中构建')));
       return;
     }
 
@@ -1696,7 +1811,9 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(18)),
       ),
-      builder: (_) => _RagQaSheetContent(bookId: bookId, initialQuestion: sentenceText),
+      builder:
+          (_) =>
+              _RagQaSheetContent(bookId: bookId, initialQuestion: sentenceText),
     );
   }
 
@@ -1832,7 +1949,12 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
     Navigator.of(context).push(
       MaterialPageRoute(
         builder:
-            (_) => FollowPage(initialSentence: text, bookId: widget.book.id),
+            (_) => FollowPage(
+              initialSentence: text,
+              bookId: widget.book.id,
+              bookTitle: widget.book.title,
+              pageNumber: _pdfCurrentPage,
+            ),
       ),
     );
   }
@@ -1889,10 +2011,7 @@ class _HighlightPainter extends CustomPainter {
 ///
 /// 初始问题默认为当前句子，可修改。Markdown 渲染回答。
 class _RagQaSheetContent extends StatefulWidget {
-  const _RagQaSheetContent({
-    required this.bookId,
-    this.initialQuestion,
-  });
+  const _RagQaSheetContent({required this.bookId, this.initialQuestion});
 
   final String bookId;
   final String? initialQuestion;
@@ -1912,7 +2031,8 @@ class _RagQaSheetContentState extends State<_RagQaSheetContent> {
     super.initState();
     _controller = TextEditingController(text: widget.initialQuestion ?? '');
     // 有初始问题时自动提问
-    if (widget.initialQuestion != null && widget.initialQuestion!.trim().isNotEmpty) {
+    if (widget.initialQuestion != null &&
+        widget.initialQuestion!.trim().isNotEmpty) {
       _ask();
     }
   }
@@ -1970,12 +2090,20 @@ class _RagQaSheetContentState extends State<_RagQaSheetContent> {
               // 标题
               Row(
                 children: [
-                  const Icon(Icons.psychology, size: 20, color: StudyPalette.spinePdf),
+                  const Icon(
+                    Icons.psychology,
+                    size: 20,
+                    color: StudyPalette.spinePdf,
+                  ),
                   const SizedBox(width: 8),
                   Text('问AI', style: titleStyle(fontSize: 18)),
                   const Spacer(),
                   IconButton(
-                    icon: const Icon(Icons.close, size: 20, color: StudyPalette.inkSoft),
+                    icon: const Icon(
+                      Icons.close,
+                      size: 20,
+                      color: StudyPalette.inkSoft,
+                    ),
                     onPressed: () => Navigator.of(context).pop(),
                   ),
                 ],
@@ -2003,13 +2131,17 @@ class _RagQaSheetContentState extends State<_RagQaSheetContent> {
                   ),
                   const SizedBox(width: 8),
                   IconButton.filled(
-                    icon: _loading
-                        ? const SizedBox(
-                            width: 18,
-                            height: 18,
-                            child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
-                          )
-                        : const Icon(Icons.send, size: 18),
+                    icon:
+                        _loading
+                            ? const SizedBox(
+                              width: 18,
+                              height: 18,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                color: Colors.white,
+                              ),
+                            )
+                            : const Icon(Icons.send, size: 18),
                     style: IconButton.styleFrom(
                       backgroundColor: StudyPalette.ember,
                       foregroundColor: Colors.white,
@@ -2021,9 +2153,7 @@ class _RagQaSheetContentState extends State<_RagQaSheetContent> {
               const SizedBox(height: 16),
 
               // 回答区
-              Expanded(
-                child: _buildAnswer(scrollController),
-              ),
+              Expanded(child: _buildAnswer(scrollController)),
             ],
           ),
         );
@@ -2083,44 +2213,53 @@ class _RagQaSheetContentState extends State<_RagQaSheetContent> {
     final lines = md.split('\n');
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
-      children: lines.map((line) {
-        final t = line.trim();
-        if (t.isEmpty) return const SizedBox(height: 8);
+      children:
+          lines.map((line) {
+            final t = line.trim();
+            if (t.isEmpty) return const SizedBox(height: 8);
 
-        // 标题
-        final headerMatch = RegExp(r'^#{1,3}\s+(.*)').firstMatch(t);
-        if (headerMatch != null) {
-          return Padding(
-            padding: const EdgeInsets.only(top: 12, bottom: 4),
-            child: Text(
-              headerMatch.group(1)!,
-              style: titleStyle(
-                fontSize: t.startsWith('###') ? 14 : t.startsWith('##') ? 16 : 18,
-              ),
-            ),
-          );
-        }
+            // 标题
+            final headerMatch = RegExp(r'^#{1,3}\s+(.*)').firstMatch(t);
+            if (headerMatch != null) {
+              return Padding(
+                padding: const EdgeInsets.only(top: 12, bottom: 4),
+                child: Text(
+                  headerMatch.group(1)!,
+                  style: titleStyle(
+                    fontSize:
+                        t.startsWith('###')
+                            ? 14
+                            : t.startsWith('##')
+                            ? 16
+                            : 18,
+                  ),
+                ),
+              );
+            }
 
-        // 列表
-        if (t.startsWith('- ') || t.startsWith('* ')) {
-          return Padding(
-            padding: const EdgeInsets.only(left: 8, top: 2, bottom: 2),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Text('•  ', style: TextStyle(color: StudyPalette.ember)),
-                Expanded(child: _buildRichText(t.substring(2))),
-              ],
-            ),
-          );
-        }
+            // 列表
+            if (t.startsWith('- ') || t.startsWith('* ')) {
+              return Padding(
+                padding: const EdgeInsets.only(left: 8, top: 2, bottom: 2),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      '•  ',
+                      style: TextStyle(color: StudyPalette.ember),
+                    ),
+                    Expanded(child: _buildRichText(t.substring(2))),
+                  ],
+                ),
+              );
+            }
 
-        // 普通文本（含加粗）
-        return Padding(
-          padding: const EdgeInsets.symmetric(vertical: 2),
-          child: _buildRichText(t),
-        );
-      }).toList(),
+            // 普通文本（含加粗）
+            return Padding(
+              padding: const EdgeInsets.symmetric(vertical: 2),
+              child: _buildRichText(t),
+            );
+          }).toList(),
     );
   }
 
@@ -2133,13 +2272,15 @@ class _RagQaSheetContentState extends State<_RagQaSheetContent> {
       if (match.start > lastEnd) {
         spans.add(TextSpan(text: text.substring(lastEnd, match.start)));
       }
-      spans.add(TextSpan(
-        text: match.group(1),
-        style: const TextStyle(
-          fontWeight: FontWeight.bold,
-          color: StudyPalette.ink,
+      spans.add(
+        TextSpan(
+          text: match.group(1),
+          style: const TextStyle(
+            fontWeight: FontWeight.bold,
+            color: StudyPalette.ink,
+          ),
         ),
-      ));
+      );
       lastEnd = match.end;
     }
     if (lastEnd < text.length) {

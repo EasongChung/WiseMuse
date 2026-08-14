@@ -69,6 +69,9 @@ class _SettingsPageState extends State<SettingsPage> {
   bool _autoLoadLocal = true;
   String? _defaultLocalModel;
 
+  // [v2.11.0] Vosk 语音模型状态
+  bool _voskBusy = false;
+
   bool _initDone = false;
 
   // 源语种选项（含自动识别）
@@ -306,6 +309,9 @@ class _SettingsPageState extends State<SettingsPage> {
                   const SizedBox(height: 24),
                   _buildSectionTitle('AI 离线优先'),
                   _buildOfflineToggle(),
+                  const SizedBox(height: 24),
+                  _buildSectionTitle('语音识别模型（Vosk 跟读）'),
+                  _buildVoskSection(),
                   const SizedBox(height: 24),
                   _buildSectionTitle('本地 AI 模型'),
                   _buildLocalModelSection(),
@@ -680,6 +686,107 @@ class _SettingsPageState extends State<SettingsPage> {
     );
   }
 
+  // ===== [v2.11.0] Vosk 语音模型管理 =====
+
+  /// Vosk 模型状态 + 在线下载 / 文件导入。
+  Widget _buildVoskSection() {
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    _voskBusy ? '操作中…' : 'Vosk 中文小模型',
+                    style: const TextStyle(
+                      fontSize: 13,
+                      color: StudyPalette.ink,
+                    ),
+                  ),
+                ),
+                if (_voskBusy)
+                  const SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            SizedBox(
+              width: double.infinity,
+              child: OutlinedButton.icon(
+                icon: const Icon(Icons.download, size: 16),
+                label: const Text('在线下载', style: TextStyle(fontSize: 12)),
+                onPressed: _voskBusy ? null : _downloadVoskModel,
+              ),
+            ),
+            const SizedBox(height: 4),
+            SizedBox(
+              width: double.infinity,
+              child: OutlinedButton.icon(
+                icon: const Icon(Icons.file_open, size: 16),
+                label: const Text('从文件导入', style: TextStyle(fontSize: 12)),
+                onPressed: _voskBusy ? null : _importVoskModel,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _downloadVoskModel() async {
+    setState(() => _voskBusy = true);
+    try {
+      final modelPath = await ModelStore.ensureVoskCnModel();
+      await SettingsService.instance.setVoskModelPath(modelPath);
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Vosk 中文模型下载完成 ✓')));
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Vosk 下载失败: $e')));
+      }
+    } finally {
+      if (mounted) setState(() => _voskBusy = false);
+    }
+  }
+
+  Future<void> _importVoskModel() async {
+    final result = await FilePicker.pickFiles(
+      type: FileType.custom,
+      allowedExtensions: const ['zip'],
+      dialogTitle: '选择 Vosk 模型 zip 文件',
+    );
+    if (result == null || result.files.isEmpty || !mounted) return;
+    final path = result.files.single.path;
+    if (path == null) return;
+    setState(() => _voskBusy = true);
+    try {
+      final modelPath = await ModelStore.importFromZip(path);
+      await SettingsService.instance.setVoskModelPath(modelPath);
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Vosk 模型导入成功 ✓')));
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Vosk 导入失败: $e')));
+      }
+    } finally {
+      if (mounted) setState(() => _voskBusy = false);
+    }
+  }
+
   // ===== [v2.10.0] RAG 知识库 =====
 
   Future<void> _refreshRagStatus() async {
@@ -697,7 +804,11 @@ class _SettingsPageState extends State<SettingsPage> {
             // Embedding 模型名
             Row(
               children: [
-                const Icon(Icons.auto_awesome, size: 20, color: StudyPalette.ink),
+                const Icon(
+                  Icons.auto_awesome,
+                  size: 20,
+                  color: StudyPalette.ink,
+                ),
                 const SizedBox(width: 8),
                 Expanded(
                   child: TextField(
@@ -752,7 +863,11 @@ class _SettingsPageState extends State<SettingsPage> {
             // 索引状态
             Row(
               children: [
-                const Icon(Icons.storage, size: 18, color: StudyPalette.inkSoft),
+                const Icon(
+                  Icons.storage,
+                  size: 18,
+                  color: StudyPalette.inkSoft,
+                ),
                 const SizedBox(width: 8),
                 Text(
                   '已索引 ${_indexedBooks.length} 本教材',
@@ -788,7 +903,10 @@ class _SettingsPageState extends State<SettingsPage> {
             SwitchListTile(
               dense: true,
               contentPadding: EdgeInsets.zero,
-              title: const Text('AI 对话时自动加载本地模型', style: TextStyle(fontSize: 14)),
+              title: const Text(
+                'AI 对话时自动加载本地模型',
+                style: TextStyle(fontSize: 14),
+              ),
               subtitle: const Text(
                 '在线 API 故障时自动回落本地模型',
                 style: TextStyle(fontSize: 12, color: StudyPalette.inkSoft),
@@ -806,7 +924,11 @@ class _SettingsPageState extends State<SettingsPage> {
             if (_localModels.isNotEmpty) ...[
               Row(
                 children: [
-                  const Icon(Icons.model_training, size: 18, color: StudyPalette.ink),
+                  const Icon(
+                    Icons.model_training,
+                    size: 18,
+                    color: StudyPalette.ink,
+                  ),
                   const SizedBox(width: 8),
                   Text('默认模型', style: titleStyle(fontSize: 14)),
                   const Spacer(),
@@ -818,7 +940,10 @@ class _SettingsPageState extends State<SettingsPage> {
                         _localModels.map((m) {
                           return DropdownMenuItem(
                             value: m.path,
-                            child: Text(m.name, style: const TextStyle(fontSize: 13)),
+                            child: Text(
+                              m.name,
+                              style: const TextStyle(fontSize: 13),
+                            ),
                           );
                         }).toList(),
                     onChanged: (v) {
@@ -888,26 +1013,27 @@ class _SettingsPageState extends State<SettingsPage> {
   }
 
   Future<void> _downloadPresetModel(String filename, String label) async {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('开始下载 $label…')),
-    );
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text('开始下载 $label…')));
     try {
-      final url = 'https://modelscope.cn/models/qwen/Qwen3-0.6B-GGUF/resolve/master/$filename';
+      final url =
+          'https://modelscope.cn/models/qwen/Qwen3-0.6B-GGUF/resolve/master/$filename';
       final dir = await ModelStore.llmModelsDir();
       final savePath = '${dir.path}/$filename';
       await _downloadFile(url, savePath);
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('$label 下载完成')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('$label 下载完成')));
         _localModels = await _scanLocalModels();
         if (mounted) setState(() {});
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('下载失败: $e')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('下载失败: $e')));
       }
     }
   }
@@ -923,16 +1049,16 @@ class _SettingsPageState extends State<SettingsPage> {
     if (path == null) return;
     try {
       await ModelStore.importGguf(path);
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('GGUF 模型导入成功')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('GGUF 模型导入成功')));
       _localModels = await _scanLocalModels();
       if (mounted) setState(() {});
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('导入失败: $e')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('导入失败: $e')));
       }
     }
   }

@@ -1,25 +1,28 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:permission_handler/permission_handler.dart';
 
 import '../../core/debug/app_log.dart';
+import '../../core/models/knowledge_point.dart';
 import '../../core/models/learning_record.dart';
+import '../../core/models/sentence.dart';
 import '../../core/models/word_entry.dart';
+import '../../core/settings/settings_service.dart';
 import '../../core/storage/database.dart';
+import '../../core/storage/knowledge_point_dao.dart';
 import '../../core/storage/learning_record_dao.dart';
+import '../../core/storage/sentence_dao.dart';
 import '../../core/storage/word_entry_dao.dart';
 import '../../core/theme/app_theme.dart';
 import '../../services/asr_service.dart';
 import '../../services/native_tts_service.dart';
 import '../../services/tts_service.dart';
 import '../../services/vosk_asr_service.dart';
-import '../../widgets/model_panel.dart';
-import '../debug/log_page.dart';
-import 'asr_demo_page.dart';
+import '../settings/settings_page.dart';
 import 'scoring.dart';
-import '../debug/llm_demo_page.dart';
 
 /// [v0.1.0] [v2.9.0] 跟读练习页（核心链路：放音 → 录音 → 识别 → 评分 → 生词落库）。
 ///
@@ -29,10 +32,18 @@ import '../debug/llm_demo_page.dart';
 /// - 星级 + 友好评语
 /// - 音节相似度指标
 class FollowPage extends StatefulWidget {
-  const FollowPage({super.key, this.initialSentence, this.bookId});
+  const FollowPage({
+    super.key,
+    this.initialSentence,
+    this.bookId,
+    this.bookTitle,
+    this.pageNumber,
+  });
 
   final String? initialSentence;
   final String? bookId;
+  final String? bookTitle;
+  final int? pageNumber;
 
   @override
   State<FollowPage> createState() => _FollowPageState();
@@ -44,7 +55,6 @@ class _FollowPageState extends State<FollowPage>
 
   final AsrService _asr = VoskAsrService();
   final TtsService _tts = NativeTtsService();
-  final _panelKey = GlobalKey<ModelPanelState>();
   final _sentenceController = TextEditingController();
 
   bool _listening = false;
@@ -60,6 +70,9 @@ class _FollowPageState extends State<FollowPage>
   late final AnimationController _waveAnimCtrl;
   final List<double> _waveBars = List.generate(16, (_) => 0.3);
   bool _waveActive = false;
+
+  // [v2.11.0] 从阅读页传入的当前页句子列表
+  List<Sentence> _pageSentences = const [];
 
   static const List<String> _sampleSentences = [
     '今天天气真好',
@@ -78,7 +91,66 @@ class _FollowPageState extends State<FollowPage>
       duration: const Duration(milliseconds: 500),
     )..addListener(_onWaveTick);
     _sentenceController.text = widget.initialSentence ?? _sampleSentences.first;
+    // [v2.11.0] 加载当前页句子（从阅读页进入时）
+    _loadPageSentences();
+    // [v2.11.0] 从设置中自动加载 Vosk 模型
+    _autoLoadVosk();
   }
+
+  /// [v2.11.0] 从阅读页加载当前页的句子列表。
+  Future<void> _loadPageSentences() async {
+    if (widget.bookId == null || widget.pageNumber == null) return;
+    try {
+      final db = await DatabaseProvider.database;
+      final dao = SentenceDao(db);
+      final pageSentences = await dao.getByPage(
+        widget.bookId!,
+        widget.pageNumber!,
+      );
+      if (mounted && pageSentences.isNotEmpty) {
+        setState(() => _pageSentences = pageSentences);
+      }
+    } catch (e) {
+      AppLog.w(_tag, '加载阅读页句子失败: $e');
+    }
+  }
+
+  Future<void> _autoLoadVosk() async {
+    final settings = SettingsService.instance;
+    final modelPath = await settings.getVoskModelPath();
+    if (modelPath == null || modelPath.isEmpty) {
+      if (mounted) {
+        setState(() => _status = '请先在设置中配置 Vosk 语音识别模型');
+      }
+      return;
+    }
+    // 检查文件是否仍存在
+    final modelDir = Directory(modelPath);
+    if (!await modelDir.exists()) {
+      AppLog.w(_tag, 'Vosk 模型目录已不存在，需重新配置');
+      if (mounted) {
+        setState(() => _status = '模型文件已丢失，请在设置中重新配置');
+      }
+      return;
+    }
+    setState(() => _status = '正在加载语音模型…');
+    try {
+      final ok = await _asr.init(modelPath);
+      if (mounted) {
+        setState(() {
+          _status = ok ? '模型已加载 ✓ 选择句子跟读' : '模型加载失败';
+        });
+      }
+    } catch (e) {
+      AppLog.e(_tag, 'Vosk 自动加载失败: $e');
+      if (mounted) {
+        setState(() => _status = '模型加载失败: $e');
+      }
+    }
+  }
+
+  /// [v2.11.0] 检查模型是否已就绪
+  bool get _modelReady => _asr.isLoaded;
 
   void _onWaveTick() {
     if (!_waveActive) return;
@@ -102,6 +174,11 @@ class _FollowPageState extends State<FollowPage>
       _playRequest++;
       setState(() => _operationBusy = true);
       unawaited(_suspendPractice(request));
+    } else {
+      // [v2.11.0] 返回前台时自动重新加载模型
+      if (!_modelReady) {
+        _autoLoadVosk();
+      }
     }
   }
 
@@ -307,6 +384,32 @@ class _FollowPageState extends State<FollowPage>
     }
   }
 
+  /// [v2.11.0] 跟读时自动将词语同步到知识点库（按书/页分类，已存在则跳过）。
+  Future<void> _syncToKnowledgeBase(String word) async {
+    if (widget.bookId == null) return;
+    try {
+      final db = await DatabaseProvider.database;
+      final dao = KnowledgePointDao(db);
+      // 已存在则跳过
+      final existing = await dao.findByBookTypeText(
+        widget.bookId!,
+        KnowledgeType.word,
+        word,
+      );
+      if (existing != null) return;
+      await dao.upsertByText(
+        widget.bookId!,
+        KnowledgeType.word,
+        word,
+        page: widget.pageNumber,
+        source: 'follow',
+      );
+      AppLog.d(_tag, '已同步到知识点库: $word');
+    } catch (e) {
+      AppLog.w(_tag, '同步知识点库失败: $e');
+    }
+  }
+
   Future<void> _persistWord(String target) async {
     final db = await DatabaseProvider.database;
     final dao = WordEntryDao(db);
@@ -318,6 +421,8 @@ class _FollowPageState extends State<FollowPage>
     } else {
       await dao.upsert(WordEntry.create(word: target, lang: 'zh'));
     }
+    // [v2.11.0] 同步到知识点库（按书/页分类）
+    unawaited(_syncToKnowledgeBase(target));
   }
 
   Future<void> _persistRecord(
@@ -340,30 +445,6 @@ class _FollowPageState extends State<FollowPage>
     if (mounted) setState(() => _status = s);
   }
 
-  Future<void> _openLog() => _openPage(const LogPage());
-  Future<void> _openDemo() => _openPage(const AsrDemoPage());
-  Future<void> _openLlmDemo() => _openPage(const LlmDemoPage());
-
-  Future<void> _openPage(Widget page) async {
-    if (!_appActive || _listening || _operationBusy || _navigating) return;
-    final lifecycleRequest = _lifecycleRequest;
-    final navigator = Navigator.of(context);
-    setState(() => _navigating = true);
-    try {
-      _playRequest++;
-      final stopped = await _tts.stop();
-      if (!_isLifecycleCurrent(lifecycleRequest)) return;
-      if (!stopped) {
-        _setStatus('无法停止朗读，暂不能切换页面');
-        return;
-      }
-      setState(() => _playing = false);
-      await navigator.push(MaterialPageRoute<void>(builder: (_) => page));
-    } finally {
-      if (mounted) setState(() => _navigating = false);
-    }
-  }
-
   Future<void> _disposeAsr() async {
     try {
       await _asr.dispose();
@@ -372,34 +453,133 @@ class _FollowPageState extends State<FollowPage>
     }
   }
 
-  @override
-  Widget build(BuildContext context) {
-    final canPractice = _panelKey.currentState?.isReady ?? false;
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('跟读练习'),
-        actions: [
-          IconButton(
-            tooltip: 'Vosk PoC 调试页',
-            icon: const Icon(Icons.science_outlined),
-            onPressed: _openDemo,
+  /// [v2.11.0] 模型状态卡片 + 设置入口。
+  Widget _buildModelStatus() {
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Row(
+          children: [
+            Icon(
+              _modelReady ? Icons.check_circle : Icons.settings,
+              color: _modelReady ? StudyPalette.moss : StudyPalette.inkSoft,
+              size: 28,
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    _modelReady ? '语音模型已就绪' : '语音识别模型未配置',
+                    style: const TextStyle(
+                      fontWeight: FontWeight.w600,
+                      color: StudyPalette.ink,
+                    ),
+                  ),
+                  Text(
+                    _status,
+                    style: const TextStyle(
+                      fontSize: 12,
+                      color: StudyPalette.inkSoft,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            if (!_modelReady)
+              TextButton.icon(
+                icon: const Icon(Icons.open_in_new, size: 16),
+                label: const Text('去设置', style: TextStyle(fontSize: 12)),
+                onPressed: _openSettings,
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// [v2.11.0] 当前页句子列表（从阅读页传入时显示）。
+  Widget _buildPageSentenceList() {
+    if (_pageSentences.isEmpty) return const SizedBox();
+    return Card(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 10, 12, 4),
+            child: Text('当前页句子', style: titleStyle(fontSize: 14)),
           ),
-          IconButton(
-            tooltip: '本地 AI 引擎 PoC',
-            icon: const Icon(Icons.psychology_outlined),
-            onPressed: _openLlmDemo,
-          ),
-          IconButton(
-            tooltip: '运行日志',
-            icon: const Icon(Icons.bug_report_outlined),
-            onPressed: _openLog,
-          ),
+          const Divider(height: 1),
+          ...List.generate(_pageSentences.length, (i) {
+            final s = _pageSentences[i];
+            final selected = _sentenceController.text == s.text;
+            return ListTile(
+              dense: true,
+              selected: selected,
+              selectedTileColor: StudyPalette.emberSoft.withValues(alpha: 0.3),
+              leading: Text(
+                '${i + 1}',
+                style: const TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                  color: StudyPalette.inkSoft,
+                ),
+              ),
+              title: Text(
+                s.text,
+                style: const TextStyle(fontSize: 14, color: StudyPalette.ink),
+              ),
+              trailing: IconButton(
+                icon: Icon(
+                  selected
+                      ? Icons.play_circle_filled
+                      : Icons.play_circle_outline,
+                  size: 20,
+                  color: selected ? StudyPalette.ember : StudyPalette.inkSoft,
+                ),
+                onPressed: () {
+                  setState(() {
+                    _sentenceController.text = s.text;
+                    _lastScore = null;
+                  });
+                  _play();
+                },
+              ),
+              onTap: () {
+                setState(() {
+                  _sentenceController.text = s.text;
+                  _lastScore = null;
+                });
+              },
+            );
+          }),
         ],
       ),
+    );
+  }
+
+  void _openSettings() {
+    Navigator.of(
+      context,
+    ).push(MaterialPageRoute(builder: (_) => const SettingsPage()));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final canPractice = _modelReady;
+    return Scaffold(
+      appBar: AppBar(title: const Text('跟读练习')),
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
-          ModelPanel(key: _panelKey, asr: _asr),
+          // [v2.11.0] 模型就绪状态 + 配置入口
+          _buildModelStatus(),
+          // [v2.11.0] 当前页句子列表（从阅读页进入时）
+          if (_pageSentences.isNotEmpty) ...[
+            const SizedBox(height: 12),
+            _buildPageSentenceList(),
+          ],
           const SizedBox(height: 16),
           TextField(
             controller: _sentenceController,
