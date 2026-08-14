@@ -21,7 +21,7 @@ class LlmDemoPage extends StatefulWidget {
 class _LlmDemoPageState extends State<LlmDemoPage> {
   static const _tag = 'llm_demo';
 
-  final LlmService _llm = LlmService();
+  final LlmService _llm = LlmService.instance;
   bool _available = false;
   bool _busy = false;
   bool _ready = false;

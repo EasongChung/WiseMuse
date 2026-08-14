@@ -51,7 +51,7 @@ class TranslationEngine {
   static const _tag = 'translate';
 
   final MlKitTranslationService _mlkit = MlKitTranslationService();
-  final LlmService _llm = LlmService();
+  final LlmService _llm = LlmService.instance;
   final OpenAiClient _client = OpenAiClient();
 
   /// 根据 [engineType] 翻译 [text] 从 [source] 到 [target]。

@@ -72,55 +72,84 @@ class StudyPalette {
         return spinePdf;
     }
   }
+
+  // ===== [v2.9.0] 深色模式色板变体 =====
+
+  /// 深色背景（接近黑色暖调）。
+  static const darkBg = Color(0xFF1A1C1E);
+
+  /// 深色卡片底（略亮于背景）。
+  static const darkCard = Color(0xFF252729);
+
+  /// 深色文字（暖白）。
+  static const darkInk = Color(0xFFE8E0D5);
+
+  /// 深色次级文字。
+  static const darkInkSoft = Color(0xFF9E9488);
+
+  /// 深色边框。
+  static const darkBorder = Color(0xFF3A3430);
 }
 
 /// 全局 [ThemeData]「暖色书房」。
 ///
-/// [useTitleFont] 为 true 时标题/数字用站酷快乐体（圆体）；正文始终系统字体。
+/// [brightness] 控制明暗色板（默认 [Brightness.light]）。
 /// 页面中强调性大标题可用 [titleStyle] 显式指定。
-ThemeData buildStudyTheme() {
+ThemeData buildStudyTheme({Brightness brightness = Brightness.light}) {
+  final isDark = brightness == Brightness.dark;
+
+  final bg = isDark ? StudyPalette.darkBg : StudyPalette.parchment;
+  final cardBg =
+      isDark ? StudyPalette.darkCard : Colors.white.withValues(alpha: 0.72);
+  final surface = isDark ? StudyPalette.darkCard : StudyPalette.parchmentDeep;
+  final onSurface = isDark ? StudyPalette.darkInk : StudyPalette.ink;
+  final onSurfaceSoft =
+      isDark ? StudyPalette.darkInkSoft : StudyPalette.inkSoft;
+  final outline = isDark ? StudyPalette.darkBorder : StudyPalette.linen;
+
   final scheme = ColorScheme.fromSeed(
     seedColor: StudyPalette.ember,
-    brightness: Brightness.light,
+    brightness: brightness,
   ).copyWith(
     primary: StudyPalette.ember,
     onPrimary: Colors.white,
     secondary: StudyPalette.moss,
     onSecondary: Colors.white,
-    surface: StudyPalette.parchment,
-    onSurface: StudyPalette.ink,
-    onSurfaceVariant: StudyPalette.inkSoft,
+    surface: surface,
+    onSurface: onSurface,
+    onSurfaceVariant: onSurfaceSoft,
     error: const Color(0xFFB6482E),
-    outline: StudyPalette.linen,
+    outline: outline,
   );
 
   final base = ThemeData(
     useMaterial3: true,
     colorScheme: scheme,
-    scaffoldBackgroundColor: StudyPalette.parchment,
+    scaffoldBackgroundColor: bg,
   );
 
   return base.copyWith(
     appBarTheme: AppBarTheme(
-      backgroundColor: StudyPalette.parchment,
-      foregroundColor: StudyPalette.ink,
+      backgroundColor: bg,
+      foregroundColor: onSurface,
       elevation: 0,
       scrolledUnderElevation: 1,
-      shadowColor: StudyPalette.ink.withValues(alpha: 0.06),
+      shadowColor:
+          isDark ? Colors.black26 : StudyPalette.ink.withValues(alpha: 0.06),
       centerTitle: false,
       titleTextStyle: TextStyle(
         fontFamily: 'ZCOOLKuaiLe',
         fontSize: 22,
-        color: StudyPalette.ink,
+        color: onSurface,
         letterSpacing: 1.2,
       ),
     ),
     cardTheme: CardThemeData(
-      color: Colors.white.withValues(alpha: 0.72),
+      color: cardBg,
       elevation: 0,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(18),
-        side: BorderSide(color: StudyPalette.linen),
+        side: BorderSide(color: outline),
       ),
       margin: EdgeInsets.zero,
     ),
@@ -139,8 +168,8 @@ ThemeData buildStudyTheme() {
     ),
     outlinedButtonTheme: OutlinedButtonThemeData(
       style: OutlinedButton.styleFrom(
-        foregroundColor: StudyPalette.ink,
-        side: BorderSide(color: StudyPalette.linen, width: 1.4),
+        foregroundColor: onSurface,
+        side: BorderSide(color: outline, width: 1.4),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
         padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
         textStyle: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
@@ -150,12 +179,12 @@ ThemeData buildStudyTheme() {
       style: TextButton.styleFrom(foregroundColor: StudyPalette.ember),
     ),
     chipTheme: base.chipTheme.copyWith(
-      backgroundColor: StudyPalette.parchmentDeep,
+      backgroundColor: surface,
       selectedColor: StudyPalette.emberSoft,
-      side: BorderSide(color: StudyPalette.linen),
+      side: BorderSide(color: outline),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(999)),
-      labelStyle: const TextStyle(color: StudyPalette.ink),
-      secondaryLabelStyle: const TextStyle(color: StudyPalette.ink),
+      labelStyle: TextStyle(color: onSurface),
+      secondaryLabelStyle: TextStyle(color: onSurface),
     ),
     floatingActionButtonTheme: FloatingActionButtonThemeData(
       backgroundColor: StudyPalette.ember,
@@ -164,28 +193,29 @@ ThemeData buildStudyTheme() {
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
     ),
     snackBarTheme: SnackBarThemeData(
-      backgroundColor: StudyPalette.ink,
+      backgroundColor: isDark ? StudyPalette.darkCard : StudyPalette.ink,
       contentTextStyle: const TextStyle(color: Colors.white),
       behavior: SnackBarBehavior.floating,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
     ),
-    dividerTheme: DividerThemeData(color: StudyPalette.linen, space: 1),
+    dividerTheme: DividerThemeData(color: outline, space: 1),
     inputDecorationTheme: InputDecorationTheme(
       filled: true,
-      fillColor: Colors.white.withValues(alpha: 0.8),
+      fillColor:
+          isDark ? StudyPalette.darkBg : Colors.white.withValues(alpha: 0.8),
       border: OutlineInputBorder(
         borderRadius: BorderRadius.circular(14),
-        borderSide: BorderSide(color: StudyPalette.linen),
+        borderSide: BorderSide(color: outline),
       ),
       enabledBorder: OutlineInputBorder(
         borderRadius: BorderRadius.circular(14),
-        borderSide: BorderSide(color: StudyPalette.linen),
+        borderSide: BorderSide(color: outline),
       ),
       focusedBorder: OutlineInputBorder(
         borderRadius: BorderRadius.circular(14),
         borderSide: const BorderSide(color: StudyPalette.ember, width: 1.6),
       ),
-      labelStyle: const TextStyle(color: StudyPalette.inkSoft),
+      labelStyle: TextStyle(color: onSurfaceSoft),
     ),
   );
 }

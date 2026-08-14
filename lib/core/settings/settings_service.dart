@@ -20,6 +20,15 @@ class SettingsService {
   static const kTtsVoice = 'tts_voice';
   static const kPreferOffline = 'prefer_offline';
 
+  // ---- [v2.9.0] 本地模型路径 ----
+  /// 本地 GGUF 模型文件路径（用户导入或下载后设置），空=未配置。
+  static const kLocalModelPath = 'local_model_path';
+
+  Future<String?> getLocalModelPath() async =>
+      (await SharedPreferences.getInstance()).getString(kLocalModelPath);
+  Future<void> setLocalModelPath(String v) async =>
+      (await SharedPreferences.getInstance()).setString(kLocalModelPath, v);
+
   // ---- 翻译引擎 ----
   /// 翻译引擎类型（[TranslationEngineType] 的 name：mlkit/llm/cloud/auto）。
   /// 默认 auto（三级回落）。

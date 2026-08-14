@@ -78,7 +78,7 @@ void main() {
         if (call.method == 'send') return '本地回答';
         return null;
       });
-      final llm = LlmService();
+      final llm = LlmService.instance;
       await llm.init('dummy'); // 设 _loaded = true
 
       final ai = AiService(
@@ -127,7 +127,7 @@ void main() {
         if (call.method == 'send') return '本地回答';
         return null;
       });
-      final llm = LlmService();
+      final llm = LlmService.instance;
       await llm.init('dummy');
 
       final mockHttp = MockClient((request) async {

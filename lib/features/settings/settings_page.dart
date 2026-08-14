@@ -1,8 +1,13 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 
+import '../../core/debug/app_log.dart';
 import '../../core/settings/settings_service.dart';
 import '../../core/theme/app_theme.dart';
+import '../../services/llm_service.dart';
 import '../../services/mlkit_translation_service.dart';
+import '../../services/model_store.dart';
 
 /// [v0.3.0] 设置页：翻译引擎配置 + 模型下载管理。
 ///
@@ -42,6 +47,11 @@ class _SettingsPageState extends State<SettingsPage> {
 
   // AI 离线优先
   bool _preferOffline = false;
+
+  // [v2.9.0] 本地 GGUF 模型状态
+  List<_GgufModelInfo> _localModels = const [];
+  bool _modelLoaded = false;
+  bool _modelScanDone = false;
 
   bool _initDone = false;
 
@@ -94,6 +104,10 @@ class _SettingsPageState extends State<SettingsPage> {
     _ttsPauseMs = await _settings.getTtsPauseMs();
     _ttsVoice = await _settings.getTtsVoice();
     _preferOffline = await _settings.getPreferOffline();
+    // [v2.9.0] 扫描本地 GGUF 模型
+    _localModels = await _scanLocalModels();
+    _modelLoaded = LlmService.instance.isLoaded;
+    _modelScanDone = true;
     // 检查常用语言模型下载状态
     for (final (code, _) in _langs) {
       final ok = await _mlkit.isModelDownloaded(code);
@@ -267,6 +281,9 @@ class _SettingsPageState extends State<SettingsPage> {
                   const SizedBox(height: 24),
                   _buildSectionTitle('AI 离线优先'),
                   _buildOfflineToggle(),
+                  const SizedBox(height: 24),
+                  _buildSectionTitle('本地 AI 模型'),
+                  _buildLocalModelSection(),
                   const SizedBox(height: 24),
                   _buildSectionTitle('云端 AI 配置（知识提取/翻译/测验兜底）'),
                   _buildApiConfig(),
@@ -629,4 +646,131 @@ class _SettingsPageState extends State<SettingsPage> {
       ),
     );
   }
+
+  // ===== [v2.9.0] 本地 AI 模型状态 =====
+
+  /// 构建本地 GGUF 模型状态卡片。
+  Widget _buildLocalModelSection() {
+    if (!_modelScanDone) {
+      return const Card(
+        child: Padding(
+          padding: EdgeInsets.all(20),
+          child: Center(
+            child: SizedBox(
+              width: 20,
+              height: 20,
+              child: CircularProgressIndicator(strokeWidth: 2),
+            ),
+          ),
+        ),
+      );
+    }
+
+    if (_localModels.isEmpty) {
+      return Card(
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Row(
+            children: [
+              const Icon(
+                Icons.model_training,
+                size: 20,
+                color: StudyPalette.inkSoft,
+              ),
+              const SizedBox(width: 12),
+              const Expanded(
+                child: Text(
+                  '未导入 GGUF 模型\n将 .gguf 文件放入应用 models/ 目录',
+                  style: TextStyle(fontSize: 13, color: StudyPalette.inkSoft),
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    return Card(
+      child: Column(
+        children: [
+          for (var i = 0; i < _localModels.length; i++) ...[
+            if (i > 0) const Divider(height: 1, indent: 16),
+            ListTile(
+              dense: true,
+              leading: Icon(
+                _modelLoaded ? Icons.check_circle : Icons.hourglass_empty,
+                color: _modelLoaded ? StudyPalette.moss : StudyPalette.inkSoft,
+                size: 20,
+              ),
+              title: Text(
+                _localModels[i].name,
+                style: const TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w600,
+                  color: StudyPalette.ink,
+                ),
+              ),
+              subtitle: Text(
+                '${_formatSize(_localModels[i].sizeBytes)} · '
+                '${_modelLoaded ? "已加载" : "未加载"}',
+                style: const TextStyle(
+                  fontSize: 12,
+                  color: StudyPalette.inkSoft,
+                ),
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  /// 扫描 models/ 目录下的 .gguf 文件。
+  Future<List<_GgufModelInfo>> _scanLocalModels() async {
+    try {
+      final dir = await ModelStore.modelsDir();
+      if (!await dir.exists()) return const [];
+      final files = <_GgufModelInfo>[];
+      await for (final entity in dir.list()) {
+        if (entity is! File) continue;
+        if (!entity.path.toLowerCase().endsWith('.gguf')) continue;
+        final stat = await entity.stat();
+        files.add(
+          _GgufModelInfo(
+            name: entity.uri.pathSegments.last,
+            sizeBytes: stat.size,
+            path: entity.path,
+          ),
+        );
+      }
+      files.sort((a, b) => a.name.compareTo(b.name));
+      return files;
+    } catch (e) {
+      AppLog.e('settings', '扫描 GGUF 模型失败: $e');
+      return const [];
+    }
+  }
+
+  /// 格式化文件大小（B/KB/MB/GB）。
+  String _formatSize(int bytes) {
+    if (bytes < 1024) return '${bytes}B';
+    if (bytes < 1024 * 1024) return '${(bytes / 1024).toStringAsFixed(1)}KB';
+    if (bytes < 1024 * 1024 * 1024) {
+      return '${(bytes / (1024 * 1024)).toStringAsFixed(1)}MB';
+    }
+    return '${(bytes / (1024 * 1024 * 1024)).toStringAsFixed(2)}GB';
+  }
+}
+
+/// [v2.9.0] GGUF 模型文件信息。
+class _GgufModelInfo {
+  const _GgufModelInfo({
+    required this.name,
+    required this.sizeBytes,
+    required this.path,
+  });
+
+  final String name;
+  final int sizeBytes;
+  final String path;
 }

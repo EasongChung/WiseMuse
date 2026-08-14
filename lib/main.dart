@@ -23,6 +23,8 @@ class WiseMuseApp extends StatelessWidget {
       title: '智启陪读',
       debugShowCheckedModeBanner: false,
       theme: buildStudyTheme(),
+      darkTheme: buildStudyTheme(brightness: Brightness.dark),
+      themeMode: ThemeMode.system,
       home: const HomeShell(),
     );
   }

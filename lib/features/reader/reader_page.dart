@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:collection';
 import 'dart:io';
 import 'dart:math' as math;
 import 'dart:ui' as ui;
@@ -100,6 +101,11 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
 
   // [v2.9.0] 文本选区——选中文字后弹出查词栏
   String? _selectedText;
+
+  // [v2.9.0] 知识点按页查询 LRU 缓存（max 20 页），翻页不重复查 DB。
+  static const int _kKnowledgeCacheMax = 20;
+  final LinkedHashMap<String, List<KnowledgePoint>> _knowledgePageCache =
+      LinkedHashMap<String, List<KnowledgePoint>>();
 
   @override
   void initState() {
@@ -1140,15 +1146,40 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
 
   // ===== 文本模式：本页知识点 =====
 
+  /// [v2.9.0] LRU 缓存 key。
+  String _knowledgeCacheKey(String bookId, int page) => '$bookId:$page';
+
   Future<void> _showPageKnowledge() async {
     final currentPage = _textPages[_textPageIndex];
     if (currentPage.isEmpty) return;
     final page = currentPage.first.page;
+    final key = _knowledgeCacheKey(widget.book.id, page);
+
+    // LRU 命中 → 刷新顺序
+    if (_knowledgePageCache.containsKey(key)) {
+      final cached = _knowledgePageCache.remove(key)!;
+      _knowledgePageCache[key] = cached; // 放到末尾（最近使用）
+      if (!mounted) return;
+      _showKnowledgeSheet(page, cached);
+      return;
+    }
+
     final db = await DatabaseProvider.database;
     final dao = KnowledgePointDao(db);
     final points = await dao.getByPage(widget.book.id, page);
     if (!mounted) return;
 
+    // 写入 LRU 缓存，超限淘汰最久未用（队首）
+    _knowledgePageCache[key] = points;
+    if (_knowledgePageCache.length > _kKnowledgeCacheMax) {
+      _knowledgePageCache.remove(_knowledgePageCache.keys.first);
+    }
+
+    _showKnowledgeSheet(page, points);
+  }
+
+  /// [v2.9.0] 提取的对话框渲染逻辑，被 _showPageKnowledge 与 LRU 缓存共用。
+  void _showKnowledgeSheet(int page, List<KnowledgePoint> points) {
     showModalBottomSheet(
       context: context,
       backgroundColor: StudyPalette.parchment,

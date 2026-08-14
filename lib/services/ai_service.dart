@@ -13,7 +13,7 @@ import 'openai_client.dart';
 /// 供 知识提取 / 测验生成 / 助教 三方复用。
 class AiService {
   AiService({LlmService? llm, OpenAiClient? client})
-    : _llm = llm ?? LlmService(),
+    : _llm = llm ?? LlmService.instance,
       _client = client ?? OpenAiClient();
 
   final LlmService _llm;
