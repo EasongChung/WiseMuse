@@ -107,6 +107,12 @@ bool isChapterLine(String line) {
   if (RegExp(r'^[（(]?[一二三四五六七八九十]+[）)]\s*$').hasMatch(t)) return true;
   if (RegExp(r'^\d+\.\s*\S{1,40}').hasMatch(t)) return true;
   if (RegExp(r'^[（(]\d+[）)]\s*\S').hasMatch(t)) return true;
+  // [v2.8.0] 英文章节：Chapter / Unit / Lesson / Part / Section + 数字/罗马
+  if (RegExp(
+    r'^(Chapter|Unit|Lesson|Part|Section|Module)\s+(\d+|[IVXLCDM]+)',
+  ).hasMatch(t)) {
+    return true;
+  }
   // 较短标题（≤20字且无句尾标点，可能为标题）
   if (t.length <= 20 &&
       !t.endsWith('。') &&
