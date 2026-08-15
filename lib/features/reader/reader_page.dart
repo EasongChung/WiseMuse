@@ -149,6 +149,12 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
   Future<void> _init() async {
     try {
       await _tts.init();
+      final rate = await SettingsService.instance.getTtsRate();
+      await _tts.setRate(rate);
+      final voice = await SettingsService.instance.getTtsVoice();
+      if (voice.isNotEmpty) {
+        await _tts.setVoice(voice);
+      }
       await _loadSentences();
       if (widget.book.source == BookSource.pdf) {
         await _initPdf();
@@ -233,6 +239,9 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
       _pdfSentenceCache.clear();
       _pageGeomCache.clear();
     });
+    if (_useOriginal && _pdfController != null) {
+      _pdfController!.setPage(next);
+    }
     _sheetRebuild?.call();
   }
 
@@ -546,10 +555,19 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
     _speakingStartedAt = request;
     if (mounted) setState(() {});
     try {
-      AppLog.d(_tag, '朗读: "$text"');
-      final ok = await _tts.speak(text);
-      if (!ok && _isSpeechRequestCurrent(request)) {
-        AppLog.w(_tag, 'TTS speak 未完成: "$text"');
+      final repeatCount = await SettingsService.instance.getTtsRepeatCount();
+      final count = repeatCount.clamp(1, 5);
+      for (var i = 0; i < count; i++) {
+        if (!_isSpeechRequestCurrent(request)) break;
+        AppLog.d(_tag, '朗读 (${i + 1}/$count): "$text"');
+        final ok = await _tts.speak(text);
+        if (!ok && _isSpeechRequestCurrent(request)) {
+          AppLog.w(_tag, 'TTS speak 未完成: "$text"');
+          break;
+        }
+        if (i < count - 1 && _isSpeechRequestCurrent(request)) {
+          await Future.delayed(const Duration(milliseconds: 400));
+        }
       }
     } finally {
       if (_isSpeechRequestCurrent(request)) {
@@ -773,20 +791,22 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
       content = _buildTextView();
     }
 
-    // [v0.1.38] 原文模式：上滑唤出文本弹窗
-    if (_useOriginal && _hasOriginal()) {
-      content = GestureDetector(
-        behavior: HitTestBehavior.translucent,
-        onVerticalDragEnd: (d) {
-          if (d.primaryVelocity != null && d.primaryVelocity! < -350) {
-            _showTextSheet();
-          }
-        },
-        child: content,
-      );
-    }
+    // 全局手势：横向滑动左右翻页 + 原文模式上滑唤出文本弹窗
+    content = GestureDetector(
+      behavior: HitTestBehavior.translucent,
+      onHorizontalDragEnd: _isMultiPage ? _onTextSwipePage : null,
+      onVerticalDragEnd:
+          (_useOriginal && _hasOriginal())
+              ? (d) {
+                if (d.primaryVelocity != null && d.primaryVelocity! < -350) {
+                  _showTextSheet();
+                }
+              }
+              : null,
+      child: content,
+    );
 
-    // [v2.12.0] 浮底查词栏或句操作栏（所有模式共享，包含原文模式）
+    // 浮底查词栏或句操作栏（所有模式共享，包含原文模式）
     Widget floatingBar;
     if (_selectedText != null && _selectedText!.isNotEmpty) {
       floatingBar = _buildWordLookupBar();
@@ -970,7 +990,7 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
   }
 
   Widget _buildTextView() {
-    // 文本模式：按页分组 + 左右滑翻页 + 句底操作条
+    // 文本模式：按页分组，通过底部全宽弹窗统一查看页码与控制连读
     if (_sentences.isEmpty) {
       return const Center(child: Text('暂无句子内容'));
     }
@@ -979,28 +999,7 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
     }
 
     final pageSentences = _textPages[_textPageIndex];
-    final totalPages = _textPages.length;
-
-    Widget pageContent = Column(
-      children: [
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-          child: Row(children: [const Spacer(), _buildPageBar(totalPages)]),
-        ),
-        Expanded(child: _buildSwipeableSentenceList(pageSentences)),
-      ],
-    );
-
-    // [v0.1.35] 多页 → 左右滑翻页，translucent 不拦截子手势
-    if (_isMultiPage) {
-      pageContent = GestureDetector(
-        behavior: HitTestBehavior.translucent,
-        onHorizontalDragEnd: _onTextSwipePage,
-        child: pageContent,
-      );
-    }
-
-    return pageContent;
+    return _buildSwipeableSentenceList(pageSentences);
   }
 
   /// [v0.1.28] 可左右滑翻页的句子列表（多页文件包裹 GestureDetector）。
@@ -1085,53 +1084,6 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
       ),
     );
     return content;
-  }
-
-  /// 页导航控件（上一页/页码/下一页）。
-  Widget _buildPageBar(int totalPages) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-      decoration: BoxDecoration(
-        color: StudyPalette.parchmentDeep.withValues(alpha: 0.6),
-        borderRadius: BorderRadius.circular(12),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          IconButton(
-            icon: const Icon(Icons.chevron_left, size: 20),
-            onPressed:
-                _textPageIndex > 0 ? () => _syncPage(_textPageIndex - 1) : null,
-            tooltip: '上一页',
-          ),
-          TextButton(
-            style: TextButton.styleFrom(
-              visualDensity: VisualDensity.compact,
-              minimumSize: const Size(0, 0),
-              padding: const EdgeInsets.symmetric(horizontal: 2),
-              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-            ),
-            onPressed: totalPages > 1 ? _showPageSelector : null,
-            child: Text(
-              '${_textPageIndex + 1}/$totalPages',
-              style: const TextStyle(
-                fontSize: 13,
-                fontWeight: FontWeight.w600,
-                color: StudyPalette.ink,
-              ),
-            ),
-          ),
-          IconButton(
-            icon: const Icon(Icons.chevron_right, size: 20),
-            onPressed:
-                _textPageIndex < totalPages - 1
-                    ? () => _syncPage(_textPageIndex + 1)
-                    : null,
-            tooltip: '下一页',
-          ),
-        ],
-      ),
-    );
   }
 
   // ===== 文本模式：自动连读 =====

@@ -1,4 +1,54 @@
+import 'dart:convert';
+
 import 'package:shared_preferences/shared_preferences.dart';
+
+/// [v0.1.44] API 供应商数据模型。
+class ApiProvider {
+  final String id;
+  final String name;
+  final String baseUrl;
+  final String apiKey;
+  final List<String> models;
+
+  const ApiProvider({
+    required this.id,
+    required this.name,
+    required this.baseUrl,
+    required this.apiKey,
+    this.models = const [],
+  });
+
+  Map<String, dynamic> toMap() => {
+    'id': id,
+    'name': name,
+    'baseUrl': baseUrl,
+    'apiKey': apiKey,
+    'models': models,
+  };
+
+  factory ApiProvider.fromMap(Map<String, dynamic> map) => ApiProvider(
+    id: map['id'] as String? ?? '',
+    name: map['name'] as String? ?? '默认供应商',
+    baseUrl: map['baseUrl'] as String? ?? '',
+    apiKey: map['apiKey'] as String? ?? '',
+    models:
+        (map['models'] as List?)?.map((e) => e.toString()).toList() ?? const [],
+  );
+
+  ApiProvider copyWith({
+    String? id,
+    String? name,
+    String? baseUrl,
+    String? apiKey,
+    List<String>? models,
+  }) => ApiProvider(
+    id: id ?? this.id,
+    name: name ?? this.name,
+    baseUrl: baseUrl ?? this.baseUrl,
+    apiKey: apiKey ?? this.apiKey,
+    models: models ?? this.models,
+  );
+}
 
 /// [v0.1.0] 设置服务：API 配置 / 朗读参数 / 离线开关（KV 存储）。
 ///
@@ -14,11 +64,88 @@ class SettingsService {
   static const kApiBaseUrl = 'api_base_url';
   static const kApiKey = 'api_key';
   static const kApiModel = 'api_model';
+  static const kApiProviders = 'api_providers_json';
+  static const kActiveProviderId = 'active_provider_id';
   static const kTtsRate = 'tts_rate';
   static const kTtsRepeatCount = 'tts_repeat_count';
   static const kTtsPauseMs = 'tts_pause_ms';
   static const kTtsVoice = 'tts_voice';
   static const kPreferOffline = 'prefer_offline';
+
+  // ---- [v0.1.44] 供应商管理 ----
+
+  static const List<ApiProvider> defaultProviders = [
+    ApiProvider(
+      id: 'siliconflow',
+      name: 'SiliconFlow (硅基流动)',
+      baseUrl: 'https://api.siliconflow.cn/v1',
+      apiKey: '',
+      models: [
+        'Qwen/Qwen2.5-7B-Instruct',
+        'deepseek-ai/DeepSeek-V3',
+        'BAAI/bge-large-zh-v1.5',
+        'BAAI/bge-m3',
+      ],
+    ),
+    ApiProvider(
+      id: 'deepseek',
+      name: 'DeepSeek',
+      baseUrl: 'https://api.deepseek.com/v1',
+      apiKey: '',
+      models: ['deepseek-chat', 'deepseek-reasoner'],
+    ),
+    ApiProvider(
+      id: 'openai',
+      name: 'OpenAI 官方',
+      baseUrl: 'https://api.openai.com/v1',
+      apiKey: '',
+      models: [
+        'gpt-4o-mini',
+        'gpt-4o',
+        'text-embedding-3-small',
+        'text-embedding-3-large',
+      ],
+    ),
+    ApiProvider(
+      id: 'ollama',
+      name: 'Ollama 本地网关',
+      baseUrl: 'http://127.0.0.1:11434/v1',
+      apiKey: 'ollama',
+      models: ['qwen2.5:7b', 'bge-m3:latest'],
+    ),
+  ];
+
+  Future<List<ApiProvider>> getProviders() async {
+    final prefs = await SharedPreferences.getInstance();
+    final jsonStr = prefs.getString(kApiProviders);
+    if (jsonStr == null || jsonStr.isEmpty) {
+      return defaultProviders;
+    }
+    try {
+      final list = jsonDecode(jsonStr) as List;
+      return list
+          .map((e) => ApiProvider.fromMap(e as Map<String, dynamic>))
+          .toList();
+    } catch (_) {
+      return defaultProviders;
+    }
+  }
+
+  Future<void> setProviders(List<ApiProvider> providers) async {
+    final prefs = await SharedPreferences.getInstance();
+    final list = providers.map((e) => e.toMap()).toList();
+    await prefs.setString(kApiProviders, jsonEncode(list));
+  }
+
+  Future<String?> getActiveProviderId() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getString(kActiveProviderId) ?? 'siliconflow';
+  }
+
+  Future<void> setActiveProviderId(String id) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(kActiveProviderId, id);
+  }
 
   // ---- [v0.1.35] 本地模型路径 ----
   /// 本地 GGUF 模型文件路径（用户导入或下载后设置），空=未配置。

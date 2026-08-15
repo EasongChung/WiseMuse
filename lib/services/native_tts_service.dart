@@ -70,4 +70,14 @@ class NativeTtsService implements TtsService {
       AppLog.e(_tag, 'setVoice 失败: $e');
     }
   }
+
+  /// [v0.1.44] 设置语速（0.5~2.0）。
+  @override
+  Future<void> setRate(double rate) async {
+    try {
+      await _channel.invokeMethod<void>('setRate', {'rate': rate});
+    } catch (e) {
+      AppLog.e(_tag, 'setRate 失败: $e');
+    }
+  }
 }

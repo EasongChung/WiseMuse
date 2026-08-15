@@ -1,23 +1,26 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
+import 'package:path/path.dart' as p;
 
 import '../../core/debug/app_log.dart';
+import '../../core/models/model_ids.dart';
 import '../../core/settings/settings_service.dart';
 import '../../core/storage/book_dao.dart';
 import '../../core/storage/database.dart';
 import '../../core/theme/app_theme.dart';
-import '../../services/llm_service.dart';
 import '../../services/mlkit_translation_service.dart';
 import '../../services/model_store.dart';
+import '../../services/native_tts_service.dart';
 import '../../services/rag/embedding_service.dart';
 import '../../services/rag/rag_retrieval_service.dart';
 import '../../services/vosk_asr_service.dart';
 
-/// [v0.3.0] 设置页：翻译引擎配置 + 模型下载管理。
+/// [v0.3.0] [v0.1.44] 设置页：翻译引擎配置 + 供应商管理 + 模型管理 + 朗读参数。
 ///
 /// 「暖色书房」统一风格，[appBar] 标题使用站酷快乐体。
 class SettingsPage extends StatefulWidget {
@@ -30,8 +33,9 @@ class SettingsPage extends StatefulWidget {
 class _SettingsPageState extends State<SettingsPage> {
   final SettingsService _settings = SettingsService.instance;
   final MlKitTranslationService _mlkit = MlKitTranslationService();
+  final NativeTtsService _tts = NativeTtsService();
 
-  // 当前引擎
+  // 当前翻译引擎
   String _engine = 'auto';
 
   // 翻译语种
@@ -42,11 +46,6 @@ class _SettingsPageState extends State<SettingsPage> {
   final Map<String, bool> _modelStatus = {};
   final Map<String, bool> _modelBusy = {};
 
-  // API 配置（云端回落）
-  final _baseUrlCtrl = TextEditingController();
-  final _apiKeyCtrl = TextEditingController();
-  final _modelCtrl = TextEditingController();
-
   // 朗读参数
   double _ttsRate = 0.9;
   int _ttsRepeatCount = 1;
@@ -56,27 +55,32 @@ class _SettingsPageState extends State<SettingsPage> {
   // AI 离线优先
   bool _preferOffline = false;
 
-  // [v0.1.35] 本地 GGUF 模型状态
+  // 本地 GGUF 模型状态
   List<_GgufModelInfo> _localModels = const [];
-  bool _modelLoaded = false;
-  bool _modelScanDone = false;
 
-  // [v0.1.37] Embedding 模型名（RAG 知识库）
+  // Embedding 模型名（RAG 知识库）
   String _embeddingModel = 'text-embedding-3-small';
-  final _embeddingCtrl = TextEditingController();
 
-  // [v0.1.37] RAG 知识库索引状态
+  // RAG 知识库索引状态
   List<String> _indexedBooks = const [];
 
-  // [v0.1.37] 本地模型管理
+  // 本地模型管理
   bool _autoLoadLocal = true;
   String? _defaultLocalModel;
 
-  // [v0.1.38] Vosk 语音模型状态
+  // Vosk 语音模型状态
   bool _voskBusy = false;
   String? _voskModelPath;
   bool _voskModelExists = false;
   bool _voskLoaded = false;
+
+  // [v0.1.44] 供应商管理
+  List<ApiProvider> _providers = const [];
+  String _activeProviderId = 'siliconflow';
+  final _baseUrlCtrl = TextEditingController();
+  final _apiKeyCtrl = TextEditingController();
+  final _customModelCtrl = TextEditingController();
+  bool _fetchingModels = false;
 
   bool _initDone = false;
 
@@ -113,8 +117,7 @@ class _SettingsPageState extends State<SettingsPage> {
   void dispose() {
     _baseUrlCtrl.dispose();
     _apiKeyCtrl.dispose();
-    _modelCtrl.dispose();
-    _embeddingCtrl.dispose();
+    _customModelCtrl.dispose();
     super.dispose();
   }
 
@@ -122,22 +125,24 @@ class _SettingsPageState extends State<SettingsPage> {
     _engine = await _settings.getTranslationEngine();
     _sourceLang = await _settings.getTranslationSource();
     _targetLang = await _settings.getTranslationTarget();
-    _baseUrlCtrl.text = (await _settings.getApiBaseUrl()) ?? '';
-    _apiKeyCtrl.text = (await _settings.getApiKey()) ?? '';
-    _modelCtrl.text = (await _settings.getApiModel()) ?? '';
+
     _ttsRate = await _settings.getTtsRate();
     _ttsRepeatCount = await _settings.getTtsRepeatCount();
     _ttsPauseMs = await _settings.getTtsPauseMs();
     _ttsVoice = await _settings.getTtsVoice();
     _preferOffline = await _settings.getPreferOffline();
-    // [v0.1.35] 扫描本地 GGUF 模型
-    _localModels = await _scanLocalModels();
-    _modelLoaded = LlmService.instance.isLoaded;
-    _modelScanDone = true;
 
-    // [v0.1.37] RAG / 本地模型管理
+    // 供应商管理加载
+    _providers = await _settings.getProviders();
+    _activeProviderId =
+        (await _settings.getActiveProviderId()) ?? 'siliconflow';
+    _syncActiveProviderToFields();
+
+    // 扫描本地 GGUF 模型
+    _localModels = await _scanLocalModels();
+
+    // RAG / 本地模型管理
     _embeddingModel = await _settings.getEmbeddingModel();
-    _embeddingCtrl.text = _embeddingModel;
     _autoLoadLocal = await _settings.getAutoLoadLocalModel();
     _defaultLocalModel = await _settings.getDefaultLocalModel();
     unawaited(_refreshRagStatus());
@@ -149,6 +154,28 @@ class _SettingsPageState extends State<SettingsPage> {
       _modelStatus[code] = ok;
     }
     if (mounted) setState(() => _initDone = true);
+  }
+
+  ApiProvider get _activeProvider {
+    return _providers.firstWhere(
+      (p) => p.id == _activeProviderId,
+      orElse:
+          () =>
+              _providers.isNotEmpty
+                  ? _providers.first
+                  : const ApiProvider(
+                    id: 'default',
+                    name: '默认供应商',
+                    baseUrl: '',
+                    apiKey: '',
+                  ),
+    );
+  }
+
+  void _syncActiveProviderToFields() {
+    final p = _activeProvider;
+    _baseUrlCtrl.text = p.baseUrl;
+    _apiKeyCtrl.text = p.apiKey;
   }
 
   Future<void> _saveEngine(String v) async {
@@ -164,7 +191,7 @@ class _SettingsPageState extends State<SettingsPage> {
       if (ok && mounted) {
         ScaffoldMessenger.of(
           context,
-        ).showSnackBar(SnackBar(content: Text('$_langName(code) 模型下载完成')));
+        ).showSnackBar(SnackBar(content: Text('${_langName(code)} 模型下载完成')));
       }
     } finally {
       if (mounted) setState(() => _modelBusy.remove(code));
@@ -178,17 +205,6 @@ class _SettingsPageState extends State<SettingsPage> {
       _modelStatus[code] = false;
     } finally {
       if (mounted) setState(() => _modelBusy.remove(code));
-    }
-  }
-
-  Future<void> _saveApi() async {
-    await _settings.setApiBaseUrl(_baseUrlCtrl.text.trim());
-    await _settings.setApiKey(_apiKeyCtrl.text.trim());
-    await _settings.setApiModel(_modelCtrl.text.trim());
-    if (mounted) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('API 配置已保存')));
     }
   }
 
@@ -208,6 +224,124 @@ class _SettingsPageState extends State<SettingsPage> {
     await _settings.setTranslationTarget(v);
     setState(() => _targetLang = v);
   }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text('设置')),
+      body:
+          _initDone
+              ? ListView(
+                padding: const EdgeInsets.fromLTRB(16, 8, 16, 40),
+                children: [
+                  _buildSectionTitle('翻译引擎'),
+                  _buildEngineSelector(),
+                  const SizedBox(height: 24),
+
+                  _buildSectionTitle('翻译语种'),
+                  _buildLanguageSelector(),
+                  const SizedBox(height: 24),
+
+                  _buildSectionTitle('离线翻译模型'),
+                  _buildModelList(),
+                  const SizedBox(height: 24),
+
+                  // [v0.1.44] 朗读参数迁移至离线翻译模型下方
+                  _buildSectionTitle('朗读参数'),
+                  _buildTtsParams(),
+                  const SizedBox(height: 24),
+
+                  _buildSectionTitle('语音识别模型（Vosk 跟读）'),
+                  _buildVoskSection(),
+                  const SizedBox(height: 24),
+
+                  _buildSectionTitle('云端 AI 供应商'),
+                  _buildProviderSection(),
+                  const SizedBox(height: 24),
+
+                  _buildSectionTitle('RAG 知识库'),
+                  _buildRagSection(),
+                  const SizedBox(height: 24),
+
+                  // [v0.1.44] 本地大模型管理（合入 AI 离线优先）
+                  _buildSectionTitle('本地大模型管理'),
+                  _buildLocalModelManager(),
+                ],
+              )
+              : const Center(child: CircularProgressIndicator()),
+    );
+  }
+
+  Widget _buildSectionTitle(String title) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: Text(title, style: titleStyle(fontSize: 16)),
+    );
+  }
+
+  // ===== 1. 翻译引擎（优化为 Chip 横向排版，解决竖排问题） =====
+
+  Widget _buildEngineSelector() {
+    final options = [
+      ('auto', '自动模式', '云端优先 → 本地 AI → ML Kit'),
+      ('cloud', '云端模型', 'OpenAI 兼容 API，翻译质量最高'),
+      ('llm', '本地 AI', '本地 GGUF 模型，无网强语义'),
+      ('mlkit', '离线快', 'Google ML Kit，极速轻量'),
+    ];
+
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children:
+                  options.map((opt) {
+                    final selected = _engine == opt.$1;
+                    return ChoiceChip(
+                      selected: selected,
+                      label: Text(
+                        opt.$2,
+                        style: TextStyle(
+                          fontSize: 13,
+                          fontWeight:
+                              selected ? FontWeight.w600 : FontWeight.normal,
+                          color:
+                              selected ? StudyPalette.ember : StudyPalette.ink,
+                        ),
+                      ),
+                      selectedColor: StudyPalette.emberSoft,
+                      backgroundColor: Colors.transparent,
+                      side: BorderSide(
+                        color:
+                            selected
+                                ? StudyPalette.ember
+                                : StudyPalette.linen,
+                      ),
+                      onSelected: (_) => _saveEngine(opt.$1),
+                    );
+                  }).toList(),
+            ),
+            const SizedBox(height: 10),
+            Text(
+              options
+                  .firstWhere(
+                    (o) => o.$1 == _engine,
+                    orElse: () => options.first,
+                  )
+                  .$3,
+              style: const TextStyle(fontSize: 12, color: StudyPalette.inkSoft),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // ===== 2. 翻译语种 =====
 
   Widget _buildLanguageSelector() {
     return Card(
@@ -293,129 +427,35 @@ class _SettingsPageState extends State<SettingsPage> {
     );
   }
 
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: const Text('设置')),
-      body:
-          _initDone
-              ? ListView(
-                padding: const EdgeInsets.fromLTRB(16, 8, 16, 40),
-                children: [
-                  _buildSectionTitle('翻译引擎'),
-                  _buildEngineSelector(),
-                  const SizedBox(height: 24),
-                  _buildSectionTitle('翻译语种'),
-                  _buildLanguageSelector(),
-                  const SizedBox(height: 24),
-                  _buildSectionTitle('朗读参数'),
-                  _buildTtsParams(),
-                  const SizedBox(height: 24),
-                  _buildSectionTitle('离线翻译模型'),
-                  _buildModelList(),
-                  const SizedBox(height: 24),
-                  _buildSectionTitle('AI 离线优先'),
-                  _buildOfflineToggle(),
-                  const SizedBox(height: 24),
-                  _buildSectionTitle('语音识别模型（Vosk 跟读）'),
-                  _buildVoskSection(),
-                  const SizedBox(height: 24),
-                  _buildSectionTitle('本地 AI 模型'),
-                  _buildLocalModelSection(),
-                  const SizedBox(height: 24),
-                  _buildSectionTitle('云端 AI 配置（知识提取/翻译/测验兜底）'),
-                  _buildApiConfig(),
-                  const SizedBox(height: 24),
-                  // [v0.1.37] RAG 知识库
-                  _buildSectionTitle('RAG 知识库'),
-                  _buildRagSection(),
-                  const SizedBox(height: 24),
-                  // [v0.1.37] 本地大模型管理
-                  _buildSectionTitle('本地大模型管理'),
-                  _buildLocalModelManager(),
-                ],
-              )
-              : const Center(child: CircularProgressIndicator()),
-    );
-  }
-
-  Widget _buildSectionTitle(String title) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 10),
-      child: Text(title, style: titleStyle(fontSize: 16)),
-    );
-  }
-
-  Widget _buildEngineSelector() {
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(12),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            SegmentedButton<String>(
-              segments: const [
-                ButtonSegment(value: 'auto', label: Text('自动')),
-                ButtonSegment(value: 'mlkit', label: Text('离线快')),
-                ButtonSegment(value: 'llm', label: Text('本地 AI')),
-                ButtonSegment(value: 'cloud', label: Text('云端')),
-              ],
-              selected: {_engine},
-              onSelectionChanged: (v) => _saveEngine(v.first),
-              style: SegmentedButton.styleFrom(
-                selectedBackgroundColor: StudyPalette.emberSoft,
-                selectedForegroundColor: StudyPalette.ember,
-              ),
-            ),
-            const SizedBox(height: 8),
-            Text(
-              _engineDesc(_engine),
-              style: const TextStyle(fontSize: 12, color: StudyPalette.inkSoft),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  String _engineDesc(String e) {
-    switch (e) {
-      case 'auto':
-        return '自动：ML Kit（快）→ 本地 AI（强）→ 云端（兜底），逐级回落';
-      case 'mlkit':
-        return 'ML Kit 离线翻译（快，需下载语言模型）';
-      case 'llm':
-        return '本地大模型 AI 翻译（需加载 GGUF 模型）';
-      case 'cloud':
-        return '云端 OpenAI 兼容 API（需配置 API 地址与密钥）';
-      default:
-        return '';
-    }
-  }
+  // ===== 3. 离线翻译模型 =====
 
   Widget _buildModelList() {
     return Card(
       child: Column(
         children: [
           for (var i = 0; i < _langs.length; i++)
-            _buildLangRow(
-              _langs[i].$1,
-              _langs[i].$2,
-              isLast: i == _langs.length - 1,
-            ),
+            _buildModelTile(_langs[i].$1, _langs[i].$2, i == _langs.length - 1),
         ],
       ),
     );
   }
 
-  Widget _buildLangRow(String code, String label, {bool isLast = false}) {
+  Widget _buildModelTile(String code, String name, bool isLast) {
     final downloaded = _modelStatus[code] ?? false;
     final busy = _modelBusy[code] ?? false;
+
     return Column(
       children: [
         ListTile(
           dense: true,
-          title: Text(label, style: const TextStyle(color: StudyPalette.ink)),
+          title: Text(name, style: const TextStyle(fontSize: 14)),
+          subtitle: Text(
+            downloaded ? '已下载' : '未下载',
+            style: TextStyle(
+              fontSize: 12,
+              color: downloaded ? StudyPalette.moss : StudyPalette.inkSoft,
+            ),
+          ),
           trailing:
               busy
                   ? const SizedBox(
@@ -464,6 +504,8 @@ class _SettingsPageState extends State<SettingsPage> {
     );
   }
 
+  // ===== 4. 朗读参数（迁移至此，彻底打通） =====
+
   Widget _buildTtsParams() {
     return Card(
       child: Padding(
@@ -494,17 +536,20 @@ class _SettingsPageState extends State<SettingsPage> {
               divisions: 15,
               label: '${_ttsRate.toStringAsFixed(1)}x',
               activeColor: StudyPalette.ember,
-              onChanged: (v) => setState(() => _ttsRate = v),
+              onChanged: (v) {
+                setState(() => _ttsRate = v);
+                _tts.setRate(v);
+              },
               onChangeEnd: (v) => _settings.setTtsRate(v),
             ),
             const Divider(height: 8),
 
-            // 重复遍数
+            // 单句重复遍数
             Row(
               children: [
                 const Icon(Icons.repeat, size: 20, color: StudyPalette.ink),
                 const SizedBox(width: 8),
-                Text('重复遍数', style: titleStyle(fontSize: 14)),
+                Text('单句重复遍数', style: titleStyle(fontSize: 14)),
                 const Spacer(),
                 Row(
                   children: [
@@ -542,7 +587,7 @@ class _SettingsPageState extends State<SettingsPage> {
             ),
             const Divider(height: 8),
 
-            // 句间停顿
+            // 连读句间停顿
             Row(
               children: [
                 const Icon(
@@ -551,7 +596,7 @@ class _SettingsPageState extends State<SettingsPage> {
                   color: StudyPalette.ink,
                 ),
                 const SizedBox(width: 8),
-                Text('句间停顿', style: titleStyle(fontSize: 14)),
+                Text('连读句间停顿', style: titleStyle(fontSize: 14)),
                 const Spacer(),
                 Text(
                   '${_ttsPauseMs}ms',
@@ -574,7 +619,7 @@ class _SettingsPageState extends State<SettingsPage> {
             ),
             const Divider(height: 8),
 
-            // [v0.1.28] 音色选择
+            // 音色选择
             Row(
               children: [
                 const Icon(
@@ -583,7 +628,7 @@ class _SettingsPageState extends State<SettingsPage> {
                   color: StudyPalette.ink,
                 ),
                 const SizedBox(width: 8),
-                Text('音色', style: titleStyle(fontSize: 14)),
+                Text('朗读音色', style: titleStyle(fontSize: 14)),
                 const Spacer(),
                 DropdownButton<String>(
                   value: _ttsVoice.isEmpty ? 'default' : _ttsVoice,
@@ -624,6 +669,7 @@ class _SettingsPageState extends State<SettingsPage> {
                     final voice = v == 'default' ? '' : v;
                     setState(() => _ttsVoice = voice);
                     _settings.setTtsVoice(voice);
+                    _tts.setVoice(voice);
                   },
                 ),
               ],
@@ -634,66 +680,7 @@ class _SettingsPageState extends State<SettingsPage> {
     );
   }
 
-  Widget _buildOfflineToggle() {
-    return Card(
-      child: SwitchListTile(
-        title: const Text('优先使用离线 AI'),
-        subtitle: const Text(
-          '开启后 AI 知识提取/翻译/测验优先走本地模型，\n云端仅作兜底',
-          style: TextStyle(fontSize: 12, color: StudyPalette.inkSoft),
-        ),
-        value: _preferOffline,
-        activeThumbColor: StudyPalette.ember,
-        onChanged: (v) {
-          setState(() => _preferOffline = v);
-          _settings.setPreferOffline(v);
-        },
-      ),
-    );
-  }
-
-  Widget _buildApiConfig() {
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(12),
-        child: Column(
-          children: [
-            TextField(
-              controller: _baseUrlCtrl,
-              decoration: const InputDecoration(
-                labelText: 'API 地址',
-                hintText: 'https://api.openai.com/v1',
-              ),
-            ),
-            const SizedBox(height: 10),
-            TextField(
-              controller: _apiKeyCtrl,
-              obscureText: true,
-              decoration: const InputDecoration(
-                labelText: 'API Key',
-                hintText: 'sk-...',
-              ),
-            ),
-            const SizedBox(height: 10),
-            TextField(
-              controller: _modelCtrl,
-              decoration: const InputDecoration(
-                labelText: '模型名',
-                hintText: 'gpt-4o-mini',
-              ),
-            ),
-            const SizedBox(height: 12),
-            Align(
-              alignment: Alignment.centerRight,
-              child: FilledButton(onPressed: _saveApi, child: const Text('保存')),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  // ===== [v0.1.38] Vosk 语音模型管理 =====
+  // ===== 5. Vosk 语音模型（模型名称 + 删除按钮，不展示冗余绝对路径） =====
 
   Future<void> _refreshVoskStatus() async {
     final path = await _settings.getVoskModelPath();
@@ -711,15 +698,15 @@ class _SettingsPageState extends State<SettingsPage> {
     }
   }
 
-  /// Vosk 模型状态 + 在线下载 / 文件导入。
   Widget _buildVoskSection() {
     final hasConfig = _voskModelPath != null && _voskModelPath!.isNotEmpty;
+    final modelName = hasConfig ? p.basename(_voskModelPath!) : '未配置';
     final statusText =
         !hasConfig
             ? '未配置语音模型'
             : (!_voskModelExists
-                ? '模型文件已丢失，请重新导入或下载'
-                : (_voskLoaded ? '模型已就绪 ✓' : '模型已配置（使用时自动加载）'));
+                ? '模型文件已丢失'
+                : (_voskLoaded ? '模型已就绪 ✓' : '已配置（跟读时自动加载）'));
     final statusColor =
         !hasConfig || !_voskModelExists
             ? StudyPalette.ember
@@ -738,7 +725,7 @@ class _SettingsPageState extends State<SettingsPage> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        _voskBusy ? '操作中…' : 'Vosk 语音识别模型',
+                        _voskBusy ? '操作中…' : '模型：$modelName',
                         style: const TextStyle(
                           fontSize: 14,
                           fontWeight: FontWeight.w600,
@@ -754,18 +741,6 @@ class _SettingsPageState extends State<SettingsPage> {
                           fontWeight: FontWeight.w500,
                         ),
                       ),
-                      if (hasConfig) ...[
-                        const SizedBox(height: 2),
-                        Text(
-                          '路径：${_voskModelPath!}',
-                          style: const TextStyle(
-                            fontSize: 11,
-                            color: StudyPalette.inkSoft,
-                          ),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ],
                     ],
                   ),
                 ),
@@ -774,34 +749,95 @@ class _SettingsPageState extends State<SettingsPage> {
                     width: 18,
                     height: 18,
                     child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                else if (hasConfig && _voskModelExists)
+                  IconButton(
+                    icon: const Icon(
+                      Icons.delete_outline,
+                      size: 20,
+                      color: StudyPalette.ember,
+                    ),
+                    tooltip: '删除此模型',
+                    onPressed: _confirmDeleteVoskModel,
                   ),
               ],
             ),
             const SizedBox(height: 10),
-            SizedBox(
-              width: double.infinity,
-              child: OutlinedButton.icon(
-                icon: const Icon(Icons.download, size: 16),
-                label: const Text(
-                  '在线下载（魔塔/镜像）',
-                  style: TextStyle(fontSize: 12),
+            Row(
+              children: [
+                Expanded(
+                  child: OutlinedButton.icon(
+                    icon: const Icon(Icons.download, size: 16),
+                    label: const Text('在线下载', style: TextStyle(fontSize: 12)),
+                    onPressed: _voskBusy ? null : _downloadVoskModel,
+                  ),
                 ),
-                onPressed: _voskBusy ? null : _downloadVoskModel,
-              ),
-            ),
-            const SizedBox(height: 4),
-            SizedBox(
-              width: double.infinity,
-              child: OutlinedButton.icon(
-                icon: const Icon(Icons.file_open, size: 16),
-                label: const Text('从 zip 文件导入', style: TextStyle(fontSize: 12)),
-                onPressed: _voskBusy ? null : _importVoskModel,
-              ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: OutlinedButton.icon(
+                    icon: const Icon(Icons.file_open, size: 16),
+                    label: const Text(
+                      '从 zip 导入',
+                      style: TextStyle(fontSize: 12),
+                    ),
+                    onPressed: _voskBusy ? null : _importVoskModel,
+                  ),
+                ),
+              ],
             ),
           ],
         ),
       ),
     );
+  }
+
+  Future<void> _confirmDeleteVoskModel() async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder:
+          (ctx) => AlertDialog(
+            title: const Text('删除 Vosk 语音模型'),
+            content: const Text('确定要删除当前配置的 Vosk 语音模型吗？删除后可随时重新下载或导入。'),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx, false),
+                child: const Text('取消'),
+              ),
+              FilledButton(
+                style: FilledButton.styleFrom(
+                  backgroundColor: StudyPalette.ember,
+                ),
+                onPressed: () => Navigator.pop(ctx, true),
+                child: const Text('删除'),
+              ),
+            ],
+          ),
+    );
+    if (confirm != true || !mounted) return;
+
+    setState(() => _voskBusy = true);
+    try {
+      if (_voskModelPath != null && _voskModelPath!.isNotEmpty) {
+        final dir = Directory(_voskModelPath!);
+        if (await dir.exists()) {
+          await dir.delete(recursive: true);
+        }
+      }
+      await _settings.setVoskModelPath('');
+      await _refreshVoskStatus();
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Vosk 语音模型已删除')));
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('删除失败: $e')));
+      }
+    } finally {
+      if (mounted) setState(() => _voskBusy = false);
+    }
   }
 
   Future<void> _downloadVoskModel() async {
@@ -854,7 +890,398 @@ class _SettingsPageState extends State<SettingsPage> {
     }
   }
 
-  // ===== [v0.1.37] RAG 知识库 =====
+  // ===== 6. 云端 AI 供应商管理（支持多 Provider + 一键拉取模型列表 + 下拉选择） =====
+
+  Widget _buildProviderSection() {
+    final current = _activeProvider;
+    final modelList = current.models;
+
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // 供应商选择行 + 新增/删除操作
+            Row(
+              children: [
+                const Icon(
+                  Icons.cloud_outlined,
+                  size: 20,
+                  color: StudyPalette.ink,
+                ),
+                const SizedBox(width: 8),
+                Text('供应商', style: titleStyle(fontSize: 14)),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: DropdownButton<String>(
+                    value: _activeProviderId,
+                    isExpanded: true,
+                    underline: const SizedBox(),
+                    items:
+                        _providers.map((p) {
+                          return DropdownMenuItem(
+                            value: p.id,
+                            child: Text(
+                              p.name,
+                              style: const TextStyle(fontSize: 13),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          );
+                        }).toList(),
+                    onChanged: (id) async {
+                      if (id == null) return;
+                      setState(() => _activeProviderId = id);
+                      await _settings.setActiveProviderId(id);
+                      _syncActiveProviderToFields();
+                    },
+                  ),
+                ),
+                IconButton(
+                  icon: const Icon(Icons.add, size: 20),
+                  tooltip: '添加供应商',
+                  onPressed: _showAddProviderDialog,
+                ),
+                if (_providers.length > 1)
+                  IconButton(
+                    icon: const Icon(
+                      Icons.delete_outline,
+                      size: 20,
+                      color: StudyPalette.ember,
+                    ),
+                    tooltip: '删除当前供应商',
+                    onPressed: _deleteCurrentProvider,
+                  ),
+              ],
+            ),
+            const Divider(height: 12),
+
+            // Base URL
+            TextField(
+              controller: _baseUrlCtrl,
+              decoration: const InputDecoration(
+                labelText: 'API 地址 (Base URL)',
+                hintText: 'https://api.siliconflow.cn/v1',
+                isDense: true,
+              ),
+              onChanged: (v) => _updateActiveProvider(baseUrl: v.trim()),
+            ),
+            const SizedBox(height: 10),
+
+            // API Key
+            TextField(
+              controller: _apiKeyCtrl,
+              obscureText: true,
+              decoration: const InputDecoration(
+                labelText: 'API Key',
+                hintText: 'sk-...',
+                isDense: true,
+              ),
+              onChanged: (v) => _updateActiveProvider(apiKey: v.trim()),
+            ),
+            const SizedBox(height: 10),
+
+            // 大语言模型选择框（Dropdown 下拉 + 获取按钮）
+            Row(
+              children: [
+                Expanded(
+                  child:
+                      modelList.isNotEmpty
+                          ? DropdownButtonFormField<String>(
+                            initialValue:
+                                modelList.contains(current.models.firstOrNull)
+                                    ? current.models.firstOrNull
+                                    : null,
+                            decoration: const InputDecoration(
+                              labelText: 'LLM 对话模型',
+                              isDense: true,
+                            ),
+                            items:
+                                modelList.map((m) {
+                                  return DropdownMenuItem(
+                                    value: m,
+                                    child: Text(
+                                      m,
+                                      style: const TextStyle(fontSize: 12),
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                  );
+                                }).toList(),
+                            onChanged: (v) async {
+                              if (v != null) {
+                                await _settings.setApiModel(v);
+                              }
+                            },
+                          )
+                          : TextField(
+                            controller: _customModelCtrl,
+                            decoration: const InputDecoration(
+                              labelText: 'LLM 模型名称',
+                              hintText: 'gpt-4o-mini',
+                              isDense: true,
+                            ),
+                            onChanged: (v) => _settings.setApiModel(v.trim()),
+                          ),
+                ),
+                const SizedBox(width: 8),
+                SizedBox(
+                  height: 36,
+                  child: FilledButton.tonalIcon(
+                    onPressed: _fetchingModels ? null : _fetchModelsFromApi,
+                    icon:
+                        _fetchingModels
+                            ? const SizedBox(
+                              width: 14,
+                              height: 14,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            )
+                            : const Icon(Icons.sync, size: 16),
+                    label: const Text('获取模型', style: TextStyle(fontSize: 12)),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text(
+                  '已加载 ${modelList.length} 个模型',
+                  style: const TextStyle(
+                    fontSize: 12,
+                    color: StudyPalette.inkSoft,
+                  ),
+                ),
+                TextButton.icon(
+                  icon: const Icon(Icons.add, size: 14),
+                  label: const Text('手动添加模型', style: TextStyle(fontSize: 12)),
+                  onPressed: _showAddCustomModelDialog,
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _updateActiveProvider({
+    String? baseUrl,
+    String? apiKey,
+    List<String>? models,
+  }) {
+    final cur = _activeProvider;
+    final updated = cur.copyWith(
+      baseUrl: baseUrl ?? cur.baseUrl,
+      apiKey: apiKey ?? cur.apiKey,
+      models: models ?? cur.models,
+    );
+    final list = _providers.map((p) => p.id == cur.id ? updated : p).toList();
+    setState(() => _providers = list);
+    _settings.setProviders(list);
+    if (baseUrl != null) _settings.setApiBaseUrl(baseUrl);
+    if (apiKey != null) _settings.setApiKey(apiKey);
+  }
+
+  Future<void> _fetchModelsFromApi() async {
+    final cur = _activeProvider;
+    if (cur.baseUrl.isEmpty) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('请先填写 API 地址')));
+      return;
+    }
+    setState(() => _fetchingModels = true);
+    try {
+      final url =
+          '${cur.baseUrl.endsWith('/') ? cur.baseUrl : '${cur.baseUrl}/'}models';
+      final headers = <String, String>{};
+      if (cur.apiKey.isNotEmpty) {
+        headers['Authorization'] = 'Bearer ${cur.apiKey}';
+      }
+      final resp = await http
+          .get(Uri.parse(url), headers: headers)
+          .timeout(const Duration(seconds: 15));
+      if (resp.statusCode == 200) {
+        final json = jsonDecode(resp.body) as Map<String, dynamic>;
+        final data = json['data'] as List?;
+        if (data != null && data.isNotEmpty) {
+          final fetched =
+              data
+                  .map((e) => (e as Map<String, dynamic>)['id']?.toString())
+                  .where((e) => e != null && e.isNotEmpty)
+                  .cast<String>()
+                  .toList();
+          _updateActiveProvider(models: fetched);
+          if (fetched.isNotEmpty) {
+            await _settings.setApiModel(fetched.first);
+          }
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(content: Text('成功获取到 ${fetched.length} 个模型')),
+            );
+          }
+        }
+      } else {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('获取模型失败: HTTP ${resp.statusCode}')),
+          );
+        }
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('获取模型失败: $e')));
+      }
+    } finally {
+      if (mounted) setState(() => _fetchingModels = false);
+    }
+  }
+
+  Future<void> _showAddProviderDialog() async {
+    final nameCtrl = TextEditingController();
+    final urlCtrl = TextEditingController();
+    final keyCtrl = TextEditingController();
+
+    final ok = await showDialog<bool>(
+      context: context,
+      builder:
+          (ctx) => AlertDialog(
+            title: const Text('添加供应商'),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextField(
+                  controller: nameCtrl,
+                  decoration: const InputDecoration(
+                    labelText: '供应商名称',
+                    hintText: '如：我的本地 Ollama',
+                  ),
+                ),
+                const SizedBox(height: 8),
+                TextField(
+                  controller: urlCtrl,
+                  decoration: const InputDecoration(
+                    labelText: 'API 地址',
+                    hintText: 'https://...',
+                  ),
+                ),
+                const SizedBox(height: 8),
+                TextField(
+                  controller: keyCtrl,
+                  decoration: const InputDecoration(
+                    labelText: 'API Key (选填)',
+                    hintText: 'sk-...',
+                  ),
+                ),
+              ],
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx, false),
+                child: const Text('取消'),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.pop(ctx, true),
+                child: const Text('添加'),
+              ),
+            ],
+          ),
+    );
+
+    if (ok == true && nameCtrl.text.trim().isNotEmpty && mounted) {
+      final newP = ApiProvider(
+        id: newModelId('prov'),
+        name: nameCtrl.text.trim(),
+        baseUrl: urlCtrl.text.trim(),
+        apiKey: keyCtrl.text.trim(),
+      );
+      final list = [..._providers, newP];
+      setState(() {
+        _providers = list;
+        _activeProviderId = newP.id;
+      });
+      await _settings.setProviders(list);
+      await _settings.setActiveProviderId(newP.id);
+      _syncActiveProviderToFields();
+    }
+  }
+
+  Future<void> _deleteCurrentProvider() async {
+    if (_providers.length <= 1) return;
+    final cur = _activeProvider;
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder:
+          (ctx) => AlertDialog(
+            title: const Text('删除供应商'),
+            content: Text('确定要删除供应商「${cur.name}」吗？'),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx, false),
+                child: const Text('取消'),
+              ),
+              FilledButton(
+                style: FilledButton.styleFrom(
+                  backgroundColor: StudyPalette.ember,
+                ),
+                onPressed: () => Navigator.pop(ctx, true),
+                child: const Text('删除'),
+              ),
+            ],
+          ),
+    );
+    if (confirm == true && mounted) {
+      final list = _providers.where((p) => p.id != cur.id).toList();
+      setState(() {
+        _providers = list;
+        _activeProviderId = list.first.id;
+      });
+      await _settings.setProviders(list);
+      await _settings.setActiveProviderId(list.first.id);
+      _syncActiveProviderToFields();
+    }
+  }
+
+  Future<void> _showAddCustomModelDialog() async {
+    final ctrl = TextEditingController();
+    final ok = await showDialog<bool>(
+      context: context,
+      builder:
+          (ctx) => AlertDialog(
+            title: const Text('手动添加模型'),
+            content: TextField(
+              controller: ctrl,
+              decoration: const InputDecoration(
+                labelText: '模型名称',
+                hintText: '如：gpt-4o-mini',
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx, false),
+                child: const Text('取消'),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.pop(ctx, true),
+                child: const Text('添加'),
+              ),
+            ],
+          ),
+    );
+    if (ok == true && ctrl.text.trim().isNotEmpty) {
+      final cur = _activeProvider;
+      final m = ctrl.text.trim();
+      if (!cur.models.contains(m)) {
+        _updateActiveProvider(models: [...cur.models, m]);
+        await _settings.setApiModel(m);
+      }
+    }
+  }
+
+  // ===== 7. RAG 知识库 =====
 
   Future<void> _refreshRagStatus() async {
     final indexed = await RagRetrievalService.instance.listIndexedBooks();
@@ -862,13 +1289,16 @@ class _SettingsPageState extends State<SettingsPage> {
   }
 
   Widget _buildRagSection() {
+    final cur = _activeProvider;
+    final models = cur.models;
+
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(12),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // Embedding 模型名
+            // Embedding 模型选择（支持下拉或手动输入）
             Row(
               children: [
                 const Icon(
@@ -878,22 +1308,49 @@ class _SettingsPageState extends State<SettingsPage> {
                 ),
                 const SizedBox(width: 8),
                 Expanded(
-                  child: TextField(
-                    controller: _embeddingCtrl,
-                    decoration: const InputDecoration(
-                      labelText: 'Embedding 模型',
-                      hintText: 'text-embedding-3-small',
-                      isDense: true,
-                      contentPadding: EdgeInsets.symmetric(
-                        horizontal: 10,
-                        vertical: 8,
-                      ),
-                    ),
-                    onChanged: (v) {
-                      _embeddingModel = v.trim();
-                      _settings.setEmbeddingModel(_embeddingModel);
-                    },
-                  ),
+                  child:
+                      models.isNotEmpty
+                          ? DropdownButtonFormField<String>(
+                            initialValue:
+                                models.contains(_embeddingModel)
+                                    ? _embeddingModel
+                                    : null,
+                            decoration: const InputDecoration(
+                              labelText: 'Embedding 向量模型',
+                              isDense: true,
+                            ),
+                            items:
+                                models.map((m) {
+                                  return DropdownMenuItem(
+                                    value: m,
+                                    child: Text(
+                                      m,
+                                      style: const TextStyle(fontSize: 12),
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                  );
+                                }).toList(),
+                            onChanged: (v) {
+                              if (v != null) {
+                                setState(() => _embeddingModel = v);
+                                _settings.setEmbeddingModel(v);
+                              }
+                            },
+                          )
+                          : TextField(
+                            controller: TextEditingController(
+                              text: _embeddingModel,
+                            ),
+                            decoration: const InputDecoration(
+                              labelText: 'Embedding 向量模型',
+                              hintText: 'text-embedding-3-small',
+                              isDense: true,
+                            ),
+                            onChanged: (v) {
+                              _embeddingModel = v.trim();
+                              _settings.setEmbeddingModel(_embeddingModel);
+                            },
+                          ),
                 ),
               ],
             ),
@@ -928,7 +1385,7 @@ class _SettingsPageState extends State<SettingsPage> {
               ),
             ),
             const SizedBox(height: 12),
-            // 索引状态（点击查看已索引书籍详情）
+            // 索引状态（点击弹出已索引书籍列表详情）
             InkWell(
               borderRadius: BorderRadius.circular(8),
               onTap: _indexedBooks.isEmpty ? null : _showIndexedBooksDialog,
@@ -967,7 +1424,6 @@ class _SettingsPageState extends State<SettingsPage> {
     );
   }
 
-  /// [v0.1.42] 弹出已索引书籍列表详情弹窗
   Future<void> _showIndexedBooksDialog() async {
     final db = await DatabaseProvider.database;
     final bookDao = BookDao(db);
@@ -1035,9 +1491,8 @@ class _SettingsPageState extends State<SettingsPage> {
     );
   }
 
-  // ===== [v0.1.37] 本地大模型管理 =====
+  // ===== 8. 本地大模型管理（合入 AI 离线优先 + 模型名称与删除按钮） =====
 
-  /// 预设模型列表（魔塔镜像下载）。
   static const _presetModels = [
     ('Qwen3-0.6B Q4_K_M', 'qwen3-0.6b-instruct-q4_k_m.gguf'),
     ('MiniCPM5-1B Q4_K_M', 'minicpm5-1b-q4_k_m.gguf'),
@@ -1050,16 +1505,37 @@ class _SettingsPageState extends State<SettingsPage> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            // [v0.1.44] 合入优先离线开关
+            SwitchListTile(
+              dense: true,
+              contentPadding: EdgeInsets.zero,
+              title: const Text(
+                '优先使用离线 AI',
+                style: TextStyle(fontSize: 14, fontWeight: FontWeight.w500),
+              ),
+              subtitle: const Text(
+                '开启后知识提取/翻译优先走本地模型，云端作兜底',
+                style: TextStyle(fontSize: 12, color: StudyPalette.inkSoft),
+              ),
+              value: _preferOffline,
+              activeThumbColor: StudyPalette.ember,
+              onChanged: (v) {
+                setState(() => _preferOffline = v);
+                _settings.setPreferOffline(v);
+              },
+            ),
+            const Divider(height: 8),
+
             // 自动加载开关
             SwitchListTile(
               dense: true,
               contentPadding: EdgeInsets.zero,
               title: const Text(
                 'AI 对话时自动加载本地模型',
-                style: TextStyle(fontSize: 14),
+                style: TextStyle(fontSize: 14, fontWeight: FontWeight.w500),
               ),
               subtitle: const Text(
-                '在线 API 故障时自动回落本地模型',
+                '空闲 10 分钟或退出时自动卸载',
                 style: TextStyle(fontSize: 12, color: StudyPalette.inkSoft),
               ),
               value: _autoLoadLocal,
@@ -1071,42 +1547,74 @@ class _SettingsPageState extends State<SettingsPage> {
             ),
             const Divider(height: 8),
 
-            // 默认模型下拉（从已扫描的本地模型中选择）
-            if (_localModels.isNotEmpty) ...[
-              Row(
-                children: [
-                  const Icon(
-                    Icons.model_training,
-                    size: 18,
-                    color: StudyPalette.ink,
+            // 已下载/导入的 GGUF 模型列表
+            Text('已配置的本地模型', style: titleStyle(fontSize: 14)),
+            const SizedBox(height: 6),
+            if (_localModels.isEmpty)
+              const Padding(
+                padding: EdgeInsets.symmetric(vertical: 8),
+                child: Text(
+                  '暂无本地 GGUF 模型，请在线下载或从文件导入',
+                  style: TextStyle(fontSize: 12, color: StudyPalette.inkSoft),
+                ),
+              )
+            else
+              ...List.generate(_localModels.length, (i) {
+                final m = _localModels[i];
+                final isDefault = _defaultLocalModel == m.path;
+                return ListTile(
+                  dense: true,
+                  contentPadding: EdgeInsets.zero,
+                  leading: Icon(
+                    isDefault ? Icons.check_circle : Icons.model_training,
+                    color: isDefault ? StudyPalette.moss : StudyPalette.inkSoft,
+                    size: 20,
                   ),
-                  const SizedBox(width: 8),
-                  Text('默认模型', style: titleStyle(fontSize: 14)),
-                  const Spacer(),
-                  DropdownButton<String>(
-                    value: _defaultLocalModel,
-                    underline: const SizedBox(),
-                    hint: const Text('未设置', style: TextStyle(fontSize: 13)),
-                    items:
-                        _localModels.map((m) {
-                          return DropdownMenuItem(
-                            value: m.path,
-                            child: Text(
-                              m.name,
-                              style: const TextStyle(fontSize: 13),
-                            ),
-                          );
-                        }).toList(),
-                    onChanged: (v) {
-                      if (v == null) return;
-                      setState(() => _defaultLocalModel = v);
-                      _settings.setDefaultLocalModel(v);
-                    },
+                  title: Text(
+                    m.name,
+                    style: TextStyle(
+                      fontSize: 13,
+                      fontWeight:
+                          isDefault ? FontWeight.w600 : FontWeight.normal,
+                      color: StudyPalette.ink,
+                    ),
                   ),
-                ],
-              ),
-              const Divider(height: 8),
-            ],
+                  subtitle: Text(
+                    '${_formatSize(m.sizeBytes)}${isDefault ? ' · 默认模型' : ''}',
+                    style: const TextStyle(
+                      fontSize: 11,
+                      color: StudyPalette.inkSoft,
+                    ),
+                  ),
+                  trailing: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      if (!isDefault)
+                        TextButton(
+                          style: TextButton.styleFrom(
+                            padding: const EdgeInsets.symmetric(horizontal: 8),
+                            textStyle: const TextStyle(fontSize: 12),
+                          ),
+                          onPressed: () {
+                            setState(() => _defaultLocalModel = m.path);
+                            _settings.setDefaultLocalModel(m.path);
+                          },
+                          child: const Text('设为默认'),
+                        ),
+                      IconButton(
+                        icon: const Icon(
+                          Icons.delete_outline,
+                          size: 18,
+                          color: StudyPalette.ember,
+                        ),
+                        tooltip: '删除此模型',
+                        onPressed: () => _confirmDeleteGgufModel(m),
+                      ),
+                    ],
+                  ),
+                );
+              }),
+            const Divider(height: 12),
 
             // 预设模型下载
             const Text(
@@ -1154,7 +1662,55 @@ class _SettingsPageState extends State<SettingsPage> {
     );
   }
 
-  /// 下载模型文件到本地。
+  Future<void> _confirmDeleteGgufModel(_GgufModelInfo info) async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder:
+          (ctx) => AlertDialog(
+            title: const Text('删除本地模型'),
+            content: Text('确定要删除模型「${info.name}」吗？文件将被永久删除。'),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx, false),
+                child: const Text('取消'),
+              ),
+              FilledButton(
+                style: FilledButton.styleFrom(
+                  backgroundColor: StudyPalette.ember,
+                ),
+                onPressed: () => Navigator.pop(ctx, true),
+                child: const Text('删除'),
+              ),
+            ],
+          ),
+    );
+    if (confirm != true || !mounted) return;
+
+    try {
+      final f = File(info.path);
+      if (await f.exists()) {
+        await f.delete();
+      }
+      if (_defaultLocalModel == info.path) {
+        _defaultLocalModel = null;
+        await _settings.setDefaultLocalModel('');
+      }
+      _localModels = await _scanLocalModels();
+      if (mounted) {
+        setState(() {});
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('模型 ${info.name} 已删除')));
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('删除失败: $e')));
+      }
+    }
+  }
+
   static Future<void> _downloadFile(String url, String savePath) async {
     final resp = await http.get(Uri.parse(url));
     if (resp.statusCode != 200) {
@@ -1190,7 +1746,6 @@ class _SettingsPageState extends State<SettingsPage> {
   }
 
   Future<void> _importGgufFromFile() async {
-    // 直接使用 FilePicker 选择 .gguf 文件
     final result = await FilePicker.pickFiles(
       type: FileType.custom,
       allowedExtensions: const ['gguf'],
@@ -1215,85 +1770,6 @@ class _SettingsPageState extends State<SettingsPage> {
     }
   }
 
-  // ===== [v0.1.35] 本地 AI 模型状态 =====
-
-  /// 构建本地 GGUF 模型状态卡片。
-  Widget _buildLocalModelSection() {
-    if (!_modelScanDone) {
-      return const Card(
-        child: Padding(
-          padding: EdgeInsets.all(20),
-          child: Center(
-            child: SizedBox(
-              width: 20,
-              height: 20,
-              child: CircularProgressIndicator(strokeWidth: 2),
-            ),
-          ),
-        ),
-      );
-    }
-
-    if (_localModels.isEmpty) {
-      return Card(
-        child: Padding(
-          padding: const EdgeInsets.all(16),
-          child: Row(
-            children: [
-              const Icon(
-                Icons.model_training,
-                size: 20,
-                color: StudyPalette.inkSoft,
-              ),
-              const SizedBox(width: 12),
-              const Expanded(
-                child: Text(
-                  '未导入 GGUF 模型\n将 .gguf 文件放入应用 models/ 目录',
-                  style: TextStyle(fontSize: 13, color: StudyPalette.inkSoft),
-                ),
-              ),
-            ],
-          ),
-        ),
-      );
-    }
-
-    return Card(
-      child: Column(
-        children: [
-          for (var i = 0; i < _localModels.length; i++) ...[
-            if (i > 0) const Divider(height: 1, indent: 16),
-            ListTile(
-              dense: true,
-              leading: Icon(
-                _modelLoaded ? Icons.check_circle : Icons.hourglass_empty,
-                color: _modelLoaded ? StudyPalette.moss : StudyPalette.inkSoft,
-                size: 20,
-              ),
-              title: Text(
-                _localModels[i].name,
-                style: const TextStyle(
-                  fontSize: 14,
-                  fontWeight: FontWeight.w600,
-                  color: StudyPalette.ink,
-                ),
-              ),
-              subtitle: Text(
-                '${_formatSize(_localModels[i].sizeBytes)} · '
-                '${_modelLoaded ? "已加载" : "未加载"}',
-                style: const TextStyle(
-                  fontSize: 12,
-                  color: StudyPalette.inkSoft,
-                ),
-              ),
-            ),
-          ],
-        ],
-      ),
-    );
-  }
-
-  /// 扫描 models/ 目录下的 .gguf 文件。
   Future<List<_GgufModelInfo>> _scanLocalModels() async {
     try {
       final dir = await ModelStore.modelsDir();
@@ -1319,7 +1795,6 @@ class _SettingsPageState extends State<SettingsPage> {
     }
   }
 
-  /// 格式化文件大小（B/KB/MB/GB）。
   String _formatSize(int bytes) {
     if (bytes < 1024) return '${bytes}B';
     if (bytes < 1024 * 1024) return '${(bytes / 1024).toStringAsFixed(1)}KB';
@@ -1330,7 +1805,6 @@ class _SettingsPageState extends State<SettingsPage> {
   }
 }
 
-/// [v0.1.35] GGUF 模型文件信息。
 class _GgufModelInfo {
   const _GgufModelInfo({
     required this.name,

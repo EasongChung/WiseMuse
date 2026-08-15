@@ -20,4 +20,7 @@ abstract class TtsService {
 
   /// [v0.1.28] 设置 TTS 音色（名称按系统 TTS 返回。空串=系统默认）。
   Future<void> setVoice(String name);
+
+  /// [v0.1.44] 设置 TTS 语速（0.5~2.0）。
+  Future<void> setRate(double rate);
 }

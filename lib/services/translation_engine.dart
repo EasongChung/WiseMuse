@@ -6,18 +6,18 @@ import 'openai_client.dart';
 
 /// 翻译引擎类型。
 ///
-/// 按优先级下降排列：ML Kit（快，离线）→ llama（强，离线）→ cloud（兜底，需联网）。
+/// 按优先级下降排列：cloud（最高质量，优先）→ llm（强，离线）→ mlkit（轻量，离线兜底）。
 enum TranslationEngineType {
-  /// ML Kit 翻译（standalone SDK，CDN 直连，无 GMS 依赖，快但质量一般）。
-  mlkit,
+  /// 云端 OpenAI 兼容 API（需网络 + API 配置，质量最高）。
+  cloud,
 
   /// llama 本地大模型（Qwen3 等，需加载 GGUF，强但慢）。
   llm,
 
-  /// 云端 OpenAI 兼容 API（需网络 + API 配置，质量最高）。
-  cloud,
+  /// ML Kit 翻译（standalone SDK，CDN 直连，无 GMS 依赖，快但质量一般）。
+  mlkit,
 
-  /// 自动：ML Kit → llama → cloud 逐级回落。
+  /// 自动：cloud → llm → mlkit 逐级回落。
   auto,
 }
 
@@ -129,18 +129,18 @@ class TranslationEngine {
     }
   }
 
-  /// 三级自动回落：ML Kit → llama → 云端。
+  /// 三级自动回落：云端 → llama → ML Kit。
   Future<String?> _tryAuto(String text, String source, String target) async {
-    // 1) ML Kit
-    final mlkit = await _tryMlkit(text, source, target);
-    if (mlkit != null) return mlkit;
+    // 1) 云端（质量最高）
+    final cloud = await _tryCloud(text, source, target);
+    if (cloud != null) return cloud;
 
-    // 2) llama
+    // 2) llama 本地模型（离线强语义）
     final llm = await _tryLlm(text, source, target);
     if (llm != null) return llm;
 
-    // 3) 云端
-    return _tryCloud(text, source, target);
+    // 3) ML Kit（极轻量离线兜底）
+    return _tryMlkit(text, source, target);
   }
 
   /// ML Kit 翻译（快，离线优先）。

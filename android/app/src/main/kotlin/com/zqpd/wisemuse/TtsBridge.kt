@@ -93,6 +93,7 @@ class TtsBridge : FlutterPlugin, MethodChannel.MethodCallHandler {
             "speak" -> handleSpeak(call, result)
             "stop" -> handleStop(result)
             "setVoice" -> handleSetVoice(call, result)
+            "setRate" -> handleSetRate(call, result)
             else -> result.notImplemented()
         }
     }
@@ -505,6 +506,23 @@ class TtsBridge : FlutterPlugin, MethodChannel.MethodCallHandler {
             }
         } catch (t: Throwable) {
             Log.e(TAG, "setVoice 异常", t)
+            result.success(false)
+        }
+    }
+
+    /** 设置 TTS 语速（0.5~2.0）。 */
+    private fun handleSetRate(call: MethodCall, result: MethodChannel.Result) {
+        val rate = (call.argument<Number>("rate")?.toFloat()) ?: 1.0f
+        val engine = tts ?: run {
+            result.success(false)
+            return
+        }
+        try {
+            engine.setSpeechRate(rate)
+            Log.i(TAG, "TTS 语速已设为: $rate")
+            result.success(true)
+        } catch (t: Throwable) {
+            Log.e(TAG, "setSpeechRate 异常", t)
             result.success(false)
         }
     }
