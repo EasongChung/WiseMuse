@@ -77,14 +77,6 @@ class _FollowPageState extends State<FollowPage>
   // [v0.1.38] 知识库选择范围标签
   String? _scopeLabel;
 
-  static const List<String> _sampleSentences = [
-    '今天天气真好',
-    '我喜欢读书',
-    '小猫在草地上玩耍',
-    '妈妈做的饭真香',
-    '我们一起上学去',
-  ];
-
   @override
   void initState() {
     super.initState();
@@ -93,7 +85,6 @@ class _FollowPageState extends State<FollowPage>
       vsync: this,
       duration: const Duration(milliseconds: 500),
     )..addListener(_onWaveTick);
-    _sentenceController.text = widget.initialSentence ?? _sampleSentences.first;
     // [v0.1.38] 加载当前页句子（从阅读页进入时）
     _loadPageSentences();
     // [v0.1.38] 从设置中自动加载 Vosk 模型
@@ -650,24 +641,6 @@ class _FollowPageState extends State<FollowPage>
               labelText: '跟读句子',
               border: OutlineInputBorder(),
             ),
-          ),
-          const SizedBox(height: 8),
-          Wrap(
-            spacing: 8,
-            runSpacing: 4,
-            children: [
-              for (final s in _sampleSentences)
-                ActionChip(
-                  label: Text(s, style: const TextStyle(fontSize: 12)),
-                  onPressed:
-                      _playing || _listening || _operationBusy
-                          ? null
-                          : () {
-                            _sentenceController.text = s;
-                            setState(() => _lastScore = null);
-                          },
-                ),
-            ],
           ),
           const SizedBox(height: 16),
           Row(
