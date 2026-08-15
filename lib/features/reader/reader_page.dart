@@ -17,7 +17,10 @@ import '../../core/storage/knowledge_point_dao.dart';
 import '../../core/storage/sentence_dao.dart';
 import '../../core/storage/word_entry_dao.dart';
 import '../../core/theme/app_theme.dart';
+import '../../services/asr_service.dart';
 import '../../services/docx_html_converter.dart';
+import '../../services/vosk_asr_service.dart';
+import 'package:permission_handler/permission_handler.dart';
 import '../../services/native_tts_service.dart';
 import '../../services/ocr_geometry_service.dart';
 import '../../services/ocr_service.dart';
@@ -28,7 +31,7 @@ import '../../services/rag/rag_qa_service.dart';
 import '../../vendor/flutter_pdfview/flutter_pdfview.dart';
 import '../knowledge/knowledge_detail_sheet.dart';
 import '../assistant/knowledge_explain_sheet.dart';
-import '../follow/follow_page.dart';
+import '../follow/scoring.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 
 /// [v0.2.0] 阅读页：按来源类型切换四种模式。
@@ -101,7 +104,7 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
   bool _switchingMode = false;
 
   // [v2.11.0] 播放状态追踪：_speakingStartedAt == _speechRequest 时表示 TTS 正在播放。
-  int _speakingStartedAt = 0;
+  int _speakingStartedAt = -1;
   bool get _ttsSpeaking =>
       _speakingStartedAt > 0 && _speakingStartedAt == _speechRequest;
 
@@ -773,7 +776,23 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
         child: content,
       );
     }
-    return content;
+
+    // [v2.12.0] 浮底查词栏或句操作栏（所有模式共享，包含原文模式）
+    Widget floatingBar;
+    if (_selectedText != null && _selectedText!.isNotEmpty) {
+      floatingBar = _buildWordLookupBar();
+    } else if (_activeSentenceText != null && _activeSentenceText!.isNotEmpty) {
+      floatingBar = _buildSentenceActionsBar();
+    } else {
+      floatingBar = const SizedBox.shrink();
+    }
+
+    return Stack(
+      children: [
+        content,
+        Positioned(left: 8, right: 8, bottom: 8, child: floatingBar),
+      ],
+    );
   }
 
   Widget _buildPdfView() {
@@ -960,21 +979,7 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
       );
     }
 
-    return Stack(
-      children: [
-        pageContent,
-        // 浮底查词栏或句操作栏（二者互斥）
-        if (_selectedText != null && _selectedText!.isNotEmpty)
-          Positioned(left: 8, right: 8, bottom: 8, child: _buildWordLookupBar())
-        else if (_activeSentenceText != null && _activeSentenceText!.isNotEmpty)
-          Positioned(
-            left: 8,
-            right: 8,
-            bottom: 8,
-            child: _buildSentenceActionsBar(),
-          ),
-      ],
-    );
+    return pageContent;
   }
 
   /// [v2.8.0] 可左右滑翻页的句子列表（多页文件包裹 GestureDetector）。
@@ -1349,45 +1354,24 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
                 ? () => _syncPage(_pdfCurrentPage - 1)
                 : null,
           ),
-          // 页码选择器（弹出全宽页码列表）
-          if (total > 1)
-            TextButton(
-              style: TextButton.styleFrom(
-                visualDensity: VisualDensity.compact,
-                minimumSize: const Size(0, 0),
-                padding: const EdgeInsets.symmetric(horizontal: 6),
-                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-              ),
-              onPressed: _showPageSelector,
-              child: const Icon(
-                Icons.grid_view,
-                size: 16,
+          // [v2.12.0] 页码文字可点击弹出选择器
+          TextButton(
+            style: TextButton.styleFrom(
+              visualDensity: VisualDensity.compact,
+              minimumSize: const Size(0, 0),
+              padding: const EdgeInsets.symmetric(horizontal: 2),
+              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+            ),
+            onPressed: total > 1 ? _showPageSelector : null,
+            child: Text(
+              '${_pdfCurrentPage + 1} / $total',
+              style: const TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
                 color: StudyPalette.ink,
               ),
-            ),
-          Text(
-            '${_pdfCurrentPage + 1} / $total',
-            style: const TextStyle(
-              fontSize: 13,
-              fontWeight: FontWeight.w600,
-              color: StudyPalette.ink,
             ),
           ),
-          if (total > 1)
-            TextButton(
-              style: TextButton.styleFrom(
-                visualDensity: VisualDensity.compact,
-                minimumSize: const Size(0, 0),
-                padding: const EdgeInsets.symmetric(horizontal: 6),
-                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-              ),
-              onPressed: _showPageSelector,
-              child: const Icon(
-                Icons.grid_view,
-                size: 16,
-                color: StudyPalette.ink,
-              ),
-            ),
           // 下翻页
           _compactIcon(
             Icons.chevron_right,
@@ -1886,19 +1870,28 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
 
   // ===== 文本模式：跟读入口 =====
 
-  void _openFollow(String text) {
+  /// [v2.12.0] 跟读弹窗：在当前页底部弹出，包含播放→录音→评分流程。
+  Future<void> _openFollow(String text) async {
+    if (text.trim().isEmpty) return;
     _speechRequest++;
     unawaited(_tts.stop());
-    Navigator.of(context).push(
-      MaterialPageRoute(
-        builder:
-            (_) => FollowPage(
-              initialSentence: text,
-              bookId: widget.book.id,
-              bookTitle: widget.book.title,
-              pageNumber: _pdfCurrentPage,
-            ),
+    _activeSentenceText = null;
+
+    if (!mounted) return;
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: StudyPalette.parchment,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(18)),
       ),
+      builder:
+          (_) => _FollowSheetContent(
+            sentence: text,
+            bookId: widget.book.id,
+            bookTitle: widget.book.title,
+            pageNumber: _pdfCurrentPage,
+          ),
     );
   }
 }
@@ -2237,6 +2230,254 @@ class _RagQaSheetContentState extends State<_RagQaSheetContent> {
           color: StudyPalette.ink,
           height: 1.6,
         ),
+      ),
+    );
+  }
+}
+
+/// [v2.12.0] 跟读弹窗内容：播放→录音→识别→评分。在阅读页底部弹出。
+class _FollowSheetContent extends StatefulWidget {
+  const _FollowSheetContent({
+    required this.sentence,
+    required this.bookId,
+    this.bookTitle,
+    this.pageNumber,
+  });
+
+  final String sentence;
+  final String bookId;
+  final String? bookTitle;
+  final int? pageNumber;
+
+  @override
+  State<_FollowSheetContent> createState() => _FollowSheetContentState();
+}
+
+class _FollowSheetContentState extends State<_FollowSheetContent> {
+
+  final AsrService _asr = VoskAsrService();
+  final NativeTtsService _tts = NativeTtsService();
+
+  bool _playing = false;
+  bool _listening = false;
+  bool _busy = false;
+  FollowScore? _score;
+  String _recognized = '';
+  String _status = '点击播放听句子';
+  int _playGeneration = 0;
+  int _lifecycleGen = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    _initVosk();
+  }
+
+  Future<void> _initVosk() async {
+    final settings = SettingsService.instance;
+    final modelPath = await settings.getVoskModelPath();
+    if (modelPath == null || modelPath.isEmpty) {
+      if (mounted) setState(() => _status = '未配置语音模型，请先到设置页配置');
+      return;
+    }
+    try {
+      final ok = await _asr.init(modelPath);
+      if (mounted) {
+        setState(() => _status = ok ? '点击播放听句子' : '模型加载失败');
+      }
+    } catch (e) {
+      if (mounted) setState(() => _status = '模型加载失败: $e');
+    }
+  }
+
+  @override
+  void dispose() {
+    unawaited(_asr.dispose());
+    super.dispose();
+  }
+
+  Future<void> _play() async {
+    if (_busy) return;
+    final request = ++_playGeneration;
+    setState(() => _playing = true);
+    final ok = await _tts.speak(widget.sentence);
+    if (mounted && request == _playGeneration) {
+      setState(() {
+        _playing = false;
+        _status = ok ? '点击麦克风录音跟读' : '播放失败';
+      });
+    }
+  }
+
+  Future<void> _toggleMic() async {
+    if (_busy) return;
+    final lifecycle = ++_lifecycleGen;
+    setState(() => _busy = true);
+    try {
+      if (_listening) {
+        final text = await _asr.stop();
+        if (!mounted || lifecycle != _lifecycleGen) return;
+        setState(() {
+          _listening = false;
+          _recognized = text;
+          _status = '识别完成';
+        });
+        _scoreSentence(text);
+      } else {
+        final perm = await Permission.microphone.request();
+        if (!mounted || lifecycle != _lifecycleGen) return;
+        if (!perm.isGranted) {
+          setState(() => _status = '麦克风权限被拒绝');
+          return;
+        }
+        final ok = await _asr.start();
+        if (mounted && lifecycle == _lifecycleGen) {
+          setState(() {
+            _listening = ok;
+            _status = ok ? '录音中… 说完点停止' : '启动录音失败';
+          });
+        }
+      }
+    } finally {
+      if (mounted && lifecycle == _lifecycleGen) {
+        setState(() => _busy = false);
+      }
+    }
+  }
+
+  void _scoreSentence(String recognized) {
+    final target = widget.sentence;
+    if (target.isEmpty || recognized.isEmpty) return;
+    final score = FollowScorer.scoreFollow(target, recognized);
+    if (mounted) setState(() => _score = score);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Center(
+            child: Container(
+              width: 32,
+              height: 4,
+              margin: const EdgeInsets.only(bottom: 12),
+              decoration: BoxDecoration(
+                color: StudyPalette.linen,
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+          ),
+          Text(
+            '跟读',
+            style: titleStyle(fontSize: 18),
+            textAlign: TextAlign.center,
+          ),
+          const SizedBox(height: 12),
+          Card(
+            child: Padding(
+              padding: const EdgeInsets.all(14),
+              child: Text(
+                widget.sentence,
+                style: const TextStyle(
+                  fontSize: 18,
+                  height: 1.6,
+                  color: StudyPalette.ink,
+                ),
+                textAlign: TextAlign.center,
+              ),
+            ),
+          ),
+          const SizedBox(height: 16),
+          Row(
+            children: [
+              Expanded(
+                child: FilledButton.icon(
+                  onPressed: _playing || _busy ? null : _play,
+                  icon: Icon(
+                    _playing ? Icons.hourglass_top : Icons.volume_up,
+                    size: 18,
+                  ),
+                  label: Text(
+                    _playing ? '播放中' : '播放',
+                    style: const TextStyle(fontSize: 13),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: FilledButton.icon(
+                  onPressed: _playing || _busy ? null : _toggleMic,
+                  icon: Icon(_listening ? Icons.stop : Icons.mic, size: 18),
+                  label: Text(
+                    _listening ? '停止' : '跟读',
+                    style: const TextStyle(fontSize: 13),
+                  ),
+                  style: FilledButton.styleFrom(
+                    backgroundColor:
+                        _listening ? StudyPalette.spinePdf : StudyPalette.ember,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Text(
+            _status,
+            style: const TextStyle(fontSize: 12, color: StudyPalette.inkSoft),
+            textAlign: TextAlign.center,
+          ),
+          if (_score != null) ...[
+            const SizedBox(height: 12),
+            Card(
+              child: Padding(
+                padding: const EdgeInsets.all(14),
+                child: Column(
+                  children: [
+                    Row(
+                      children: [
+                        Text(
+                          '${_score!.score.toStringAsFixed(0)} 分',
+                          style: TextStyle(
+                            fontSize: 28,
+                            fontWeight: FontWeight.bold,
+                            color:
+                                _score!.passed
+                                    ? StudyPalette.moss
+                                    : StudyPalette.ember,
+                          ),
+                        ),
+                        const Spacer(),
+                        Text(
+                          _score!.comment,
+                          style: TextStyle(
+                            fontSize: 14,
+                            fontWeight: FontWeight.w600,
+                            color:
+                                _score!.passed
+                                    ? StudyPalette.moss
+                                    : StudyPalette.ember,
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      '识别：$_recognized',
+                      style: const TextStyle(
+                        fontSize: 12,
+                        color: StudyPalette.inkSoft,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ],
       ),
     );
   }
