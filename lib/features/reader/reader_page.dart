@@ -2254,7 +2254,6 @@ class _FollowSheetContent extends StatefulWidget {
 }
 
 class _FollowSheetContentState extends State<_FollowSheetContent> {
-
   final AsrService _asr = VoskAsrService();
   final NativeTtsService _tts = NativeTtsService();
 
