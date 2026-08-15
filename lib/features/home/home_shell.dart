@@ -34,8 +34,14 @@ class _HomeShellState extends State<HomeShell> {
       bottomNavigationBar: NavigationBar(
         selectedIndex: _selectedIndex,
         onDestinationSelected: (i) => setState(() => _selectedIndex = i),
-        backgroundColor: StudyPalette.parchment,
-        indicatorColor: StudyPalette.emberSoft,
+        backgroundColor:
+            Theme.of(context).brightness == Brightness.dark
+                ? StudyPalette.darkCard
+                : StudyPalette.parchment,
+        indicatorColor:
+            Theme.of(context).brightness == Brightness.dark
+                ? StudyPalette.ember.withValues(alpha: 0.35)
+                : StudyPalette.emberSoft,
         destinations: const [
           NavigationDestination(
             icon: Icon(Icons.library_books_outlined),

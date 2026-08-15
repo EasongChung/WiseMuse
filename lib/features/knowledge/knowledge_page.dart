@@ -433,9 +433,9 @@ class _KnowledgePageState extends State<KnowledgePage> {
         ),
         title: Text(
           kp.text,
-          style: const TextStyle(
+          style: TextStyle(
             fontWeight: FontWeight.w600,
-            color: StudyPalette.ink,
+            color: StudyPalette.onSurfaceResolved(context),
           ),
         ),
         subtitle:
@@ -458,7 +458,10 @@ class _KnowledgePageState extends State<KnowledgePage> {
           ),
           child: Text(
             _masteryLabel(kp.mastery),
-            style: TextStyle(fontSize: 11, color: StudyPalette.ink),
+            style: TextStyle(
+              fontSize: 11,
+              color: StudyPalette.onSurfaceResolved(context),
+            ),
           ),
         ),
         onTap: () => _showDetail(kp),

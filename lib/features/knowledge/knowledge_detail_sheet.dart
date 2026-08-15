@@ -87,10 +87,27 @@ class _KnowledgeDetailSheetState extends State<KnowledgeDetailSheet> {
 
           // 类型标签 + 内容
           Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Icon(_typeIcon(_kp.type), color: _typeColor(_kp.type), size: 28),
+              Icon(_typeIcon(_kp.type), color: _typeColor(_kp.type), size: 26),
               const SizedBox(width: 10),
-              Expanded(child: Text(_kp.text, style: titleStyle(fontSize: 20))),
+              Expanded(
+                child: Text(
+                  _kp.text,
+                  style:
+                      _kp.type == KnowledgeType.poem
+                          ? TextStyle(
+                            fontSize: 16,
+                            height: 1.6,
+                            fontWeight: FontWeight.w600,
+                            color: StudyPalette.onSurfaceResolved(context),
+                          )
+                          : titleStyle(
+                            fontSize: 20,
+                            color: StudyPalette.onSurfaceResolved(context),
+                          ),
+                ),
+              ),
             ],
           ),
           const SizedBox(height: 12),
@@ -117,30 +134,34 @@ class _KnowledgeDetailSheetState extends State<KnowledgeDetailSheet> {
 
           // 释义
           if (_kp.definition != null && _kp.definition!.isNotEmpty) ...[
-            const Text(
+            Text(
               '释义',
               style: TextStyle(
                 fontWeight: FontWeight.w600,
                 fontSize: 13,
-                color: StudyPalette.ink,
+                color: StudyPalette.onSurfaceResolved(context),
               ),
             ),
             const SizedBox(height: 4),
             Text(
               _kp.definition!,
-              style: const TextStyle(fontSize: 14, color: StudyPalette.ink),
+              style: TextStyle(
+                fontSize: 14,
+                color: StudyPalette.onSurfaceResolved(context),
+                height: 1.4,
+              ),
             ),
             const SizedBox(height: 12),
           ],
 
           // 附加信息
           if (_kp.extra != null && _kp.extra!.isNotEmpty) ...[
-            const Text(
+            Text(
               '附加',
               style: TextStyle(
                 fontWeight: FontWeight.w600,
                 fontSize: 13,
-                color: StudyPalette.ink,
+                color: StudyPalette.onSurfaceResolved(context),
               ),
             ),
             const SizedBox(height: 4),

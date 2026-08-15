@@ -192,7 +192,13 @@ class _KnowledgeEditSheetState extends State<KnowledgeEditSheet> {
               // 内容
               TextFormField(
                 controller: _textCtrl,
-                decoration: const InputDecoration(labelText: '内容 *'),
+                decoration: InputDecoration(
+                  labelText: _type == KnowledgeType.poem ? '诗词全篇内容 *' : '内容 *',
+                  hintText:
+                      _type == KnowledgeType.poem ? '包含题目、作者与完整诗句（换行排列）' : null,
+                ),
+                maxLines: _type == KnowledgeType.poem ? 6 : 1,
+                minLines: _type == KnowledgeType.poem ? 3 : 1,
                 validator:
                     (v) => (v == null || v.trim().isEmpty) ? '请输入内容' : null,
               ),

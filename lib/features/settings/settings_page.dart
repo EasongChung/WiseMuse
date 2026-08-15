@@ -317,9 +317,7 @@ class _SettingsPageState extends State<SettingsPage> {
                       backgroundColor: Colors.transparent,
                       side: BorderSide(
                         color:
-                            selected
-                                ? StudyPalette.ember
-                                : StudyPalette.linen,
+                            selected ? StudyPalette.ember : StudyPalette.linen,
                       ),
                       onSelected: (_) => _saveEngine(opt.$1),
                     );

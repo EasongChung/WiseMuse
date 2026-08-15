@@ -75,20 +75,20 @@ class StudyPalette {
 
   // ===== [v0.1.35] 深色模式色板变体 =====
 
-  /// 深色背景（接近黑色暖调）。
-  static const darkBg = Color(0xFF1A1C1E);
+  /// 深色背景（纯正暗夜色调，对比度增强）。
+  static const darkBg = Color(0xFF141618);
 
-  /// 深色卡片底（略亮于背景）。
-  static const darkCard = Color(0xFF252729);
+  /// 深色卡片底（明显区别于背景的高对比深灰）。
+  static const darkCard = Color(0xFF23262A);
 
-  /// 深色文字（暖白）。
-  static const darkInk = Color(0xFFE8E0D5);
+  /// 深色文字（清晰明亮暖白，增强对比度与辨识度）。
+  static const darkInk = Color(0xFFF2ECE4);
 
-  /// 深色次级文字。
-  static const darkInkSoft = Color(0xFF9E9488);
+  /// 深色次级文字（明晰浅暖灰，避免发暗看不清）。
+  static const darkInkSoft = Color(0xFFBBB2A6);
 
-  /// 深色边框。
-  static const darkBorder = Color(0xFF3A3430);
+  /// 深色边框（清晰可见的适度边框）。
+  static const darkBorder = Color(0xFF48423E);
 
   /// [v0.1.35] 列表项/卡片背景（明暗自适应），替代 inline `Colors.white.withAlpha(N)`。
   /// 在 build 方法中调用以保证 [context] 持有正确的 [Brightness]。
@@ -212,6 +212,18 @@ ThemeData buildStudyTheme({Brightness brightness = Brightness.light}) {
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
     ),
     dividerTheme: DividerThemeData(color: outline, space: 1),
+    bottomSheetTheme: BottomSheetThemeData(
+      backgroundColor: isDark ? StudyPalette.darkBg : StudyPalette.parchment,
+      surfaceTintColor: Colors.transparent,
+    ),
+    dialogTheme: DialogThemeData(
+      backgroundColor: isDark ? StudyPalette.darkCard : StudyPalette.parchment,
+      surfaceTintColor: Colors.transparent,
+    ),
+    listTileTheme: ListTileThemeData(
+      iconColor: onSurface,
+      textColor: onSurface,
+    ),
     inputDecorationTheme: InputDecorationTheme(
       filled: true,
       fillColor:
@@ -234,7 +246,8 @@ ThemeData buildStudyTheme({Brightness brightness = Brightness.light}) {
 }
 
 /// 标题样式（站酷快乐体圆体）。用于页面大标题 / 强调性数字。
-TextStyle titleStyle({double fontSize = 22, Color color = StudyPalette.ink}) {
+/// 若未指定 [color]，则自适应当前主题前景色。
+TextStyle titleStyle({double fontSize = 22, Color? color}) {
   return TextStyle(
     fontFamily: 'ZCOOLKuaiLe',
     fontSize: fontSize,
