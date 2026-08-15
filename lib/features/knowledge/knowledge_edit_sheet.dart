@@ -6,14 +6,14 @@ import '../../core/theme/app_theme.dart';
 
 /// [v0.3.0] 知识点新建/编辑弹窗（BottomSheet）。
 ///
-/// 支持选择类型、教材关联、填写内容。
+/// 支持选择类型、书籍关联、填写内容。
 class KnowledgeEditSheet extends StatefulWidget {
   const KnowledgeEditSheet({super.key, this.initial, this.books});
 
   /// 编辑模式：传入现有知识点；新建模式为 null。
   final KnowledgePoint? initial;
 
-  /// 可选教材列表（供关联选择）。
+  /// 可选书籍列表（供关联选择）。
   final List<Book>? books;
 
   /// 弹出并返回新/编辑后的 KnowledgePoint，用户取消返回 null。
@@ -140,11 +140,11 @@ class _KnowledgeEditSheetState extends State<KnowledgeEditSheet> {
               ),
               const SizedBox(height: 12),
 
-              // 关联教材
+              // 关联书籍
               if (widget.books != null && widget.books!.isNotEmpty)
                 DropdownButtonFormField<String>(
                   initialValue: _selectedBookId,
-                  decoration: const InputDecoration(labelText: '关联教材（可选）'),
+                  decoration: const InputDecoration(labelText: '关联书籍（可选）'),
                   items: [
                     const DropdownMenuItem(value: null, child: Text('不关联')),
                     ...widget.books!.map(

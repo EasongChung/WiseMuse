@@ -38,7 +38,7 @@ class WordEntry {
   /// 语言代码（zh/en/...），用于听写/复习的语音与匹配。
   final String lang;
 
-  /// 来源教材（可选）。
+  /// 来源书籍（可选）。
   final String? fromBookId;
 
   int mastery;

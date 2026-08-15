@@ -871,7 +871,7 @@ class _SettingsPageState extends State<SettingsPage> {
                 ),
                 const SizedBox(width: 8),
                 Text(
-                  '已索引 ${_indexedBooks.length} 本教材',
+                  '已索引 ${_indexedBooks.length} 本书籍',
                   style: const TextStyle(
                     fontSize: 13,
                     color: StudyPalette.inkSoft,

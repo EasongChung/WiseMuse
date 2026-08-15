@@ -2,7 +2,7 @@ import 'model_ids.dart';
 
 /// [v0.3.0] 知识库知识点（AI 提取或手动录入的词语/成语/英语单词/古诗词）。
 ///
-/// 关联教材双粒度：[bookId] + [page]/[chapter]（page=0 表示整本/无页）。
+/// 关联书籍双粒度：[bookId] + [page]/[chapter]（page=0 表示整本/无页）。
 /// [mastery] 掌握度 0-5，由测验/复习结果驱动；[wrongCount] 累计答错次数。
 ///
 /// 与 word_entries（生词本=未掌握流动仓）职责分离：测验答错词除回写本表外

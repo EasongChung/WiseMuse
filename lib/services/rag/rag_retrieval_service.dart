@@ -5,7 +5,7 @@ import '../../core/storage/sentence_dao.dart';
 import 'embedding_service.dart';
 import 'vector_index.dart';
 
-/// [v0.1.37] RAG 检索编排：教材文本分块 → embedding → 索引 → 检索。
+/// [v0.1.37] RAG 检索编排：书籍文本分块 → embedding → 索引 → 检索。
 ///
 /// 整合 [EmbeddingService] 与 [VectorIndex]，提供全书索引、检索、
 /// 状态查询的统一入口。

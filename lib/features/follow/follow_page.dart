@@ -623,7 +623,7 @@ class _FollowPageState extends State<FollowPage>
               ),
               title: const Text('从知识库选择', style: TextStyle(fontSize: 14)),
               subtitle: Text(
-                _scopeLabel ?? '选教材→单元→课，从中跟读',
+                _scopeLabel ?? '选书籍→单元→课，从中跟读',
                 style: const TextStyle(
                   fontSize: 12,
                   color: StudyPalette.inkSoft,

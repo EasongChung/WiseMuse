@@ -277,7 +277,7 @@ class _WordBookPageState extends State<WordBookPage> {
   }
 }
 
-/// 生词卡片：词 + 掌握度星标 + 来源教材 + 长按删除。
+/// 生词卡片：词 + 掌握度星标 + 来源书籍 + 长按删除。
 class _WordCard extends StatelessWidget {
   const _WordCard({required this.entry, required this.onDelete});
 
@@ -330,7 +330,7 @@ class _WordCard extends StatelessWidget {
                     Text(
                       '掌握度 ${entry.mastery}/5  ·  '
                       '错 ${entry.wrongCount} 次'
-                      '${entry.fromBookId != null ? '  ·  来自教材' : ''}',
+                      '${entry.fromBookId != null ? '  ·  来自书籍' : ''}',
                       style: const TextStyle(
                         fontSize: 12,
                         color: StudyPalette.inkSoft,

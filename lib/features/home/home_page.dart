@@ -137,14 +137,14 @@ class _HomePageState extends State<HomePage> {
     }
   }
 
-  /// 直接删除教材（不弹确认——弹窗已由 [_BookCard._confirmDelete] 完成）。
+  /// 直接删除书籍（不弹确认——弹窗已由 [_BookCard._confirmDelete] 完成）。
   Future<void> _deleteBook(Book book) async {
     try {
       final db = await DatabaseProvider.database;
       await BookDao(db).delete(book.id);
       // [v0.1.37] 同步删除 RAG 索引
       unawaited(RagRetrievalService.instance.deleteIndex(book.id));
-      AppLog.d(_tag, '删除教材: ${book.title}');
+      AppLog.d(_tag, '删除书籍: ${book.title}');
       await _refresh();
     } catch (e, s) {
       AppLog.e(_tag, '删除失败: $e\n$s');
@@ -422,7 +422,7 @@ class _BookCard extends StatelessWidget {
       context: context,
       builder:
           (context) => AlertDialog(
-            title: const Text('删除教材'),
+            title: const Text('删除书籍'),
             content: Text('确定删除「${book.title}」吗？相关句子会一并删除。'),
             actions: [
               TextButton(

@@ -1,11 +1,11 @@
 import 'model_ids.dart';
 
-/// [v0.1.0] 教材/导入文档模型。
+/// [v0.1.0] 书籍/导入文档模型。
 ///
-/// 一次导入 = 一本教材（Book），含来源类型与原文件引用。
+/// 一次导入 = 一本书籍（Book），含来源类型与原文件引用。
 /// 章节/页/句结构由 Phase 2 分章分句模块补充（Sentence 表）。
 
-/// 教材来源类型。
+/// 书籍来源类型。
 enum BookSource {
   camera('拍照'),
   gallery('相册'),
@@ -24,7 +24,7 @@ enum BookSource {
   }
 }
 
-/// 一篇导入的教材。
+/// 一篇导入的书籍。
 class Book {
   Book({
     required this.id,
@@ -36,7 +36,7 @@ class Book {
     required this.updatedAt,
   });
 
-  /// 生成带时间戳与随机后缀的新教材。
+  /// 生成带时间戳与随机后缀的新书籍。
   factory Book.create({
     required String title,
     required BookSource source,

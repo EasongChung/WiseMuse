@@ -38,7 +38,7 @@ class _QuizHubPageState extends State<QuizHubPage> {
         _loading = false;
       });
     } catch (e, s) {
-      AppLog.e(_tag, '加载教材列表失败: $e\n$s');
+      AppLog.e(_tag, '加载书籍列表失败: $e\n$s');
       if (!mounted) return;
       setState(() => _loading = false);
     }
@@ -66,7 +66,7 @@ class _QuizHubPageState extends State<QuizHubPage> {
     if (_books.isEmpty) {
       return const Center(
         child: Text(
-          '暂无教材，请先导入教材',
+          '暂无书籍，请先导入书籍',
           style: TextStyle(color: StudyPalette.inkSoft),
         ),
       );

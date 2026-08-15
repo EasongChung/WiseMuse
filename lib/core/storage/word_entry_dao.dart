@@ -54,7 +54,7 @@ class WordEntryDao {
     return rows.map(WordEntry.fromMap).toList();
   }
 
-  /// 按教材取生词。
+  /// 按书籍取生词。
   Future<List<WordEntry>> getByBook(String bookId) async {
     final rows = await db.query(
       _table,

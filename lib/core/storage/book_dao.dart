@@ -3,7 +3,7 @@ import 'package:sqflite/sqflite.dart';
 import '../models/book.dart';
 import 'sentence_dao.dart';
 
-/// [v0.1.0] 教材（Book）数据访问。
+/// [v0.1.0] 书籍（Book）数据访问。
 ///
 /// [v0.1.35] 多孩子模式：构造时传入 [profileId]，null=家长模式不过滤。
 
@@ -15,7 +15,7 @@ class BookDao {
 
   static const _table = 'books';
 
-  /// 插入新教材，自动关联 profileId。
+  /// 插入新书籍，自动关联 profileId。
   Future<String> insert(Book book) async {
     final map = book.toMap();
     if (profileId != null) map['profile_id'] = profileId;
@@ -23,7 +23,7 @@ class BookDao {
     return book.id;
   }
 
-  /// 按更新时间倒序取全部教材（当前孩子的）。
+  /// 按更新时间倒序取全部书籍（当前孩子的）。
   Future<List<Book>> getAll() async {
     final rows =
         profileId != null
@@ -48,14 +48,14 @@ class BookDao {
     return rows.isEmpty ? null : Book.fromMap(rows.first);
   }
 
-  /// 更新教材（title/pageCount 等），同步刷新 updated_at。
+  /// 更新书籍（title/pageCount 等），同步刷新 updated_at。
   Future<int> update(Book book) async {
     final data = book.toMap();
     data['updated_at'] = DateTime.now().microsecondsSinceEpoch;
     return db.update(_table, data, where: 'id = ?', whereArgs: [book.id]);
   }
 
-  /// 删除教材及其引用。
+  /// 删除书籍及其引用。
   Future<int> delete(String id) async {
     // 关联清理：生词引用置空、学习记录保留（历史）、句子级联删。
     await db.update(

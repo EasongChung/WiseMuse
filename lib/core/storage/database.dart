@@ -106,7 +106,7 @@ class DatabaseProvider {
 
   /// 建表（版本 1）。
   static Future<void> _onCreate(Database db, int version) async {
-    // 教材
+    // 书籍
     await db.execute('''
       CREATE TABLE books (
         id TEXT PRIMARY KEY,
@@ -151,7 +151,7 @@ class DatabaseProvider {
     );
     await db.execute('CREATE INDEX idx_records_type ON learning_records(type)');
     await db.execute('CREATE INDEX idx_records_at ON learning_records(at)');
-    // 教材句（Phase 2：导入时按页/句切好的文本骨架 + 图片 OCR 几何）
+    // 书籍句（Phase 2：导入时按页/句切好的文本骨架 + 图片 OCR 几何）
     await db.execute(_createSentencesSql);
     await db.execute(_createSentenceIndexesSql);
     // 知识库与章节测验（v3）

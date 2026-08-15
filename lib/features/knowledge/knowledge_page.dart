@@ -221,9 +221,9 @@ class _KnowledgePageState extends State<KnowledgePage> {
     return ListView(
       padding: const EdgeInsets.fromLTRB(12, 4, 12, 96),
       children: [
-        // 已关联教材 → 三级钻取
+        // 已关联书籍 → 三级钻取
         ...sortedBooks.map((book) => _buildBookSection(book)),
-        // 未关联教材的知识点
+        // 未关联书籍的知识点
         ...orphanKeys.map((key) => _buildOrphanSection(key)),
       ],
     );
@@ -379,7 +379,7 @@ class _KnowledgePageState extends State<KnowledgePage> {
     );
   }
 
-  /// 未关联教材的知识点。
+  /// 未关联书籍的知识点。
   Widget _buildOrphanSection(String bookId) {
     final unitMap = _groupedPoints[bookId] ?? {};
     if (unitMap.isEmpty) return const SizedBox.shrink();
@@ -481,7 +481,7 @@ class _KnowledgePageState extends State<KnowledgePage> {
                 ListTile(
                   leading: const Icon(Icons.auto_awesome),
                   title: const Text('AI 提取知识点'),
-                  subtitle: const Text('从已有教材中自动提取'),
+                  subtitle: const Text('从已有书籍中自动提取'),
                   onTap: () {
                     Navigator.pop(context);
                     _showAiExtract();
@@ -504,7 +504,7 @@ class _KnowledgePageState extends State<KnowledgePage> {
   }
 
   Future<void> _showAiExtract() async {
-    // 选择有句子的教材
+    // 选择有句子的书籍
     final db = await DatabaseProvider.database;
     final sentenceDao = SentenceDao(db);
     final booksWithSentences = <Book>[];
@@ -517,7 +517,7 @@ class _KnowledgePageState extends State<KnowledgePage> {
     if (booksWithSentences.isEmpty) {
       ScaffoldMessenger.of(
         context,
-      ).showSnackBar(const SnackBar(content: Text('没有可提取的教材（教材中无句子内容）')));
+      ).showSnackBar(const SnackBar(content: Text('没有可提取的书籍（书籍中无句子内容）')));
       return;
     }
 
@@ -526,7 +526,7 @@ class _KnowledgePageState extends State<KnowledgePage> {
       context: context,
       builder:
           (ctx) => AlertDialog(
-            title: const Text('选择教材'),
+            title: const Text('选择书籍'),
             content: SizedBox(
               width: double.maxFinite,
               child: ListView(

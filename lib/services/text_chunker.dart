@@ -98,7 +98,7 @@ List<String> chapterTitlesOf(List<String> chunks) {
 bool isChapterLine(String line) {
   final t = line.trim();
   if (t.isEmpty) return false;
-  // [v0.1.38] 教材体系：第X课 / 第X单元 / 第X章 / 第X节
+  // [v0.1.38] 书籍体系：第X课 / 第X单元 / 第X章 / 第X节
   if (RegExp(r'^第\s*[0-9一二三四五六七八九十百千万]+\s*(?:[章节部回课]|单元|部分)').hasMatch(t)) {
     return true;
   }

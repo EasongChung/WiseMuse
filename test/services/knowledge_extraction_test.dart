@@ -68,7 +68,7 @@ void main() {
               {
                 'message': {
                   'content':
-                      '{"summary":"一段教材","knowledge_points":[{"text":"学习","type":"word","definition":"study"},{"text":"画蛇添足","type":"idiom","definition":"多余的举动"}]}',
+                      '{"summary":"一段书籍","knowledge_points":[{"text":"学习","type":"word","definition":"study"},{"text":"画蛇添足","type":"idiom","definition":"多余的举动"}]}',
                 },
               },
             ],
@@ -92,7 +92,7 @@ void main() {
       expect(result.points[0].type.name, 'word');
       expect(result.points[1].text, '画蛇添足');
       expect(result.points[1].type.name, 'idiom');
-      expect(result.summary, '一段教材');
+      expect(result.summary, '一段书籍');
       expect(result.errors, isEmpty);
     });
 

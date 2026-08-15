@@ -3,10 +3,10 @@ import '../ai_service.dart';
 import '../profile_service.dart';
 import 'rag_retrieval_service.dart';
 
-/// [v0.1.37] RAG 问答服务：基于教材内容的儿童友好问答。
+/// [v0.1.37] RAG 问答服务：基于书籍内容的儿童友好问答。
 ///
 /// 流程：
-/// 1. [RagRetrievalService.retrieveContext] 检索教材相关片段
+/// 1. [RagRetrievalService.retrieveContext] 检索书籍相关片段
 /// 2. 组装含原文上下文的 Prompt
 /// 3. [AiService.complete] 生成回答（双引擎回落：云端 → 本地 llama）
 /// 4. 返回 Markdown 格式的儿童友好回答
@@ -18,10 +18,10 @@ class RagQaService {
 
   final RagRetrievalService _retrieval = RagRetrievalService.instance;
 
-  /// 基于教材内容回答问题。
+  /// 基于书籍内容回答问题。
   ///
-  /// [bookId] 教材 ID；[question] 儿童提问原文。
-  /// 返回 Markdown 格式回答（带教材引用）。失败/无索引返回 null。
+  /// [bookId] 书籍 ID；[question] 儿童提问原文。
+  /// 返回 Markdown 格式回答（带书籍引用）。失败/无索引返回 null。
   Future<String?> ask(String bookId, String question) async {
     if (question.trim().isEmpty) return null;
 
@@ -35,7 +35,7 @@ class RagQaService {
     final ctx = await _retrieval.retrieveContext(bookId, question, topK: 3);
     if (ctx == null) {
       AppLog.d(_tag, '未检索到相关内容 book=$bookId query=$question');
-      return '在教材中没有找到与「$question」相关的内容。\n\n试试换个说法提问，或者看看其他部分的内容哦！📖';
+      return '在书籍中没有找到与「$question」相关的内容。\n\n试试换个说法提问，或者看看其他部分的内容哦！📖';
     }
 
     final (context, sourceInfo) = ctx;
@@ -79,17 +79,17 @@ class RagQaService {
     String childName,
   ) {
     final greeting = childName.isNotEmpty ? childName : '小朋友';
-    return '''你是 $greeting 的学习小助手，请根据下面的教材内容回答问题。
+    return '''你是 $greeting 的学习小助手，请根据下面的书籍内容回答问题。
 
-教材原文片段（按相关度排列）：
+书籍原文片段（按相关度排列）：
 $context
 
 $greeting 的问题：$question
 
 要求：
 - 用活泼亲切、通俗易懂的语言回答，适合 6-12 岁儿童理解
-- 尽量引用教材原文来支撑答案
-- 如果问题在教材中找不到答案，诚实说「教材中没有提到哦」
+- 尽量引用书籍原文来支撑答案
+- 如果问题在书籍中找不到答案，诚实说「书籍中没有提到哦」
 - 回答末尾可以加一个鼓励或好奇的小问题
 - 用 Markdown 格式输出（加粗关键词、小标题、emoji）
 - 总字数控制在 200 字以内
@@ -99,13 +99,13 @@ $greeting 的问题：$question
 $sourceInfo''';
   }
 
-  /// AI 不可用时的兜底回答：直接展示相关教材片段。
+  /// AI 不可用时的兜底回答：直接展示相关书籍片段。
   String _buildFallbackAnswer(String question, String context) {
-    return '''关于「$question」，教材中这样说：
+    return '''关于「$question」，书籍中这样说：
 
 $context
 
-💡 **小提示**：当前 AI 引擎未配置或不可用，以上是教材原文片段。
+💡 **小提示**：当前 AI 引擎未配置或不可用，以上是书籍原文片段。
 配置 AI 后可以获得更详细的解释哦！''';
   }
 

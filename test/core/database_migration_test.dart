@@ -60,7 +60,7 @@ void main() {
       );
       await v1.insert('books', {
         'id': 'b_old',
-        'title': '老教材',
+        'title': '老书籍',
         'source': 'pdf',
         'original_file_path': '/x/y.pdf',
         'page_count': 3,
@@ -82,7 +82,7 @@ void main() {
         whereArgs: ['b_old'],
       );
       expect(rows.length, 1);
-      expect(rows.first['title'], '老教材');
+      expect(rows.first['title'], '老书籍');
       expect(rows.first['page_count'], 3);
 
       final idx = await v2.rawQuery(

@@ -88,7 +88,7 @@ class _DictationPageState extends State<DictationPage> {
                     color: StudyPalette.spineWord,
                   ),
                   title: const Text('从知识库选择'),
-                  subtitle: const Text('选教材→单元→课，从中听写'),
+                  subtitle: const Text('选书籍→单元→课，从中听写'),
                   onTap: () => Navigator.of(context).pop('knowledge'),
                 ),
               ],

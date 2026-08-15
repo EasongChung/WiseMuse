@@ -13,7 +13,7 @@ import 'ocr_service.dart';
 import 'pdf_service.dart';
 import 'sentence_splitter.dart';
 
-/// [v0.2.0] 教材导入编排：复制原文件 → 解析/OCR → 切句 → 写库。
+/// [v0.2.0] 书籍导入编排：复制原文件 → 解析/OCR → 切句 → 写库。
 ///
 /// 数据流：
 /// - **PDF 有文本层**：PdfService.extractTexts → 逐页 splitTextToSentences →

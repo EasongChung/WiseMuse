@@ -28,7 +28,7 @@ class KnowledgeExtractionService {
 
   /// 按 scope 提取知识点。
   ///
-  /// [bookId] 教材 id；[page]/[chapter] 可选（null 时提取整本或整章）；
+  /// [bookId] 书籍 id；[page]/[chapter] 可选（null 时提取整本或整章）；
   /// [sentences] 该 scope 的句子列表（调用方预取）。
   /// [persist] 是否写库（false 返回预览结果，用于测试）。
   ///
@@ -156,7 +156,7 @@ class KnowledgeExtractionService {
     final allSentences = await sentenceDao.getByBook(book.id);
 
     if (allSentences.isEmpty) {
-      return KnowledgeExtractionResult(errors: ['教材无可提取文本']);
+      return KnowledgeExtractionResult(errors: ['书籍无可提取文本']);
     }
 
     // 章节索引
@@ -224,7 +224,7 @@ class KnowledgeExtractionService {
     final chunkTag =
         totalChunks > 1 ? '（第 ${chunkIndex + 1}/$totalChunks 块）' : '';
 
-    return '''教材文本$scopeTag$chunkTag：
+    return '''书籍文本$scopeTag$chunkTag：
 $text
 ---
 请提取知识点。返回 JSON：
@@ -236,10 +236,10 @@ $text
    {"text": "诗句", "type": "poem", "definition": "出处/作者", "extra": "下一句或赏析"}
  ]}
 要求：
-- 词语：教材中值得学习的生词（最多 8 条）
-- 成语：教材中的四字成语（最多 8 条）
-- english：教材中的英语单词（最多 8 条，附中文释义）
-- 古诗词：教材中引用的诗词句（最多 4 条，附出处）
+- 词语：书籍中值得学习的生词（最多 8 条）
+- 成语：书籍中的四字成语（最多 8 条）
+- english：书籍中的英语单词（最多 8 条，附中文释义）
+- 古诗词：书籍中引用的诗词句（最多 4 条，附出处）
 - 每类宁缺毋滥，无相关内容则留空数组
 只输出 JSON，不要多余文字。''';
   }

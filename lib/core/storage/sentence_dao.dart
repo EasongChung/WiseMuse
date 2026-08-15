@@ -2,7 +2,7 @@ import 'package:sqflite/sqflite.dart';
 
 import '../models/sentence.dart';
 
-/// [v0.2.0] 教材句（Sentence）数据访问。
+/// [v0.2.0] 书籍句（Sentence）数据访问。
 ///
 /// 一次导入在事务内批量写入；按 book/page 读取供阅读页使用。
 class SentenceDao {
@@ -29,12 +29,12 @@ class SentenceDao {
     });
   }
 
-  /// 删除某教材的全部句子（删除教材时级联）。
+  /// 删除某书籍的全部句子（删除书籍时级联）。
   Future<int> deleteByBook(String bookId) async {
     return db.delete(_table, where: 'book_id = ?', whereArgs: [bookId]);
   }
 
-  /// 按教材取全部句子（页序、句序）。
+  /// 按书籍取全部句子（页序、句序）。
   Future<List<Sentence>> getByBook(String bookId) async {
     final rows = await db.query(
       _table,
@@ -45,7 +45,7 @@ class SentenceDao {
     return rows.map(Sentence.fromMap).toList();
   }
 
-  /// 按教材 + 页码取句子（页内句序）。
+  /// 按书籍 + 页码取句子（页内句序）。
   Future<List<Sentence>> getByPage(String bookId, int page) async {
     final rows = await db.query(
       _table,
@@ -56,7 +56,7 @@ class SentenceDao {
     return rows.map(Sentence.fromMap).toList();
   }
 
-  /// 某教材的句子总数。
+  /// 某书籍的句子总数。
   Future<int> countByBook(String bookId) async {
     final rows = await db.rawQuery(
       'SELECT COUNT(*) AS c FROM $_table WHERE book_id = ?',

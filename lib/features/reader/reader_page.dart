@@ -343,6 +343,12 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
         final hit = hitSentence(sentences, point, snapEm: 4);
         if (hit != null) {
           AppLog.d(_tag, '命中句子: ${hit.text}');
+          if (mounted) {
+            setState(() {
+              _activeSentenceText = hit.text;
+              _activeSentenceIndex = null;
+            });
+          }
           await controller.setHighlights(details.page, hit.rects);
           if (!_isPdfRequestCurrent(request, controller, viewGeneration)) {
             return;
@@ -540,11 +546,13 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
   Future<void> _speakRequest(String text, int request) async {
     if (text.trim().isEmpty || !_isSpeechRequestCurrent(request)) return;
     _speakingStartedAt = request;
+    if (mounted) setState(() {});
     AppLog.d(_tag, '朗读: "$text"');
     final ok = await _tts.speak(text);
     // 如果当前请求仍是最新，重置播放状态
     if (_isSpeechRequestCurrent(request)) {
       _speakingStartedAt = 0;
+      if (mounted) setState(() {});
     }
     if (!ok && _isSpeechRequestCurrent(request)) {
       AppLog.w(_tag, 'TTS speak 未完成: "$text"');
@@ -904,7 +912,11 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
     );
     if (hit != null) {
       AppLog.d(_tag, '图片命中: ${hit.text}');
-      setState(() => _imgHighlight = hit);
+      setState(() {
+        _imgHighlight = hit;
+        _activeSentenceText = hit.text;
+        _activeSentenceIndex = null;
+      });
       _speak(hit.text);
     } else {
       setState(() => _imgHighlight = null);
@@ -939,7 +951,12 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
                       return;
                     }
                     final text = m.message.trim();
-                    if (text.isNotEmpty) _speak(text);
+                    if (text.isNotEmpty) {
+                      if (mounted) {
+                        setState(() => _activeSentenceText = text);
+                      }
+                      _speak(text);
+                    }
                   },
                 )
                 ..loadHtmlString(snapshot.data!),
@@ -1354,7 +1371,7 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
                 ? () => _syncPage(_pdfCurrentPage - 1)
                 : null,
           ),
-          // [v2.12.0] 页码文字可点击弹出选择器
+          // [v0.1.38] 页码文字可点击弹出选择器
           TextButton(
             style: TextButton.styleFrom(
               visualDensity: VisualDensity.compact,
@@ -1709,7 +1726,7 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
     );
   }
 
-  /// [v0.1.37] RAG 问答：基于教材内容提问。
+  /// [v0.1.37] RAG 问答：基于书籍内容提问。
   Future<void> _askRag(String bookId, String sentenceText) async {
     if (bookId.isEmpty || sentenceText.trim().isEmpty) return;
 
@@ -1720,7 +1737,7 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
     if (!ready) {
       ScaffoldMessenger.of(
         context,
-      ).showSnackBar(const SnackBar(content: Text('该教材尚未构建知识库，请先在书架中构建')));
+      ).showSnackBar(const SnackBar(content: Text('该书籍尚未构建知识库，请先在书架中构建')));
       return;
     }
 
@@ -1870,7 +1887,7 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
 
   // ===== 文本模式：跟读入口 =====
 
-  /// [v2.12.0] 跟读弹窗：在当前页底部弹出，包含播放→录音→评分流程。
+  /// [v0.1.38] 跟读弹窗：在当前页底部弹出，包含播放→录音→评分流程。
   Future<void> _openFollow(String text) async {
     if (text.trim().isEmpty) return;
     _speechRequest++;
@@ -1943,7 +1960,7 @@ class _HighlightPainter extends CustomPainter {
       oldDelegate.rects != rects;
 }
 
-/// [v0.1.37] RAG 问答弹窗内容：输入问题 → AI 基于教材回答。
+/// [v0.1.37] RAG 问答弹窗内容：输入问题 → AI 基于书籍回答。
 ///
 /// 初始问题默认为当前句子，可修改。Markdown 渲染回答。
 class _RagQaSheetContent extends StatefulWidget {
@@ -2053,7 +2070,7 @@ class _RagQaSheetContentState extends State<_RagQaSheetContent> {
                     child: TextField(
                       controller: _controller,
                       decoration: const InputDecoration(
-                        hintText: '输入关于这篇教材的问题…',
+                        hintText: '输入关于这篇书籍的问题…',
                         isDense: true,
                         contentPadding: EdgeInsets.symmetric(
                           horizontal: 12,
@@ -2114,7 +2131,7 @@ class _RagQaSheetContentState extends State<_RagQaSheetContent> {
     if (!_asked) {
       return Center(
         child: Text(
-          '输入你想了解的问题，AI 会结合教材内容回答',
+          '输入你想了解的问题，AI 会结合书籍内容回答',
           style: TextStyle(color: StudyPalette.inkSoft, fontSize: 14),
           textAlign: TextAlign.center,
         ),
@@ -2235,7 +2252,7 @@ class _RagQaSheetContentState extends State<_RagQaSheetContent> {
   }
 }
 
-/// [v2.12.0] 跟读弹窗内容：播放→录音→识别→评分。在阅读页底部弹出。
+/// [v0.1.38] 跟读弹窗内容：播放→录音→识别→评分。在阅读页底部弹出。
 class _FollowSheetContent extends StatefulWidget {
   const _FollowSheetContent({
     required this.sentence,
