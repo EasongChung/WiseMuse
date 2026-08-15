@@ -61,14 +61,17 @@ class VectorIndex {
       // 构造成 IndexChunk
       final indexChunks = <IndexChunk>[];
       for (var i = 0; i < chunks.length; i++) {
-        indexChunks.add(IndexChunk(
-          id: i,
-          text: chunks[i].text,
-          sentenceIds: chunks[i].sentenceIds,
-          embedding: embeddings != null && i < embeddings.length
-              ? embeddings[i]
-              : null,
-        ));
+        indexChunks.add(
+          IndexChunk(
+            id: i,
+            text: chunks[i].text,
+            sentenceIds: chunks[i].sentenceIds,
+            embedding:
+                embeddings != null && i < embeddings.length
+                    ? embeddings[i]
+                    : null,
+          ),
+        );
       }
 
       // 持久化
@@ -136,11 +139,7 @@ class VectorIndex {
       scored.sort((a, b) => b.$2.compareTo(a.$2));
       return scored.take(topK).map((s) {
         final chunk = chunks[s.$1];
-        return SearchResult(
-          chunk: chunk,
-          score: s.$2,
-          method: 'vector',
-        );
+        return SearchResult(chunk: chunk, score: s.$2, method: 'vector');
       }).toList();
     }
 
@@ -148,11 +147,7 @@ class VectorIndex {
     final texts = chunks.map((c) => c.text).toList();
     final ranked = EmbeddingService.textSearchRank(query, texts);
     return ranked.take(topK).map((r) {
-      return SearchResult(
-        chunk: chunks[r.$1],
-        score: r.$2,
-        method: 'text',
-      );
+      return SearchResult(chunk: chunks[r.$1], score: r.$2, method: 'text');
     }).toList();
   }
 
@@ -192,10 +187,12 @@ class VectorIndex {
     while (start < sentences.length) {
       final end = (start + chunkSize).clamp(0, sentences.length);
       final batch = sentences.sublist(start, end);
-      chunks.add(_TextChunk(
-        text: batch.map((s) => s.text).join(''),
-        sentenceIds: batch.map((s) => s.id).toList(),
-      ));
+      chunks.add(
+        _TextChunk(
+          text: batch.map((s) => s.text).join(''),
+          sentenceIds: batch.map((s) => s.id).toList(),
+        ),
+      );
       if (end >= sentences.length) break;
       start += chunkSize - overlap;
     }
@@ -239,10 +236,7 @@ class VectorIndex {
       'book_id': bookId,
       'chunks': chunks.map((c) => c.toJson()).toList(),
     };
-    await file.writeAsString(
-      jsonEncode(data),
-      flush: true,
-    );
+    await file.writeAsString(jsonEncode(data), flush: true);
     AppLog.d(_tag, '索引已持久化 book=$bookId (${chunks.length} chunks)');
   }
 }
@@ -271,10 +265,8 @@ class IndexChunk {
   factory IndexChunk.fromJson(Map<String, dynamic> json) => IndexChunk(
     id: json['id'] as int,
     text: json['text'] as String,
-    sentenceIds:
-        (json['sentence_ids'] as List).cast<String>(),
-    embedding:
-        (json['embedding'] as List?)?.cast<double>(),
+    sentenceIds: (json['sentence_ids'] as List).cast<String>(),
+    embedding: (json['embedding'] as List?)?.cast<double>(),
   );
 }
 
@@ -292,9 +284,7 @@ class SearchResult {
 
   /// 相关文本摘要（截取前 200 字）。
   String get snippet =>
-      chunk.text.length > 200
-          ? '${chunk.text.substring(0, 200)}…'
-          : chunk.text;
+      chunk.text.length > 200 ? '${chunk.text.substring(0, 200)}…' : chunk.text;
 }
 
 /// 内部文本块（构建用）。

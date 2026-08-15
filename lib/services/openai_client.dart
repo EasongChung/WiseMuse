@@ -133,10 +133,7 @@ class OpenAiClient {
                 'Content-Type': 'application/json',
                 'Authorization': 'Bearer $key',
               },
-              body: jsonEncode({
-                'model': model,
-                'input': batch,
-              }),
+              body: jsonEncode({'model': model, 'input': batch}),
             )
             .timeout(const Duration(seconds: 60));
 

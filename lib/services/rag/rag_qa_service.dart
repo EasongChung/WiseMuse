@@ -53,7 +53,10 @@ class RagQaService {
       var answer = result.text.trim();
       // 去掉可能的代码围栏
       if (answer.startsWith('```') && answer.endsWith('```')) {
-        answer = answer.substring(answer.indexOf('\n') + 1, answer.length - 3).trim();
+        answer =
+            answer
+                .substring(answer.indexOf('\n') + 1, answer.length - 3)
+                .trim();
       }
       return answer;
     }

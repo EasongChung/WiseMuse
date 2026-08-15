@@ -54,12 +54,7 @@ class RagRetrievalService {
       queryEmb = await _embedding.embed(query);
     }
 
-    return _index.search(
-      bookId,
-      query,
-      queryEmbedding: queryEmb,
-      topK: topK,
-    );
+    return _index.search(bookId, query, queryEmbedding: queryEmb, topK: topK);
   }
 
   /// 检索并拼接上下文文本（供 LLM prompt 使用）。

@@ -74,11 +74,12 @@ class EmbeddingService {
   ) {
     if (query.trim().isEmpty || chunkTexts.isEmpty) return const [];
 
-    final queryTerms = query
-        .toLowerCase()
-        .split(RegExp(r'[\s\p{P}]+'))
-        .where((t) => t.length >= 2)
-        .toList();
+    final queryTerms =
+        query
+            .toLowerCase()
+            .split(RegExp(r'[\s\p{P}]+'))
+            .where((t) => t.length >= 2)
+            .toList();
     if (queryTerms.isEmpty) return const [];
 
     final n = chunkTexts.length;
@@ -86,11 +87,12 @@ class EmbeddingService {
     final df = <String, int>{};
     final termInChunks = <int, Set<String>>{};
     for (var i = 0; i < n; i++) {
-      final terms = chunkTexts[i]
-          .toLowerCase()
-          .split(RegExp(r'[\s\p{P}]+'))
-          .where((t) => t.length >= 2)
-          .toSet();
+      final terms =
+          chunkTexts[i]
+              .toLowerCase()
+              .split(RegExp(r'[\s\p{P}]+'))
+              .where((t) => t.length >= 2)
+              .toSet();
       termInChunks[i] = terms;
       for (final t in terms) {
         df[t] = (df[t] ?? 0) + 1;

@@ -61,9 +61,9 @@ class _HomePageState extends State<HomePage> {
           SnackBar(content: Text('「${book.title}」知识库已构建完成（$count 个片段）')),
         );
       } else {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('「${book.title}」无可索引内容，跳过')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('「${book.title}」无可索引内容，跳过')));
       }
       unawaited(_refreshRagStatus());
     }
@@ -102,16 +102,16 @@ class _HomePageState extends State<HomePage> {
       unawaited(_buildRagIndex(book));
       if (!mounted) return;
       // 打开阅读页
-      await Navigator.of(context).push(
-        MaterialPageRoute<void>(builder: (_) => ReaderPage(book: book)),
-      );
+      await Navigator.of(
+        context,
+      ).push(MaterialPageRoute<void>(builder: (_) => ReaderPage(book: book)));
       await _refresh();
     } catch (e, s) {
       AppLog.e(_tag, '导入失败: $e\n$s');
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('导入失败：$e')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('导入失败：$e')));
     } finally {
       if (mounted) setState(() => _importing = false);
     }
