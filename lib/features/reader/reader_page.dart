@@ -1562,63 +1562,6 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
     );
   }
 
-  /// [v2.8.0] PDF 目录弹窗（仅多页）：列出页码 + 每页文本预览，点击跳页。
-  void _showPdfToc() {
-    final pages = _pageTexts;
-    if (pages.length <= 1) return;
-    showModalBottomSheet(
-      context: context,
-      builder:
-          (_) => ListView(
-            shrinkWrap: true,
-            padding: const EdgeInsets.symmetric(vertical: 12),
-            children: [
-              const Padding(
-                padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                child: Text(
-                  '目录',
-                  style: TextStyle(
-                    fontSize: 16,
-                    fontWeight: FontWeight.bold,
-                    color: StudyPalette.ink,
-                  ),
-                ),
-              ),
-              for (int i = 0; i < pages.length; i++)
-                ListTile(
-                  dense: true,
-                  selected: i == _pdfCurrentPage,
-                  leading: Text(
-                    '${i + 1}',
-                    style: const TextStyle(
-                      fontWeight: FontWeight.bold,
-                      color: StudyPalette.ink,
-                    ),
-                  ),
-                  title: Text(
-                    pages[i].trim().isNotEmpty
-                        ? (pages[i].length > 40
-                            ? '${pages[i].substring(0, 40)}…'
-                            : pages[i])
-                        : '第 ${i + 1} 页',
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(color: StudyPalette.ink),
-                  ),
-                  onTap: () {
-                    _syncPage(i);
-                    // 原文模式下同时跳转 PDF 原生翻页
-                    if (_useOriginal && _pdfController != null) {
-                      _pdfController!.setPage(i);
-                    }
-                    Navigator.of(context).pop();
-                  },
-                ),
-            ],
-          ),
-    );
-  }
-
   // ===== [v2.9.0] 长按选词查词 =====
 
   /// 浮底查词栏：选中文字后显示 [查词] / [加入生词本] / [取消]。

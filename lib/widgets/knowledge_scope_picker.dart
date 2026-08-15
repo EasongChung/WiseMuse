@@ -54,8 +54,6 @@ class _ScopePickerContent extends StatefulWidget {
 }
 
 class _ScopePickerContentState extends State<_ScopePickerContent> {
-  static const _tag = 'scope_picker';
-
   // 数据
   List<Book> _books = const [];
   Map<String, Map<int, Map<int, List<KnowledgePoint>>>> _grouped = const {};
@@ -175,7 +173,6 @@ class _ScopePickerContentState extends State<_ScopePickerContent> {
       padding: const EdgeInsets.symmetric(horizontal: 12),
       children:
           _books.map((book) {
-            final unitMap = _grouped[book.id] ?? {};
             return ListTile(
               leading: const Icon(
                 Icons.library_books,
