@@ -128,10 +128,11 @@ class _DictationPageState extends State<DictationPage> {
       final words =
           filtered.map((p) => p.text).where((t) => t.isNotEmpty).toList();
       if (words.isEmpty) {
-        if (mounted)
+        if (mounted) {
           ScaffoldMessenger.of(
             context,
           ).showSnackBar(const SnackBar(content: Text('该范围无可用知识点')));
+        }
         return;
       }
       _showModeAndStart(words);

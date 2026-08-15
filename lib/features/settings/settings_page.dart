@@ -842,6 +842,7 @@ class _SettingsPageState extends State<SettingsPage> {
                   if (!mounted) return;
                   if (ok) {
                     final result = await EmbeddingService.instance.embed('测试');
+                    if (!mounted) return;
                     ScaffoldMessenger.of(context).showSnackBar(
                       SnackBar(
                         content: Text(
@@ -1049,6 +1050,7 @@ class _SettingsPageState extends State<SettingsPage> {
     if (path == null) return;
     try {
       await ModelStore.importGguf(path);
+      if (!mounted) return;
       ScaffoldMessenger.of(
         context,
       ).showSnackBar(const SnackBar(content: Text('GGUF 模型导入成功')));

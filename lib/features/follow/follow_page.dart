@@ -61,7 +61,6 @@ class _FollowPageState extends State<FollowPage>
   bool _listening = false;
   bool _playing = false;
   bool _operationBusy = false;
-  bool _navigating = false;
   bool _appActive = true;
   int _playRequest = 0;
   int _lifecycleRequest = 0;
@@ -221,11 +220,7 @@ class _FollowPageState extends State<FollowPage>
   }
 
   Future<void> _play() async {
-    if (!_appActive ||
-        _playing ||
-        _listening ||
-        _operationBusy ||
-        _navigating) {
+    if (!_appActive || _playing || _listening || _operationBusy) {
       return;
     }
     final text = _sentenceController.text.trim();
@@ -261,11 +256,7 @@ class _FollowPageState extends State<FollowPage>
 
   /// 慢速示范播放（用于儿童跟读前聆听）。
   Future<void> _slowPlay() async {
-    if (!_appActive ||
-        _playing ||
-        _listening ||
-        _operationBusy ||
-        _navigating) {
+    if (!_appActive || _playing || _listening || _operationBusy) {
       return;
     }
     final text = _sentenceController.text.trim();
@@ -300,7 +291,7 @@ class _FollowPageState extends State<FollowPage>
   }
 
   Future<void> _toggleListen() async {
-    if (!_appActive || _playing || _operationBusy || _navigating) return;
+    if (!_appActive || _playing || _operationBusy) return;
     final lifecycleRequest = _lifecycleRequest;
     setState(() => _operationBusy = true);
     try {
