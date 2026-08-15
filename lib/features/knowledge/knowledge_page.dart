@@ -7,6 +7,8 @@ import '../../core/storage/book_dao.dart';
 import '../../core/storage/database.dart';
 import '../../core/storage/knowledge_point_dao.dart';
 import '../../core/theme/app_theme.dart';
+import '../../services/knowledge_extraction_service.dart';
+import '../../core/storage/sentence_dao.dart';
 import 'knowledge_detail_sheet.dart';
 import 'knowledge_edit_sheet.dart';
 
@@ -502,10 +504,115 @@ class _KnowledgePageState extends State<KnowledgePage> {
   }
 
   Future<void> _showAiExtract() async {
+    // 选择有句子的教材
+    final db = await DatabaseProvider.database;
+    final sentenceDao = SentenceDao(db);
+    final booksWithSentences = <Book>[];
+    for (final book in _books) {
+      final count = await sentenceDao.countByBook(book.id);
+      if (count > 0) booksWithSentences.add(book);
+    }
     if (!mounted) return;
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(const SnackBar(content: Text('AI 提取功能即将推出')));
+
+    if (booksWithSentences.isEmpty) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('没有可提取的教材（教材中无句子内容）')));
+      return;
+    }
+
+    // 选书
+    final book = await showDialog<Book>(
+      context: context,
+      builder:
+          (ctx) => AlertDialog(
+            title: const Text('选择教材'),
+            content: SizedBox(
+              width: double.maxFinite,
+              child: ListView(
+                shrinkWrap: true,
+                children:
+                    booksWithSentences.map((b) {
+                      return ListTile(
+                        title: Text(b.title),
+                        onTap: () => Navigator.pop(ctx, b),
+                      );
+                    }).toList(),
+              ),
+            ),
+          ),
+    );
+    if (book == null || !mounted) return;
+
+    // 进度弹窗
+    if (!mounted) return;
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder:
+          (ctx) => StatefulBuilder(
+            builder: (ctx, setDialogState) {
+              var done = 0;
+              var total = 0;
+              var points = 0;
+              var errors = <String>[];
+              return AlertDialog(
+                title: const Text('AI 提取知识点'),
+                content: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const LinearProgressIndicator(),
+                    const SizedBox(height: 12),
+                    Text(total > 0 ? '正在处理第 $done/$total 页…' : '正在准备…'),
+                    const SizedBox(height: 4),
+                    Text(
+                      '已提取 $points 条知识点'
+                      '${errors.isNotEmpty ? '，${errors.length} 个错误' : ''}',
+                      style: const TextStyle(
+                        fontSize: 12,
+                        color: StudyPalette.inkSoft,
+                      ),
+                    ),
+                  ],
+                ),
+              );
+            },
+          ),
+    );
+
+    // 开始提取
+    final service = KnowledgeExtractionService();
+    final result = await service.extractBook(
+      book,
+      onProgress: (d, t) {
+        // 进度更新
+      },
+    );
+
+    // 关闭进度弹窗
+    if (mounted) Navigator.of(context).pop();
+
+    // 显示结果
+    if (!mounted) return;
+    showDialog(
+      context: context,
+      builder:
+          (ctx) => AlertDialog(
+            title: const Text('提取完成'),
+            content: Text(
+              '从 「${book.title}」 中提取了 ${result.points.length} 条知识点\n'
+              '${result.errors.isEmpty ? '' : '${result.errors.length} 个页面提取失败'}',
+            ),
+            actions: [
+              FilledButton(
+                onPressed: () => Navigator.pop(ctx),
+                child: const Text('确定'),
+              ),
+            ],
+          ),
+    );
+    _load();
   }
 
   Future<void> _showManualAdd() async {
