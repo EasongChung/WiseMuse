@@ -17,10 +17,7 @@ import '../../core/storage/knowledge_point_dao.dart';
 import '../../core/storage/sentence_dao.dart';
 import '../../core/storage/word_entry_dao.dart';
 import '../../core/theme/app_theme.dart';
-import '../../services/asr_service.dart';
 import '../../services/docx_html_converter.dart';
-import '../../services/vosk_asr_service.dart';
-import 'package:permission_handler/permission_handler.dart';
 import '../../services/native_tts_service.dart';
 import '../../services/ocr_geometry_service.dart';
 import '../../services/ocr_service.dart';
@@ -31,7 +28,6 @@ import '../../services/rag/rag_qa_service.dart';
 import '../../vendor/flutter_pdfview/flutter_pdfview.dart';
 import '../knowledge/knowledge_detail_sheet.dart';
 import '../assistant/knowledge_explain_sheet.dart';
-import '../follow/scoring.dart';
 import '../../widgets/follow_sheet.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 

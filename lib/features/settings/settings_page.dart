@@ -6,7 +6,6 @@ import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 
 import '../../core/debug/app_log.dart';
-import '../../core/models/book.dart';
 import '../../core/settings/settings_service.dart';
 import '../../core/storage/book_dao.dart';
 import '../../core/storage/database.dart';
@@ -16,7 +15,6 @@ import '../../services/mlkit_translation_service.dart';
 import '../../services/model_store.dart';
 import '../../services/rag/embedding_service.dart';
 import '../../services/rag/rag_retrieval_service.dart';
-import '../../services/rag/vector_index.dart';
 import '../../services/vosk_asr_service.dart';
 
 /// [v0.3.0] 设置页：翻译引擎配置 + 模型下载管理。
@@ -1015,12 +1013,12 @@ class _SettingsPageState extends State<SettingsPage> {
                       onPressed: () async {
                         await RagRetrievalService.instance.deleteIndex(bookId);
                         await _refreshRagStatus();
-                        if (ctx.mounted) Navigator.pop(ctx);
-                        if (mounted) {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(content: Text('已清除《$title》的向量索引')),
-                          );
-                        }
+                        if (!ctx.mounted) return;
+                        Navigator.pop(ctx);
+                        if (!context.mounted) return;
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(content: Text('已清除《$title》的向量索引')),
+                        );
                       },
                     ),
                   );
