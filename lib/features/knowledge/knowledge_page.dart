@@ -10,9 +10,9 @@ import '../../core/theme/app_theme.dart';
 import 'knowledge_detail_sheet.dart';
 import 'knowledge_edit_sheet.dart';
 
-/// [v0.3.0] 知识库页：按类型筛选 + 按书浏览 + FAB 提取/手动添加。
+/// [v0.3.0] [v2.11.0] 知识库页：三级钻取 书→单元→课/页→知识点。
 ///
-/// 顶部 Chips 筛选类型，下部按书分组展示知识点列表。
+/// 顶部 Chips 筛选类型，主体按书/单元/课三层展开浏览，FAB 添加。
 class KnowledgePage extends StatefulWidget {
   const KnowledgePage({super.key});
 
@@ -25,7 +25,8 @@ class _KnowledgePageState extends State<KnowledgePage> {
 
   KnowledgeType? _filterType;
   List<Book> _books = const [];
-  Map<String, List<KnowledgePoint>> _bookPoints = const {};
+  Map<String, Map<int, Map<int, List<KnowledgePoint>>>> _groupedPoints =
+      const {};
   bool _loading = true;
 
   @override
@@ -41,16 +42,19 @@ class _KnowledgePageState extends State<KnowledgePage> {
       final dao = KnowledgePointDao(db);
       final allPoints = await dao.getAll(type: _filterType);
 
-      // 按 bookId 分组
-      final grouped = <String, List<KnowledgePoint>>{};
+      // 按 bookId → chapter(单元) → page(课/页) 三级分组
+      final grouped = <String, Map<int, Map<int, List<KnowledgePoint>>>>{};
       for (final p in allPoints) {
-        grouped.putIfAbsent(p.bookId ?? '', () => []).add(p);
+        final bookId = p.bookId ?? '';
+        final unitMap = grouped.putIfAbsent(bookId, () => {});
+        final pageMap = unitMap.putIfAbsent(p.chapter ?? 0, () => {});
+        pageMap.putIfAbsent(p.page ?? 0, () => []).add(p);
       }
 
       if (!mounted) return;
       setState(() {
         _books = books;
-        _bookPoints = grouped;
+        _groupedPoints = grouped;
         _loading = false;
       });
     } catch (e, s) {
@@ -100,6 +104,23 @@ class _KnowledgePageState extends State<KnowledgePage> {
     return StudyPalette.moss;
   }
 
+  /// 单元标签（chapter=0 表示无单元分配）。
+  String _unitLabel(int chapter) => chapter <= 0 ? '未分类' : '第 $chapter 单元';
+
+  /// 课/页标签（page=0 表示无页码）。
+  String _pageLabel(int page) => page <= 0 ? '通用' : '第 $page 课';
+
+  /// 统计叶子知识点数。
+  int _countPoints(Map<int, Map<int, List<KnowledgePoint>>> unitMap) {
+    var count = 0;
+    for (final pageMap in unitMap.values) {
+      for (final points in pageMap.values) {
+        count += points.length;
+      }
+    }
+    return count;
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -111,7 +132,7 @@ class _KnowledgePageState extends State<KnowledgePage> {
                 children: [
                   _buildFilterChips(),
                   const Divider(height: 1),
-                  Expanded(child: _buildKnowledgeList()),
+                  Expanded(child: _buildKnowledgeTree()),
                 ],
               ),
       floatingActionButton: FloatingActionButton.extended(
@@ -162,8 +183,9 @@ class _KnowledgePageState extends State<KnowledgePage> {
     );
   }
 
-  Widget _buildKnowledgeList() {
-    if (_bookPoints.isEmpty) {
+  /// 知识库树：书 → 单元 → 课/页 → 知识点条目。
+  Widget _buildKnowledgeTree() {
+    if (_groupedPoints.isEmpty) {
       return Center(
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -189,16 +211,15 @@ class _KnowledgePageState extends State<KnowledgePage> {
     }
 
     final sortedBooks =
-        _books.where((b) => _bookPoints.containsKey(b.id)).toList();
-    // 未关联教材的知识点（bookId=''或不在 _books 中）
-    final orphanKeys = _bookPoints.keys.where(
+        _books.where((b) => _groupedPoints.containsKey(b.id)).toList();
+    final orphanKeys = _groupedPoints.keys.where(
       (k) => k.isEmpty || !_books.any((b) => b.id == k),
     );
 
     return ListView(
       padding: const EdgeInsets.fromLTRB(12, 4, 12, 96),
       children: [
-        // 已关联教材的分组
+        // 已关联教材 → 三级钻取
         ...sortedBooks.map((book) => _buildBookSection(book)),
         // 未关联教材的知识点
         ...orphanKeys.map((key) => _buildOrphanSection(key)),
@@ -206,46 +227,170 @@ class _KnowledgePageState extends State<KnowledgePage> {
     );
   }
 
+  /// 书层级：可展开显示单元列表。
   Widget _buildBookSection(Book book) {
-    final points = _bookPoints[book.id] ?? [];
-    if (points.isEmpty) return const SizedBox.shrink();
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Padding(
-          padding: const EdgeInsets.symmetric(vertical: 8),
-          child: Row(
-            children: [
-              Icon(Icons.library_books, size: 18, color: StudyPalette.spinePdf),
-              const SizedBox(width: 6),
-              Text(book.title, style: titleStyle(fontSize: 15)),
-              const SizedBox(width: 8),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                decoration: BoxDecoration(
-                  color: StudyPalette.parchmentDeep,
-                  borderRadius: BorderRadius.circular(10),
-                ),
-                child: Text(
-                  '${points.length}',
-                  style: const TextStyle(
-                    fontSize: 12,
-                    color: StudyPalette.inkSoft,
-                  ),
+    final unitMap = _groupedPoints[book.id] ?? {};
+    if (unitMap.isEmpty) return const SizedBox.shrink();
+    final totalPoints = _countPoints(unitMap);
+    final sortedUnits =
+        unitMap.entries.toList()..sort((a, b) => a.key.compareTo(b.key));
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: ExpansionTile(
+        initiallyExpanded: false,
+        leading: const Icon(
+          Icons.library_books,
+          size: 20,
+          color: StudyPalette.spinePdf,
+        ),
+        title: Text(book.title, style: titleStyle(fontSize: 15)),
+        trailing: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+              decoration: BoxDecoration(
+                color: StudyPalette.parchmentDeep,
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Text(
+                '$totalPoints',
+                style: const TextStyle(
+                  fontSize: 12,
+                  color: StudyPalette.inkSoft,
                 ),
               ),
-            ],
-          ),
+            ),
+            const Icon(
+              Icons.expand_more,
+              size: 20,
+              color: StudyPalette.inkSoft,
+            ),
+          ],
         ),
-        ...points.map((p) => _buildKnowledgeTile(p)),
-        const SizedBox(height: 4),
-      ],
+        children:
+            sortedUnits
+                .map((e) => _buildUnitSection(book.id, e.key, e.value))
+                .toList(),
+      ),
     );
   }
 
+  /// 单元层级：可展开显示课/页列表。
+  Widget _buildUnitSection(
+    String bookId,
+    int chapter,
+    Map<int, List<KnowledgePoint>> pageMap,
+  ) {
+    final sortedPages =
+        pageMap.entries.toList()..sort((a, b) => a.key.compareTo(b.key));
+    var pageCount = 0;
+    for (final points in pageMap.values) {
+      pageCount += points.length;
+    }
+
+    return Padding(
+      padding: const EdgeInsets.only(left: 16),
+      child: ExpansionTile(
+        leading: const Icon(
+          Icons.folder_outlined,
+          size: 18,
+          color: StudyPalette.ember,
+        ),
+        title: Text(
+          _unitLabel(chapter),
+          style: const TextStyle(fontSize: 14, color: StudyPalette.ink),
+        ),
+        trailing: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+              decoration: BoxDecoration(
+                color: StudyPalette.emberSoft.withValues(alpha: 0.5),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Text(
+                '$pageCount',
+                style: const TextStyle(fontSize: 11, color: StudyPalette.ember),
+              ),
+            ),
+            const Icon(
+              Icons.expand_more,
+              size: 18,
+              color: StudyPalette.inkSoft,
+            ),
+          ],
+        ),
+        children:
+            sortedPages
+                .map((e) => _buildPageSection(bookId, chapter, e.key, e.value))
+                .toList(),
+      ),
+    );
+  }
+
+  /// 课/页层级：知识点条目列表。
+  Widget _buildPageSection(
+    String bookId,
+    int chapter,
+    int page,
+    List<KnowledgePoint> points,
+  ) {
+    return Padding(
+      padding: const EdgeInsets.only(left: 32),
+      child: ExpansionTile(
+        tilePadding: const EdgeInsets.only(left: 8, right: 4),
+        leading: const Icon(
+          Icons.description_outlined,
+          size: 16,
+          color: StudyPalette.spineWord,
+        ),
+        title: Text(
+          _pageLabel(page),
+          style: const TextStyle(fontSize: 13, color: StudyPalette.inkSoft),
+        ),
+        trailing: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+              decoration: BoxDecoration(
+                color: StudyPalette.mossSoft.withValues(alpha: 0.5),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Text(
+                '${points.length}',
+                style: const TextStyle(fontSize: 11, color: StudyPalette.moss),
+              ),
+            ),
+            const Icon(
+              Icons.expand_more,
+              size: 16,
+              color: StudyPalette.inkSoft,
+            ),
+          ],
+        ),
+        children: points.map((p) => _buildKnowledgeTile(p)).toList(),
+      ),
+    );
+  }
+
+  /// 未关联教材的知识点。
   Widget _buildOrphanSection(String bookId) {
-    final points = _bookPoints[bookId] ?? [];
+    final unitMap = _groupedPoints[bookId] ?? {};
+    if (unitMap.isEmpty) return const SizedBox.shrink();
+
+    // 拍平所有知识点
+    final points = <KnowledgePoint>[];
+    for (final pageMap in unitMap.values) {
+      for (final lst in pageMap.values) {
+        points.addAll(lst);
+      }
+    }
     if (points.isEmpty) return const SizedBox.shrink();
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -272,6 +417,7 @@ class _KnowledgePageState extends State<KnowledgePage> {
     );
   }
 
+  /// 单个知识点条目（与之前一致）。
   Widget _buildKnowledgeTile(KnowledgePoint kp) {
     return Card(
       margin: const EdgeInsets.only(bottom: 4),
@@ -356,8 +502,6 @@ class _KnowledgePageState extends State<KnowledgePage> {
   }
 
   Future<void> _showAiExtract() async {
-    // TODO(S4+): 选书 → 调用 KnowledgeExtractionService.extractBook → 刷新
-    // MVP 暂跳选书弹窗，提示功能开发中
     if (!mounted) return;
     ScaffoldMessenger.of(
       context,

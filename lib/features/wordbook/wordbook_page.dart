@@ -1,11 +1,14 @@
 import 'package:flutter/material.dart';
 
 import '../../core/debug/app_log.dart';
+import '../../core/models/knowledge_point.dart';
 import '../../core/models/word_entry.dart';
 import '../../core/storage/database.dart';
+import '../../core/storage/knowledge_point_dao.dart';
 import '../../core/storage/word_entry_dao.dart';
 import '../../core/theme/app_theme.dart';
 import '../../widgets/review_card.dart';
+import '../../widgets/knowledge_scope_picker.dart';
 import '../stats/stats_page.dart';
 import '../../services/spaced_repetition_service.dart';
 
@@ -100,6 +103,57 @@ class _WordBookPageState extends State<WordBookPage> {
     );
   }
 
+  /// [v2.11.0] 从知识库选择范围进行复习。
+  Future<void> _openKnowledgeReview() async {
+    final scope = await KnowledgeScopePicker.show(context);
+    if (scope == null || !mounted) return;
+    try {
+      final db = await DatabaseProvider.database;
+      final dao = KnowledgePointDao(db);
+      final points = await dao.getByBook(scope.bookId);
+      var filtered = points;
+      if (scope.chapter != null && scope.chapter! > 0) {
+        filtered = filtered.where((p) => p.chapter == scope.chapter).toList();
+      }
+      if (scope.page != null && scope.page! > 0) {
+        filtered = filtered.where((p) => p.page == scope.page).toList();
+      }
+      final unmastered = filtered.where((p) => p.mastery < 3).toList();
+      if (unmastered.isEmpty) {
+        if (mounted) {
+          ScaffoldMessenger.of(
+            context,
+          ).showSnackBar(const SnackBar(content: Text('该范围无不掌握知识点')));
+        }
+        return;
+      }
+      final entries =
+          unmastered
+              .map(
+                (p) => WordEntry.create(
+                  word: p.text,
+                  lang: p.type == KnowledgeType.english ? 'en' : 'zh',
+                  fromBookId: p.bookId,
+                ),
+              )
+              .toList();
+      if (!mounted) return;
+      Navigator.of(context).push(
+        MaterialPageRoute<void>(
+          builder:
+              (_) => ReviewCard(
+                words: entries,
+                onComplete: () {
+                  AppLog.d(_tag, '知识库复习完成');
+                },
+              ),
+        ),
+      );
+    } catch (e) {
+      AppLog.e(_tag, '加载知识库复习失败: $e');
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -121,6 +175,12 @@ class _WordBookPageState extends State<WordBookPage> {
               icon: const Icon(Icons.autorenew_outlined),
               onPressed: _openReview,
             ),
+          // [v2.11.0] 从知识库复习
+          IconButton(
+            tooltip: '从知识库复习',
+            icon: const Icon(Icons.auto_stories_outlined),
+            onPressed: _openKnowledgeReview,
+          ),
         ],
       ),
       body:

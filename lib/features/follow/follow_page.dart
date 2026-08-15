@@ -22,6 +22,7 @@ import '../../services/native_tts_service.dart';
 import '../../services/tts_service.dart';
 import '../../services/vosk_asr_service.dart';
 import '../settings/settings_page.dart';
+import '../../widgets/knowledge_scope_picker.dart';
 import 'scoring.dart';
 
 /// [v0.1.0] [v2.9.0] 跟读练习页（核心链路：放音 → 录音 → 识别 → 评分 → 生词落库）。
@@ -73,6 +74,9 @@ class _FollowPageState extends State<FollowPage>
 
   // [v2.11.0] 从阅读页传入的当前页句子列表
   List<Sentence> _pageSentences = const [];
+
+  // [v2.11.0] 知识库选择范围标签
+  String? _scopeLabel;
 
   static const List<String> _sampleSentences = [
     '今天天气真好',
@@ -565,6 +569,49 @@ class _FollowPageState extends State<FollowPage>
     ).push(MaterialPageRoute(builder: (_) => const SettingsPage()));
   }
 
+  /// [v2.11.0] 打开知识库范围选择器，选中后加载对应知识点作为跟读句子。
+  Future<void> _openKnowledgeScope() async {
+    final scope = await KnowledgeScopePicker.show(context);
+    if (scope == null || !mounted) return;
+    setState(() {
+      _scopeLabel =
+          '${scope.bookTitle}'
+          '${scope.chapter != null && scope.chapter! > 0 ? ' · 第${scope.chapter}单元' : ''}'
+          '${scope.page != null && scope.page! > 0 ? ' · 第${scope.page}课' : ''}';
+      _pageSentences = const [];
+    });
+    try {
+      final db = await DatabaseProvider.database;
+      final dao = KnowledgePointDao(db);
+      final points = await dao.getByBook(scope.bookId);
+      var filtered = points;
+      if (scope.chapter != null && scope.chapter! > 0) {
+        filtered = filtered.where((p) => p.chapter == scope.chapter).toList();
+      }
+      if (scope.page != null && scope.page! > 0) {
+        filtered = filtered.where((p) => p.page == scope.page).toList();
+      }
+      if (!mounted) return;
+      setState(() {
+        _pageSentences =
+            filtered
+                .map(
+                  (kp) => Sentence(
+                    id: kp.id,
+                    bookId: scope.bookId,
+                    page: kp.page ?? 0,
+                    chapter: kp.chapter ?? 0,
+                    index: 0,
+                    text: kp.text,
+                  ),
+                )
+                .toList();
+      });
+    } catch (e) {
+      AppLog.e(_tag, '加载知识库句子失败: $e');
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final canPractice = _modelReady;
@@ -575,6 +622,30 @@ class _FollowPageState extends State<FollowPage>
         children: [
           // [v2.11.0] 模型就绪状态 + 配置入口
           _buildModelStatus(),
+          // [v2.11.0] 从知识库选择练习范围
+          Card(
+            child: ListTile(
+              leading: const Icon(
+                Icons.auto_stories,
+                size: 20,
+                color: StudyPalette.spinePdf,
+              ),
+              title: const Text('从知识库选择', style: TextStyle(fontSize: 14)),
+              subtitle: Text(
+                _scopeLabel ?? '选教材→单元→课，从中跟读',
+                style: const TextStyle(
+                  fontSize: 12,
+                  color: StudyPalette.inkSoft,
+                ),
+              ),
+              trailing: const Icon(
+                Icons.chevron_right,
+                size: 18,
+                color: StudyPalette.inkSoft,
+              ),
+              onTap: () => _openKnowledgeScope(),
+            ),
+          ),
           // [v2.11.0] 当前页句子列表（从阅读页进入时）
           if (_pageSentences.isNotEmpty) ...[
             const SizedBox(height: 12),

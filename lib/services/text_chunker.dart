@@ -98,8 +98,8 @@ List<String> chapterTitlesOf(List<String> chunks) {
 bool isChapterLine(String line) {
   final t = line.trim();
   if (t.isEmpty) return false;
-  // 中文：第X章 / 第X节 / 第X部分
-  if (RegExp(r'^第\s*[0-9一二三四五六七八九十百千万]+\s*[章节部回部分]').hasMatch(t)) {
+  // [v2.11.0] 教材体系：第X课 / 第X单元 / 第X章 / 第X节
+  if (RegExp(r'^第\s*[0-9一二三四五六七八九十百千万]+\s*(?:[章节部回课]|单元|部分)').hasMatch(t)) {
     return true;
   }
   // 中文序号：一、 二、 (一) (二) 1. 1) (1)
@@ -107,7 +107,7 @@ bool isChapterLine(String line) {
   if (RegExp(r'^[（(]?[一二三四五六七八九十]+[）)]\s*$').hasMatch(t)) return true;
   if (RegExp(r'^\d+\.\s*\S{1,40}').hasMatch(t)) return true;
   if (RegExp(r'^[（(]\d+[）)]\s*\S').hasMatch(t)) return true;
-  // [v2.8.0] 英文章节：Chapter / Unit / Lesson / Part / Section + 数字/罗马
+  // 英文章节：Unit / Lesson / Chapter / Module + 数字/罗马
   if (RegExp(
     r'^(Chapter|Unit|Lesson|Part|Section|Module)\s+(\d+|[IVXLCDM]+)',
   ).hasMatch(t)) {

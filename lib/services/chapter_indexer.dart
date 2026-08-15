@@ -69,8 +69,8 @@ class ChapterIndexer {
 
     AppLog.d(
       _tag,
-      '章节索引完成: ${titleIndices.length} 标题行, '
-      '$currentChapter 章, ${result.length} 句',
+      '单元索引完成: ${titleIndices.length} 标题行, '
+      '$currentChapter 单元, ${result.length} 句',
     );
     return result;
   }

@@ -159,18 +159,18 @@ class _KnowledgeEditSheetState extends State<KnowledgeEditSheet> {
               if (widget.books != null && widget.books!.isNotEmpty)
                 const SizedBox(height: 12),
 
-              // 页/章（可选）
+              // 单元/课（可选）
               Row(
                 children: [
                   Expanded(
                     child: TextFormField(
                       keyboardType: TextInputType.number,
                       decoration: const InputDecoration(
-                        labelText: '页码（可选）',
+                        labelText: '单元（可选）',
                         hintText: '如 1',
                       ),
-                      initialValue: _page?.toString() ?? '',
-                      onChanged: (v) => _page = int.tryParse(v),
+                      initialValue: _chapter?.toString() ?? '',
+                      onChanged: (v) => _chapter = int.tryParse(v),
                     ),
                   ),
                   const SizedBox(width: 12),
@@ -178,11 +178,11 @@ class _KnowledgeEditSheetState extends State<KnowledgeEditSheet> {
                     child: TextFormField(
                       keyboardType: TextInputType.number,
                       decoration: const InputDecoration(
-                        labelText: '章节（可选）',
+                        labelText: '课/页码（可选）',
                         hintText: '如 1',
                       ),
-                      initialValue: _chapter?.toString() ?? '',
-                      onChanged: (v) => _chapter = int.tryParse(v),
+                      initialValue: _page?.toString() ?? '',
+                      onChanged: (v) => _page = int.tryParse(v),
                     ),
                   ),
                 ],

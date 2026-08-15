@@ -4,8 +4,10 @@ import 'package:flutter/material.dart';
 
 import '../../core/debug/app_log.dart';
 import '../../widgets/char_select_grid.dart';
+import '../../widgets/knowledge_scope_picker.dart';
 import '../../core/models/learning_record.dart';
 import '../../core/storage/database.dart';
+import '../../core/storage/knowledge_point_dao.dart';
 import '../../core/storage/learning_record_dao.dart';
 import '../../core/storage/word_entry_dao.dart';
 import '../../core/theme/app_theme.dart';
@@ -55,17 +57,101 @@ class _DictationPageState extends State<DictationPage> {
   @override
   void initState() {
     super.initState();
-    _loadAndStart();
+    _showSourcePicker();
   }
 
-  @override
-  void dispose() {
-    _spellingCtrl.dispose();
-    super.dispose();
+  /// [v2.11.0] 选择词源：生词本 / 手动输入 / 知识库。
+  Future<void> _showSourcePicker() async {
+    final source = await showDialog<String>(
+      context: context,
+      builder:
+          (context) => AlertDialog(
+            title: const Text('选择词源'),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                ListTile(
+                  leading: const Icon(Icons.book, color: StudyPalette.ember),
+                  title: const Text('生词本'),
+                  subtitle: const Text('优先未掌握词'),
+                  onTap: () => Navigator.of(context).pop('wordbook'),
+                ),
+                ListTile(
+                  leading: const Icon(Icons.edit, color: StudyPalette.spinePdf),
+                  title: const Text('手动输入'),
+                  subtitle: const Text('自行输入要听写的词'),
+                  onTap: () => Navigator.of(context).pop('manual'),
+                ),
+                ListTile(
+                  leading: const Icon(
+                    Icons.auto_stories,
+                    color: StudyPalette.spineWord,
+                  ),
+                  title: const Text('从知识库选择'),
+                  subtitle: const Text('选教材→单元→课，从中听写'),
+                  onTap: () => Navigator.of(context).pop('knowledge'),
+                ),
+              ],
+            ),
+          ),
+    );
+    if (!mounted) return;
+    switch (source) {
+      case 'knowledge':
+        await _loadFromKnowledge();
+        break;
+      case 'manual':
+        await _loadManual();
+        break;
+      default:
+        await _loadFromWordbook();
+    }
   }
 
-  Future<void> _loadAndStart() async {
-    // 默认从生词本取未掌握中文单字
+  Future<void> _loadFromKnowledge() async {
+    final scope = await KnowledgeScopePicker.show(context);
+    if (scope == null || !mounted) {
+      if (mounted) Navigator.of(context).pop();
+      return;
+    }
+    try {
+      final db = await DatabaseProvider.database;
+      final dao = KnowledgePointDao(db);
+      final points = await dao.getByBook(scope.bookId);
+      var filtered = points;
+      if (scope.chapter != null && scope.chapter! > 0) {
+        filtered = filtered.where((p) => p.chapter == scope.chapter).toList();
+      }
+      if (scope.page != null && scope.page! > 0) {
+        filtered = filtered.where((p) => p.page == scope.page).toList();
+      }
+      final words =
+          filtered.map((p) => p.text).where((t) => t.isNotEmpty).toList();
+      if (words.isEmpty) {
+        if (mounted)
+          ScaffoldMessenger.of(
+            context,
+          ).showSnackBar(const SnackBar(content: Text('该范围无可用知识点')));
+        return;
+      }
+      _showModeAndStart(words);
+    } catch (e) {
+      AppLog.e(_tag, '从知识库加载失败: $e');
+    }
+  }
+
+  Future<void> _loadManual() async {
+    final input = await _showWordInputDialog();
+    if (input == null || !mounted) {
+      if (mounted) Navigator.of(context).pop();
+      return;
+    }
+    _showModeAndStart(
+      input.split(RegExp(r'[\s,，、]+')).where((w) => w.isNotEmpty).toList(),
+    );
+  }
+
+  Future<void> _loadFromWordbook() async {
     try {
       final db = await DatabaseProvider.database;
       final entries = await WordEntryDao(db).getUnmastered(threshold: 3);
@@ -73,17 +159,22 @@ class _DictationPageState extends State<DictationPage> {
       if (!mounted) return;
 
       if (words.isEmpty) {
-        // 无生词时弹输入框手动输入
-        final input = await _showWordInputDialog();
-        if (input == null || !mounted) return;
-        _start(input.split(''));
+        await _loadManual();
         return;
       }
-      _start(words);
+      _showModeAndStart(words);
     } catch (e) {
       AppLog.e(_tag, '加载生词本失败: $e');
-      if (mounted) _start(['大', '小', '上', '下', '人', '山', '水', '火']);
+      if (mounted) _showModeAndStart(['大', '小', '上', '下', '人', '山', '水', '火']);
     }
+  }
+
+  void _showModeAndStart(List<String> words) {
+    if (!mounted) return;
+    setState(() {
+      _loading = false;
+    });
+    _start(words);
   }
 
   void _start(List<String> words) async {
