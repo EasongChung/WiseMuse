@@ -87,10 +87,10 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
   int _textPageIndex = 0;
   List<List<Sentence>> _textPages = const [];
 
-  // [v2.8.0] 底部文本面板独立刷新回调 & 可见性
+  // [v0.1.28] 底部文本面板独立刷新回调 & 可见性
   int _pdfCurrentPage = 0;
 
-  // [v2.8.0] 底部文本面板独立刷新回调
+  // [v0.1.28] 底部文本面板独立刷新回调
   VoidCallback? _sheetRebuild;
   final ScrollController _sheetScrollController = ScrollController();
 
@@ -103,19 +103,19 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
   int _workGeneration = 0;
   bool _switchingMode = false;
 
-  // [v2.11.0] 播放状态追踪：_speakingStartedAt == _speechRequest 时表示 TTS 正在播放。
+  // [v0.1.38] 播放状态追踪：_speakingStartedAt == _speechRequest 时表示 TTS 正在播放。
   int _speakingStartedAt = -1;
   bool get _ttsSpeaking =>
       _speakingStartedAt > 0 && _speakingStartedAt == _speechRequest;
 
-  // [v2.9.0] 文本选区——选中文字后弹出查词栏
+  // [v0.1.35] 文本选区——选中文字后弹出查词栏
   String? _selectedText;
 
-  // [v2.9.0] 当前朗读/选中句索引（用于底栏操作条）
+  // [v0.1.35] 当前朗读/选中句索引（用于底栏操作条）
   int? _activeSentenceIndex;
   String? _activeSentenceText;
 
-  // [v2.9.0] 知识点按页查询 LRU 缓存（max 20 页），翻页不重复查 DB。
+  // [v0.1.35] 知识点按页查询 LRU 缓存（max 20 页），翻页不重复查 DB。
   static const int _kKnowledgeCacheMax = 20;
   final LinkedHashMap<String, List<KnowledgePoint>> _knowledgePageCache =
       LinkedHashMap<String, List<KnowledgePoint>>();
@@ -196,7 +196,7 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
     _textPageIndex = _textPageIndex.clamp(0, _textPages.length - 1);
   }
 
-  // ===== [v2.8.0] 原文/文本分页同步 =====
+  // ===== [v0.1.28] 原文/文本分页同步 =====
 
   /// 当前页文本（多页文档取 _pdfCurrentPage 对应页）。
   String get _displayText {
@@ -217,7 +217,7 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
   /// 是否多页文档。
   bool get _isMultiPage => _pageTexts.length > 1;
 
-  /// [v2.8.0] 统一翻页同步：更新共享页码、清除旧状态。
+  /// [v0.1.28] 统一翻页同步：更新共享页码、清除旧状态。
   /// 所有翻页操作（PDF onPageChanged / 文本翻页 / 目录跳页）最终调用此函数。
   void _syncPage(int page) {
     final total = _pageTexts.length;
@@ -764,7 +764,7 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
       content = _buildTextView();
     }
 
-    // [v2.11.0] 原文模式：上滑唤出文本弹窗
+    // [v0.1.38] 原文模式：上滑唤出文本弹窗
     if (_useOriginal && _hasOriginal()) {
       content = GestureDetector(
         behavior: HitTestBehavior.translucent,
@@ -970,7 +970,7 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
       ],
     );
 
-    // [v2.9.0] 多页 → 左右滑翻页，translucent 不拦截子手势
+    // [v0.1.35] 多页 → 左右滑翻页，translucent 不拦截子手势
     if (_isMultiPage) {
       pageContent = GestureDetector(
         behavior: HitTestBehavior.translucent,
@@ -982,8 +982,8 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
     return pageContent;
   }
 
-  /// [v2.8.0] 可左右滑翻页的句子列表（多页文件包裹 GestureDetector）。
-  /// [v2.9.0] 包裹 SelectionArea 支持长按选词。
+  /// [v0.1.28] 可左右滑翻页的句子列表（多页文件包裹 GestureDetector）。
+  /// [v0.1.35] 包裹 SelectionArea 支持长按选词。
   Widget _buildSwipeableSentenceList(List<Sentence> sentences) {
     final content = SelectionArea(
       onSelectionChanged: (selected) {
@@ -1135,7 +1135,7 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
 
   // ===== 文本模式：本页知识点 =====
 
-  /// [v2.9.0] LRU 缓存 key。
+  /// [v0.1.35] LRU 缓存 key。
   String _knowledgeCacheKey(String bookId, int page) => '$bookId:$page';
 
   Future<void> _showPageKnowledge() async {
@@ -1167,7 +1167,7 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
     _showKnowledgeSheet(page, points);
   }
 
-  /// [v2.9.0] 提取的对话框渲染逻辑，被 _showPageKnowledge 与 LRU 缓存共用。
+  /// [v0.1.35] 提取的对话框渲染逻辑，被 _showPageKnowledge 与 LRU 缓存共用。
   void _showKnowledgeSheet(int page, List<KnowledgePoint> points) {
     showModalBottomSheet(
       context: context,
@@ -1225,7 +1225,7 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
     );
   }
 
-  // ===== [v2.8.0] 原文模式：底部文本面板 =====
+  // ===== [v0.1.28] 原文模式：底部文本面板 =====
 
   /// 可拖拽高度的底部文本面板（原文模式下显示当前页句子列表）。
   /// 复用 _buildTextView 的句子渲染逻辑，独立滚动与刷新。
@@ -1321,7 +1321,7 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
                     const Divider(height: 1),
                     // 当前页句子列表
                     Expanded(child: _buildSheetSentences()),
-                    // [v2.9.0] 浮底句操作栏（与文本模式一致）
+                    // [v0.1.35] 浮底句操作栏（与文本模式一致）
                     if (_activeSentenceText != null &&
                         _activeSentenceText!.isNotEmpty)
                       Padding(
@@ -1380,7 +1380,7 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
                 ? () => _syncPage(_pdfCurrentPage + 1)
                 : null,
           ),
-          // [v2.11.0] 连读/停止（替代 AppBar 中的全屏连读按钮）
+          // [v0.1.38] 连读/停止（替代 AppBar 中的全屏连读按钮）
           if (_isMultiPage)
             _compactIcon(
               _autoPlaying
@@ -1399,7 +1399,7 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
     );
   }
 
-  /// [v2.11.0] 全宽页码选择器弹窗：列出所有页码，点击跳转。
+  /// [v0.1.38] 全宽页码选择器弹窗：列出所有页码，点击跳转。
   void _showPageSelector() {
     final pages = _pageTexts;
     if (pages.length <= 1) return;
@@ -1493,7 +1493,7 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
   }
 
   /// 文本面板内当前页句子列表（复用 _buildTextView 的句子渲染）。
-  /// [v2.9.0] 包裹 SelectionArea 支持长按选词。
+  /// [v0.1.35] 包裹 SelectionArea 支持长按选词。
   Widget _buildSheetSentences() {
     final pages = _pageTexts;
     if (pages.isEmpty) return const SizedBox();
@@ -1546,7 +1546,7 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
     );
   }
 
-  // ===== [v2.9.0] 长按选词查词 =====
+  // ===== [v0.1.35] 长按选词查词 =====
 
   /// 浮底查词栏：选中文字后显示 [查词] / [加入生词本] / [取消]。
   Widget _buildWordLookupBar() {
@@ -1611,7 +1611,7 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
     );
   }
 
-  /// [v2.9.0] 浮底句操作栏：朗读当前句 + 跟读/翻译/标记/AI 讲解。
+  /// [v0.1.35] 浮底句操作栏：朗读当前句 + 跟读/翻译/标记/AI 讲解。
   Widget _buildSentenceActionsBar() {
     final text = _activeSentenceText ?? '';
     return Material(
@@ -1622,7 +1622,7 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
         padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
         child: Row(
           children: [
-            // [v2.11.0] 朗读/停止合一：播放时显示停止图标，不播放时显示播放图标
+            // [v0.1.38] 朗读/停止合一：播放时显示停止图标，不播放时显示播放图标
             IconButton(
               icon: Icon(
                 _ttsSpeaking ? Icons.stop : Icons.play_arrow,
@@ -1682,7 +1682,7 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
                 KnowledgeExplainSheet.show(context, text);
               },
             ),
-            // [v2.10.0] 问AI（RAG 问答）
+            // [v0.1.37] 问AI（RAG 问答）
             IconButton(
               icon: const Icon(Icons.psychology, size: 20),
               tooltip: '问AI',
@@ -1709,7 +1709,7 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
     );
   }
 
-  /// [v2.10.0] RAG 问答：基于教材内容提问。
+  /// [v0.1.37] RAG 问答：基于教材内容提问。
   Future<void> _askRag(String bookId, String sentenceText) async {
     if (bookId.isEmpty || sentenceText.trim().isEmpty) return;
 
@@ -1729,7 +1729,7 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
     _showRagQaSheet(bookId, sentenceText);
   }
 
-  /// [v2.10.0] RAG 问答弹窗：输入问题 → AI 回答。
+  /// [v0.1.37] RAG 问答弹窗：输入问题 → AI 回答。
   void _showRagQaSheet(String bookId, String sentenceText) {
     showModalBottomSheet(
       context: context,
@@ -1943,7 +1943,7 @@ class _HighlightPainter extends CustomPainter {
       oldDelegate.rects != rects;
 }
 
-/// [v2.10.0] RAG 问答弹窗内容：输入问题 → AI 基于教材回答。
+/// [v0.1.37] RAG 问答弹窗内容：输入问题 → AI 基于教材回答。
 ///
 /// 初始问题默认为当前句子，可修改。Markdown 渲染回答。
 class _RagQaSheetContent extends StatefulWidget {

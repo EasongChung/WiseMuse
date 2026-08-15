@@ -170,7 +170,7 @@ class OpenAiClient {
   }
 }
 
-/// [v2.10.0] OpenAI 兼容 embedding API 的参数封装。
+/// [v0.1.37] OpenAI 兼容 embedding API 的参数封装。
 class EmbeddingRequest {
   const EmbeddingRequest({
     required this.model,

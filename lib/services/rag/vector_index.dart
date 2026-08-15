@@ -9,7 +9,7 @@ import '../../core/debug/app_log.dart';
 import '../../core/models/sentence.dart';
 import 'embedding_service.dart';
 
-/// [v2.10.0] 教材 RAG 向量索引（内存 Map + JSON 持久化）。
+/// [v0.1.37] 教材 RAG 向量索引（内存 Map + JSON 持久化）。
 ///
 /// 每本书独立索引文件 `{documents}/rag_index/{bookId}.json`。
 /// 构建时先尝试云端 embedding，失败则存纯文本供 BM25 回落。

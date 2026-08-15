@@ -2,7 +2,7 @@ import 'package:sqflite/sqflite.dart';
 
 import '../models/profile.dart';
 
-/// [v2.9.0] 孩子/家长档案数据访问。
+/// [v0.1.35] 孩子/家长档案数据访问。
 class ProfileDao {
   ProfileDao(this.db);
 

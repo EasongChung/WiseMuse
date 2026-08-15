@@ -7,7 +7,7 @@ import '../core/storage/database.dart';
 import '../core/storage/knowledge_point_dao.dart';
 import '../core/theme/app_theme.dart';
 
-/// [v2.11.0] 知识库范围选择结果。
+/// [v0.1.38] 知识库范围选择结果。
 class KnowledgeScope {
   const KnowledgeScope({
     required this.bookId,
@@ -29,7 +29,7 @@ class KnowledgeScope {
   String? get lessonLabel => page == null || page! <= 0 ? null : '第 $page 课';
 }
 
-/// [v2.11.0] 三级范围选择弹窗：书→单元→课/页。
+/// [v0.1.38] 三级范围选择弹窗：书→单元→课/页。
 ///
 /// 返回 [KnowledgeScope] 或 null（取消）。
 class KnowledgeScopePicker {

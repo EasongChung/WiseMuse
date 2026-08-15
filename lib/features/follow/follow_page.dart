@@ -25,7 +25,7 @@ import '../settings/settings_page.dart';
 import '../../widgets/knowledge_scope_picker.dart';
 import 'scoring.dart';
 
-/// [v0.1.0] [v2.9.0] 跟读练习页（核心链路：放音 → 录音 → 识别 → 评分 → 生词落库）。
+/// [v0.1.0] [v0.1.35] 跟读练习页（核心链路：放音 → 录音 → 识别 → 评分 → 生词落库）。
 ///
 /// v2.9.0 增强：
 /// - 慢速示范播放
@@ -71,10 +71,10 @@ class _FollowPageState extends State<FollowPage>
   final List<double> _waveBars = List.generate(16, (_) => 0.3);
   bool _waveActive = false;
 
-  // [v2.11.0] 从阅读页传入的当前页句子列表
+  // [v0.1.38] 从阅读页传入的当前页句子列表
   List<Sentence> _pageSentences = const [];
 
-  // [v2.11.0] 知识库选择范围标签
+  // [v0.1.38] 知识库选择范围标签
   String? _scopeLabel;
 
   static const List<String> _sampleSentences = [
@@ -94,13 +94,13 @@ class _FollowPageState extends State<FollowPage>
       duration: const Duration(milliseconds: 500),
     )..addListener(_onWaveTick);
     _sentenceController.text = widget.initialSentence ?? _sampleSentences.first;
-    // [v2.11.0] 加载当前页句子（从阅读页进入时）
+    // [v0.1.38] 加载当前页句子（从阅读页进入时）
     _loadPageSentences();
-    // [v2.11.0] 从设置中自动加载 Vosk 模型
+    // [v0.1.38] 从设置中自动加载 Vosk 模型
     _autoLoadVosk();
   }
 
-  /// [v2.11.0] 从阅读页加载当前页的句子列表。
+  /// [v0.1.38] 从阅读页加载当前页的句子列表。
   Future<void> _loadPageSentences() async {
     if (widget.bookId == null || widget.pageNumber == null) return;
     try {
@@ -152,7 +152,7 @@ class _FollowPageState extends State<FollowPage>
     }
   }
 
-  /// [v2.11.0] 检查模型是否已就绪
+  /// [v0.1.38] 检查模型是否已就绪
   bool get _modelReady => _asr.isLoaded;
 
   void _onWaveTick() {
@@ -178,7 +178,7 @@ class _FollowPageState extends State<FollowPage>
       setState(() => _operationBusy = true);
       unawaited(_suspendPractice(request));
     } else {
-      // [v2.11.0] 返回前台时自动重新加载模型
+      // [v0.1.38] 返回前台时自动重新加载模型
       if (!_modelReady) {
         _autoLoadVosk();
       }
@@ -379,7 +379,7 @@ class _FollowPageState extends State<FollowPage>
     }
   }
 
-  /// [v2.11.0] 跟读时自动将词语同步到知识点库（按书/页分类，已存在则跳过）。
+  /// [v0.1.38] 跟读时自动将词语同步到知识点库（按书/页分类，已存在则跳过）。
   Future<void> _syncToKnowledgeBase(String word) async {
     if (widget.bookId == null) return;
     try {
@@ -416,7 +416,7 @@ class _FollowPageState extends State<FollowPage>
     } else {
       await dao.upsert(WordEntry.create(word: target, lang: 'zh'));
     }
-    // [v2.11.0] 同步到知识点库（按书/页分类）
+    // [v0.1.38] 同步到知识点库（按书/页分类）
     unawaited(_syncToKnowledgeBase(target));
   }
 
@@ -448,7 +448,7 @@ class _FollowPageState extends State<FollowPage>
     }
   }
 
-  /// [v2.11.0] 模型状态卡片 + 设置入口。
+  /// [v0.1.38] 模型状态卡片 + 设置入口。
   Widget _buildModelStatus() {
     return Card(
       child: Padding(
@@ -494,7 +494,7 @@ class _FollowPageState extends State<FollowPage>
     );
   }
 
-  /// [v2.11.0] 当前页句子列表（从阅读页传入时显示）。
+  /// [v0.1.38] 当前页句子列表（从阅读页传入时显示）。
   Widget _buildPageSentenceList() {
     if (_pageSentences.isEmpty) return const SizedBox();
     return Card(
@@ -560,7 +560,7 @@ class _FollowPageState extends State<FollowPage>
     ).push(MaterialPageRoute(builder: (_) => const SettingsPage()));
   }
 
-  /// [v2.11.0] 打开知识库范围选择器，选中后加载对应知识点作为跟读句子。
+  /// [v0.1.38] 打开知识库范围选择器，选中后加载对应知识点作为跟读句子。
   Future<void> _openKnowledgeScope() async {
     final scope = await KnowledgeScopePicker.show(context);
     if (scope == null || !mounted) return;
@@ -611,9 +611,9 @@ class _FollowPageState extends State<FollowPage>
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
-          // [v2.11.0] 模型就绪状态 + 配置入口
+          // [v0.1.38] 模型就绪状态 + 配置入口
           _buildModelStatus(),
-          // [v2.11.0] 从知识库选择练习范围
+          // [v0.1.38] 从知识库选择练习范围
           Card(
             child: ListTile(
               leading: const Icon(
@@ -637,7 +637,7 @@ class _FollowPageState extends State<FollowPage>
               onTap: () => _openKnowledgeScope(),
             ),
           ),
-          // [v2.11.0] 当前页句子列表（从阅读页进入时）
+          // [v0.1.38] 当前页句子列表（从阅读页进入时）
           if (_pageSentences.isNotEmpty) ...[
             const SizedBox(height: 12),
             _buildPageSentenceList(),

@@ -103,7 +103,7 @@ class _WordBookPageState extends State<WordBookPage> {
     );
   }
 
-  /// [v2.11.0] 从知识库选择范围进行复习。
+  /// [v0.1.38] 从知识库选择范围进行复习。
   Future<void> _openKnowledgeReview() async {
     final scope = await KnowledgeScopePicker.show(context);
     if (scope == null || !mounted) return;
@@ -175,7 +175,7 @@ class _WordBookPageState extends State<WordBookPage> {
               icon: const Icon(Icons.autorenew_outlined),
               onPressed: _openReview,
             ),
-          // [v2.11.0] 从知识库复习
+          // [v0.1.38] 从知识库复习
           IconButton(
             tooltip: '从知识库复习',
             icon: const Icon(Icons.auto_stories_outlined),

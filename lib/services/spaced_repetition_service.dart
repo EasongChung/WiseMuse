@@ -2,7 +2,7 @@ import '../core/models/word_entry.dart';
 import '../core/storage/database.dart';
 import '../core/storage/word_entry_dao.dart';
 
-/// [v2.9.0] 艾宾浩斯遗忘曲线调度引擎。
+/// [v0.1.35] 艾宾浩斯遗忘曲线调度引擎。
 ///
 /// 基于掌握度（mastery 0-5）与上次复习时间，计算下次复习间隔，
 /// 生成「今日待复习」任务列表。

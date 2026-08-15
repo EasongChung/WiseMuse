@@ -14,7 +14,7 @@ import 'package:sqflite/sqflite.dart';
 /// - 错误 → wrongCount+1（生词本中不存在自动插入）
 /// - 复习 → mastery+1 + 写入 LearningRecord(review)
 ///
-/// [v2.9.0] 新增双向同步：知识点与生词本的 mastery 达阈后自动清理。
+/// [v0.1.35] 新增双向同步：知识点与生词本的 mastery 达阈后自动清理。
 class MasteryService {
   MasteryService._();
 

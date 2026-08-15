@@ -105,7 +105,7 @@ class _QuizPageState extends State<QuizPage> {
     }
   }
 
-  /// [v2.8.0] 加载错词权重表 {word: wrongCount}，用于个性化出题。
+  /// [v0.1.28] 加载错词权重表 {word: wrongCount}，用于个性化出题。
   Future<Map<String, int>> _loadWrongWords() async {
     try {
       final db = await DatabaseProvider.database;

@@ -4,7 +4,7 @@ import '../core/models/profile.dart';
 import '../core/storage/database.dart';
 import '../core/storage/profile_dao.dart';
 
-/// [v2.9.0] 孩子/家长档案服务：多孩子模式的核心。
+/// [v0.1.35] 孩子/家长档案服务：多孩子模式的核心。
 ///
 /// 职责：
 /// - 当前活跃档案的选择与持久化（SharedPreferences）

@@ -4,7 +4,7 @@ import '../../core/theme/app_theme.dart';
 import '../../services/ai_tutor_service.dart';
 import 'knowledge_explain_sheet.dart';
 
-/// [v2.8.0] AI 助教推荐面板：显示今日推荐复习知识点列表。
+/// [v0.1.28] AI 助教推荐面板：显示今日推荐复习知识点列表。
 ///
 /// 从 [AiTutorService.getRecommendation] 加载，每条可点击展开讲解。
 class TutorPanel extends StatefulWidget {

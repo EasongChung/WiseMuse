@@ -61,7 +61,7 @@ class NativeTtsService implements TtsService {
     }
   }
 
-  /// [v2.8.0] 设置音色（名称按系统 TTS 服务返回。空串=系统默认）。
+  /// [v0.1.28] 设置音色（名称按系统 TTS 服务返回。空串=系统默认）。
   @override
   Future<void> setVoice(String name) async {
     try {

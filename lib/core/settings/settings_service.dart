@@ -20,7 +20,7 @@ class SettingsService {
   static const kTtsVoice = 'tts_voice';
   static const kPreferOffline = 'prefer_offline';
 
-  // ---- [v2.9.0] 本地模型路径 ----
+  // ---- [v0.1.35] 本地模型路径 ----
   /// 本地 GGUF 模型文件路径（用户导入或下载后设置），空=未配置。
   static const kLocalModelPath = 'local_model_path';
 
@@ -84,7 +84,7 @@ class SettingsService {
   Future<void> setTtsPauseMs(int v) async =>
       (await SharedPreferences.getInstance()).setInt(kTtsPauseMs, v);
 
-  /// [v2.8.0] TTS 音色名称（空串=系统默认）。
+  /// [v0.1.28] TTS 音色名称（空串=系统默认）。
   Future<String> getTtsVoice() async =>
       (await SharedPreferences.getInstance()).getString(kTtsVoice) ?? '';
   Future<void> setTtsVoice(String v) async =>
@@ -119,7 +119,7 @@ class SettingsService {
   Future<void> setTranslationTarget(String v) async =>
       (await SharedPreferences.getInstance()).setString(kTranslationTarget, v);
 
-  // ---- [v2.10.0] RAG / Embedding ----
+  // ---- [v0.1.37] RAG / Embedding ----
 
   /// Embedding 模型名（默认 text-embedding-3-small）。
   static const kEmbeddingModel = 'embedding_model';
@@ -130,7 +130,7 @@ class SettingsService {
   Future<void> setEmbeddingModel(String v) async =>
       (await SharedPreferences.getInstance()).setString(kEmbeddingModel, v);
 
-  // ---- [v2.10.0] 本地模型管理 ----
+  // ---- [v0.1.37] 本地模型管理 ----
 
   /// 默认本地 LLM 模型文件路径（空=未设置）。
   static const kDefaultLocalModel = 'default_local_model';
@@ -149,7 +149,7 @@ class SettingsService {
   Future<void> setAutoLoadLocalModel(bool v) async =>
       (await SharedPreferences.getInstance()).setBool(kAutoLoadLocalModel, v);
 
-  // ---- [v2.11.0] Vosk 跟读模型路径 ----
+  // ---- [v0.1.38] Vosk 跟读模型路径 ----
 
   /// Vosk 中文模型目录路径（在线下载或导入后保存），空=未配置。
   static const kVoskModelPath = 'vosk_model_path';

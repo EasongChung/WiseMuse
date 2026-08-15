@@ -53,23 +53,23 @@ class _SettingsPageState extends State<SettingsPage> {
   // AI 离线优先
   bool _preferOffline = false;
 
-  // [v2.9.0] 本地 GGUF 模型状态
+  // [v0.1.35] 本地 GGUF 模型状态
   List<_GgufModelInfo> _localModels = const [];
   bool _modelLoaded = false;
   bool _modelScanDone = false;
 
-  // [v2.10.0] Embedding 模型名（RAG 知识库）
+  // [v0.1.37] Embedding 模型名（RAG 知识库）
   String _embeddingModel = 'text-embedding-3-small';
   final _embeddingCtrl = TextEditingController();
 
-  // [v2.10.0] RAG 知识库索引状态
+  // [v0.1.37] RAG 知识库索引状态
   List<String> _indexedBooks = const [];
 
-  // [v2.10.0] 本地模型管理
+  // [v0.1.37] 本地模型管理
   bool _autoLoadLocal = true;
   String? _defaultLocalModel;
 
-  // [v2.11.0] Vosk 语音模型状态
+  // [v0.1.38] Vosk 语音模型状态
   bool _voskBusy = false;
 
   bool _initDone = false;
@@ -124,12 +124,12 @@ class _SettingsPageState extends State<SettingsPage> {
     _ttsPauseMs = await _settings.getTtsPauseMs();
     _ttsVoice = await _settings.getTtsVoice();
     _preferOffline = await _settings.getPreferOffline();
-    // [v2.9.0] 扫描本地 GGUF 模型
+    // [v0.1.35] 扫描本地 GGUF 模型
     _localModels = await _scanLocalModels();
     _modelLoaded = LlmService.instance.isLoaded;
     _modelScanDone = true;
 
-    // [v2.10.0] RAG / 本地模型管理
+    // [v0.1.37] RAG / 本地模型管理
     _embeddingModel = await _settings.getEmbeddingModel();
     _embeddingCtrl.text = _embeddingModel;
     _autoLoadLocal = await _settings.getAutoLoadLocalModel();
@@ -319,11 +319,11 @@ class _SettingsPageState extends State<SettingsPage> {
                   _buildSectionTitle('云端 AI 配置（知识提取/翻译/测验兜底）'),
                   _buildApiConfig(),
                   const SizedBox(height: 24),
-                  // [v2.10.0] RAG 知识库
+                  // [v0.1.37] RAG 知识库
                   _buildSectionTitle('RAG 知识库'),
                   _buildRagSection(),
                   const SizedBox(height: 24),
-                  // [v2.10.0] 本地大模型管理
+                  // [v0.1.37] 本地大模型管理
                   _buildSectionTitle('本地大模型管理'),
                   _buildLocalModelManager(),
                 ],
@@ -567,7 +567,7 @@ class _SettingsPageState extends State<SettingsPage> {
             ),
             const Divider(height: 8),
 
-            // [v2.8.0] 音色选择
+            // [v0.1.28] 音色选择
             Row(
               children: [
                 const Icon(
@@ -686,7 +686,7 @@ class _SettingsPageState extends State<SettingsPage> {
     );
   }
 
-  // ===== [v2.11.0] Vosk 语音模型管理 =====
+  // ===== [v0.1.38] Vosk 语音模型管理 =====
 
   /// Vosk 模型状态 + 在线下载 / 文件导入。
   Widget _buildVoskSection() {
@@ -787,7 +787,7 @@ class _SettingsPageState extends State<SettingsPage> {
     }
   }
 
-  // ===== [v2.10.0] RAG 知识库 =====
+  // ===== [v0.1.37] RAG 知识库 =====
 
   Future<void> _refreshRagStatus() async {
     final indexed = await RagRetrievalService.instance.listIndexedBooks();
@@ -885,7 +885,7 @@ class _SettingsPageState extends State<SettingsPage> {
     );
   }
 
-  // ===== [v2.10.0] 本地大模型管理 =====
+  // ===== [v0.1.37] 本地大模型管理 =====
 
   /// 预设模型列表（魔塔镜像下载）。
   static const _presetModels = [
@@ -1065,7 +1065,7 @@ class _SettingsPageState extends State<SettingsPage> {
     }
   }
 
-  // ===== [v2.9.0] 本地 AI 模型状态 =====
+  // ===== [v0.1.35] 本地 AI 模型状态 =====
 
   /// 构建本地 GGUF 模型状态卡片。
   Widget _buildLocalModelSection() {
@@ -1180,7 +1180,7 @@ class _SettingsPageState extends State<SettingsPage> {
   }
 }
 
-/// [v2.9.0] GGUF 模型文件信息。
+/// [v0.1.35] GGUF 模型文件信息。
 class _GgufModelInfo {
   const _GgufModelInfo({
     required this.name,

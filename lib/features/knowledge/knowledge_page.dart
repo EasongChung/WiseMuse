@@ -12,7 +12,7 @@ import '../../core/storage/sentence_dao.dart';
 import 'knowledge_detail_sheet.dart';
 import 'knowledge_edit_sheet.dart';
 
-/// [v0.3.0] [v2.11.0] 知识库页：三级钻取 书→单元→课/页→知识点。
+/// [v0.3.0] [v0.1.38] 知识库页：三级钻取 书→单元→课/页→知识点。
 ///
 /// 顶部 Chips 筛选类型，主体按书/单元/课三层展开浏览，FAB 添加。
 class KnowledgePage extends StatefulWidget {

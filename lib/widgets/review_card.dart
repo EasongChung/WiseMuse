@@ -6,7 +6,7 @@ import '../core/theme/app_theme.dart';
 import '../services/dictation_engine.dart';
 import '../services/spaced_repetition_service.dart';
 
-/// [v2.9.0] 复习卡片：三种形态，艾宾浩斯双向掌握度流转。
+/// [v0.1.35] 复习卡片：三种形态，艾宾浩斯双向掌握度流转。
 ///
 /// - [ReviewMode.flashcard]：卡片翻转记忆（看词 → 翻转看释义 → 自评）
 /// - [ReviewMode.choice]：选择题辨析（看词选正确项）

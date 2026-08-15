@@ -3,7 +3,7 @@ import '../ai_service.dart';
 import '../profile_service.dart';
 import 'rag_retrieval_service.dart';
 
-/// [v2.10.0] RAG 问答服务：基于教材内容的儿童友好问答。
+/// [v0.1.37] RAG 问答服务：基于教材内容的儿童友好问答。
 ///
 /// 流程：
 /// 1. [RagRetrievalService.retrieveContext] 检索教材相关片段

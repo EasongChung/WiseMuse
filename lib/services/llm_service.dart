@@ -9,7 +9,7 @@ import 'package:flutter/services.dart';
 /// - [bench] 基准测试（pp/tg t/s）
 /// - [unload] / [destroy] 释放
 ///
-/// [v2.9.0] 改为单例，各调用方共享同一实例的加载状态。
+/// [v0.1.35] 改为单例，各调用方共享同一实例的加载状态。
 ///
 /// 调用方（features 层）负责：先查 [isAvailable]，不可用则回落云端引擎。
 class LlmService {

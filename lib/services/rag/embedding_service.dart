@@ -5,7 +5,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../../core/debug/app_log.dart';
 import '../openai_client.dart';
 
-/// [v2.10.0] Embedding 服务：云端 API 优先，无配置时回落文本检索。
+/// [v0.1.37] Embedding 服务：云端 API 优先，无配置时回落文本检索。
 ///
 /// 封装 [OpenAiClient.embeddings()] 调用云端 embedding 模型。
 /// 未配置时 [embed]/[embedBatch] 返回 null，由上层降级为 BM25 文本匹配。

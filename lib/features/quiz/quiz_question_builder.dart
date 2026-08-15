@@ -9,7 +9,7 @@ import '../../core/models/knowledge_point.dart';
 /// - [QuestionType.charSelect]：听音选字——仅限中文单字知识点
 /// - [QuestionType.choice]：AI 选择题——需 AiService 生成（无 AI 时跳过此题型）
 ///
-/// [v2.8.0] 个性化：通过 [wrongWords] 传入错词权重，高频错词优先出题。
+/// [v0.1.28] 个性化：通过 [wrongWords] 传入错词权重，高频错词优先出题。
 /// - >3 次错 → 必出（强制入池）
 /// - 1-2 次错 → 高概率（pool 中 2x 权重）
 /// - 0 次错 → 正常概率
@@ -68,7 +68,7 @@ class QuizQuestionBuilder {
   ///
   /// [knowledgePoints] 本页/本章的知识点列表。
   /// [hasAi] 是否有 AI 引擎（否则跳过 choice 题型）。
-  /// [wrongWords] [v2.8.0] 错词权重表 {word: wrongCount}，高频错词优先出题。
+  /// [wrongWords] [v0.1.28] 错词权重表 {word: wrongCount}，高频错词优先出题。
   static List<QuizQuestion> buildQuestions(
     List<KnowledgePoint> knowledgePoints, {
     bool hasAi = false,
@@ -142,7 +142,7 @@ class QuizQuestionBuilder {
     return questions;
   }
 
-  /// [v2.8.0] 按错词权重生成加权池：高频错词在池中出现多次，提高出题概率。
+  /// [v0.1.28] 按错词权重生成加权池：高频错词在池中出现多次，提高出题概率。
   ///
   /// - wrongCount > 3 → 必出（3x）
   /// - wrongCount 1-2 → 高概率（2x）

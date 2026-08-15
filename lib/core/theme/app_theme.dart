@@ -73,7 +73,7 @@ class StudyPalette {
     }
   }
 
-  // ===== [v2.9.0] 深色模式色板变体 =====
+  // ===== [v0.1.35] 深色模式色板变体 =====
 
   /// 深色背景（接近黑色暖调）。
   static const darkBg = Color(0xFF1A1C1E);
@@ -90,7 +90,7 @@ class StudyPalette {
   /// 深色边框。
   static const darkBorder = Color(0xFF3A3430);
 
-  /// [v2.9.0] 列表项/卡片背景（明暗自适应），替代 inline `Colors.white.withAlpha(N)`。
+  /// [v0.1.35] 列表项/卡片背景（明暗自适应），替代 inline `Colors.white.withAlpha(N)`。
   /// 在 build 方法中调用以保证 [context] 持有正确的 [Brightness]。
   static Color surfaceWithAlpha(BuildContext context, {double alpha = 0.6}) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
@@ -98,7 +98,7 @@ class StudyPalette {
     return base.withValues(alpha: alpha);
   }
 
-  /// [v2.9.0] 表层文字颜色（明暗自适应）。
+  /// [v0.1.35] 表层文字颜色（明暗自适应）。
   static Color onSurfaceResolved(BuildContext context) {
     return Theme.of(context).brightness == Brightness.dark ? darkInk : ink;
   }

@@ -8,7 +8,7 @@ import '../settings/settings_page.dart';
 import '../wordbook/wordbook_page.dart';
 
 /// [v0.3.0] 个人中心页（我的 Tab）。
-/// [v2.9.0] 多孩子模式：顶部显示当前孩子头像+名称，点击切换；
+/// [v0.1.35] 多孩子模式：顶部显示当前孩子头像+名称，点击切换；
 ///         右下家长入口齿轮图标，家长模式可访问设置。
 class ProfilePage extends StatefulWidget {
   const ProfilePage({super.key});
@@ -290,7 +290,7 @@ class _ProfilePageState extends State<ProfilePage> {
           ),
         ),
 
-        // [v2.9.0] 右下家长入口齿轮 — 仅家长模式可见
+        // [v0.1.35] 右下家长入口齿轮 — 仅家长模式可见
         if (p?.isParent == true)
           Positioned(
             right: 16,

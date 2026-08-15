@@ -18,6 +18,6 @@ abstract class TtsService {
   /// 依赖”已静音”的操作（例如启动跟读录音）。
   Future<bool> stop();
 
-  /// [v2.8.0] 设置 TTS 音色（名称按系统 TTS 返回。空串=系统默认）。
+  /// [v0.1.28] 设置 TTS 音色（名称按系统 TTS 返回。空串=系统默认）。
   Future<void> setVoice(String name);
 }

@@ -5,7 +5,7 @@ import 'sentence_dao.dart';
 
 /// [v0.1.0] 教材（Book）数据访问。
 ///
-/// [v2.9.0] 多孩子模式：构造时传入 [profileId]，null=家长模式不过滤。
+/// [v0.1.35] 多孩子模式：构造时传入 [profileId]，null=家长模式不过滤。
 
 class BookDao {
   BookDao(this.db, {this.profileId});

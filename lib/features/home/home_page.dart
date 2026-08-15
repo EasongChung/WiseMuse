@@ -32,7 +32,7 @@ class _HomePageState extends State<HomePage> {
   bool _loading = true;
   bool _importing = false;
 
-  // [v2.10.0] RAG 知识库索引状态：bookId → isIndexed
+  // [v0.1.37] RAG 知识库索引状态：bookId → isIndexed
   Map<String, bool> _ragStatus = const {};
 
   @override
@@ -98,7 +98,7 @@ class _HomePageState extends State<HomePage> {
       if (book == null || !mounted) return;
       AppLog.d(_tag, '导入成功: ${book.title}');
       await _refresh();
-      // [v2.10.0] 导入完成后异步构建 RAG 知识库
+      // [v0.1.37] 导入完成后异步构建 RAG 知识库
       unawaited(_buildRagIndex(book));
       if (!mounted) return;
       // 打开阅读页
@@ -142,7 +142,7 @@ class _HomePageState extends State<HomePage> {
     try {
       final db = await DatabaseProvider.database;
       await BookDao(db).delete(book.id);
-      // [v2.10.0] 同步删除 RAG 索引
+      // [v0.1.37] 同步删除 RAG 索引
       unawaited(RagRetrievalService.instance.deleteIndex(book.id));
       AppLog.d(_tag, '删除教材: ${book.title}');
       await _refresh();
@@ -270,7 +270,7 @@ class _HomePageState extends State<HomePage> {
 ///
 /// 整体观感像一本书立在书架上，来源类型映射为不同书脊色
 /// （PDF=靛蓝 / 图片=橙 / Word=苔绿 / TXT=灰紫，见 [StudyPalette.spineFor]）。
-/// [v2.10.0] 新增 RAG 索引状态指示和「构建知识库」按钮。
+/// [v0.1.37] 新增 RAG 索引状态指示和「构建知识库」按钮。
 class _BookCard extends StatelessWidget {
   const _BookCard({
     required this.book,
@@ -371,7 +371,7 @@ class _BookCard extends StatelessWidget {
                     ),
                   ),
                   const SizedBox(height: 6),
-                  // [v2.10.0] RAG 知识库状态指示
+                  // [v0.1.37] RAG 知识库状态指示
                   _buildRagStatus(),
                 ],
               ),
@@ -382,7 +382,7 @@ class _BookCard extends StatelessWidget {
     );
   }
 
-  /// [v2.10.0] RAG 知识库索引状态指示。
+  /// [v0.1.37] RAG 知识库索引状态指示。
   Widget _buildRagStatus() {
     if (isIndexed) {
       return Row(

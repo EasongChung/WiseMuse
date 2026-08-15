@@ -17,7 +17,7 @@ import '../../services/vosk_asr_service.dart';
 import '../../widgets/model_panel.dart';
 import '../follow/scoring.dart';
 
-/// [v2.9.0] Sentence dictation page for the dictation module.
+/// [v0.1.35] Sentence dictation page for the dictation module.
 ///
 /// Two modes:
 /// - [SentenceDictMode.wordJigsaw]: listen then tap word cards in order

@@ -3,7 +3,7 @@ import 'package:sqflite/sqflite.dart';
 import '../models/learning_record.dart';
 
 /// [v0.1.0] 学习记录（LearningRecord）数据访问。
-/// [v2.9.0] 多孩子模式：构造传入 [profileId]，null=不过滤（家长模式）。
+/// [v0.1.35] 多孩子模式：构造传入 [profileId]，null=不过滤（家长模式）。
 
 class LearningRecordDao {
   LearningRecordDao(this.db, {this.profileId});

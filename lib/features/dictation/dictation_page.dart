@@ -60,7 +60,7 @@ class _DictationPageState extends State<DictationPage> {
     _showSourcePicker();
   }
 
-  /// [v2.11.0] 选择词源：生词本 / 手动输入 / 知识库。
+  /// [v0.1.38] 选择词源：生词本 / 手动输入 / 知识库。
   Future<void> _showSourcePicker() async {
     final source = await showDialog<String>(
       context: context,

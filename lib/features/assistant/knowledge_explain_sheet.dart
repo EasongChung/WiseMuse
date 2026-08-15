@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 import '../../core/theme/app_theme.dart';
 import '../../services/ai_tutor_service.dart';
 
-/// [v2.8.0] 知识点讲解弹窗：调用 [AiTutorService.explain] 生成 Markdown 讲解。
+/// [v0.1.28] 知识点讲解弹窗：调用 [AiTutorService.explain] 生成 Markdown 讲解。
 ///
 /// 加载中显示指示器，失败显示重试入口。暖色书房风格。
 class KnowledgeExplainSheet extends StatefulWidget {
