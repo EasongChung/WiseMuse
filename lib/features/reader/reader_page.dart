@@ -1100,12 +1100,21 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
                 _textPageIndex > 0 ? () => _syncPage(_textPageIndex - 1) : null,
             tooltip: '上一页',
           ),
-          Text(
-            '${_textPageIndex + 1}/$totalPages',
-            style: const TextStyle(
-              fontSize: 13,
-              fontWeight: FontWeight.w600,
-              color: StudyPalette.ink,
+          TextButton(
+            style: TextButton.styleFrom(
+              visualDensity: VisualDensity.compact,
+              minimumSize: const Size(0, 0),
+              padding: const EdgeInsets.symmetric(horizontal: 2),
+              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+            ),
+            onPressed: totalPages > 1 ? _showPageSelector : null,
+            child: Text(
+              '${_textPageIndex + 1}/$totalPages',
+              style: const TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+                color: StudyPalette.ink,
+              ),
             ),
           ),
           IconButton(
@@ -1653,10 +1662,11 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
                   unawaited(_tts.stop());
                 } else {
                   if (_activeSentenceIndex != null) {
-                    setState(() => _textHighlightIndex = _activeSentenceIndex);
+                    _textHighlightIndex = _activeSentenceIndex;
                   }
                   _speak(text);
                 }
+                if (mounted) setState(() {});
               },
             ),
             // 跟读
