@@ -3,12 +3,13 @@ import 'package:flutter/material.dart';
 import '../../core/debug/app_log.dart';
 import '../../core/models/book.dart';
 import '../../core/models/knowledge_point.dart';
+import '../../core/settings/settings_service.dart';
 import '../../core/storage/book_dao.dart';
 import '../../core/storage/database.dart';
 import '../../core/storage/knowledge_point_dao.dart';
+import '../../core/storage/sentence_dao.dart';
 import '../../core/theme/app_theme.dart';
 import '../../services/knowledge_extraction_service.dart';
-import '../../core/storage/sentence_dao.dart';
 import 'knowledge_detail_sheet.dart';
 import 'knowledge_edit_sheet.dart';
 
@@ -544,31 +545,86 @@ class _KnowledgePageState extends State<KnowledgePage> {
     );
     if (book == null || !mounted) return;
 
+    // 获取当前模型配置信息（用于弹窗呈现）
+    final preferOffline = await SettingsService.instance.getPreferOffline();
+    final localModel = await SettingsService.instance.getDefaultLocalModel();
+    final apiModel = await SettingsService.instance.getApiModel();
+    final engineInfo =
+        preferOffline
+            ? '本地模型优先（${localModel ?? '未选默认'}）'
+            : '在线模型（${(apiModel != null && apiModel.isNotEmpty) ? apiModel : 'OpenAI兼容'}）';
+
     // 进度弹窗
     if (!mounted) return;
+    void Function(void Function())? updateDialog;
+    var currentDone = 0;
+    var currentTotal = 0;
+    var currentPoints = 0;
+    var currentErrors = <String>[];
+    var currentStatus = '正在连接模型并准备提取…';
+
     showDialog(
       context: context,
       barrierDismissible: false,
       builder:
           (ctx) => StatefulBuilder(
             builder: (ctx, setDialogState) {
-              var done = 0;
-              var total = 0;
-              var points = 0;
-              var errors = <String>[];
+              updateDialog = setDialogState;
               return AlertDialog(
                 title: const Text('AI 提取知识点'),
                 content: Column(
                   mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 8,
+                        vertical: 4,
+                      ),
+                      decoration: BoxDecoration(
+                        color: StudyPalette.linen,
+                        borderRadius: BorderRadius.circular(6),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const Icon(
+                            Icons.psychology,
+                            size: 16,
+                            color: StudyPalette.spinePdf,
+                          ),
+                          const SizedBox(width: 6),
+                          Flexible(
+                            child: Text(
+                              '模型：$engineInfo',
+                              style: const TextStyle(
+                                fontSize: 11,
+                                color: StudyPalette.ink,
+                                fontWeight: FontWeight.w500,
+                              ),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 12),
                     const LinearProgressIndicator(),
                     const SizedBox(height: 12),
-                    Text(total > 0 ? '正在处理第 $done/$total 页…' : '正在准备…'),
+                    Text(
+                      currentTotal > 0
+                          ? '正在分析第 $currentDone/$currentTotal 页…'
+                          : currentStatus,
+                      style: const TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w500,
+                        color: StudyPalette.ink,
+                      ),
+                    ),
                     const SizedBox(height: 4),
                     Text(
-                      '已提取 $points 条知识点'
-                      '${errors.isNotEmpty ? '，${errors.length} 个错误' : ''}',
+                      '已提炼 $currentPoints 条知识点'
+                      '${currentErrors.isNotEmpty ? '，${currentErrors.length} 个错误' : ''}',
                       style: const TextStyle(
                         fontSize: 12,
                         color: StudyPalette.inkSoft,
@@ -586,7 +642,10 @@ class _KnowledgePageState extends State<KnowledgePage> {
     final result = await service.extractBook(
       book,
       onProgress: (d, t) {
-        // 进度更新
+        currentDone = d;
+        currentTotal = t;
+        currentStatus = '正在提取第 $d/$t 页知识点…';
+        updateDialog?.call(() {});
       },
     );
 

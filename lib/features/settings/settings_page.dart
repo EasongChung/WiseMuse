@@ -6,13 +6,18 @@ import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 
 import '../../core/debug/app_log.dart';
+import '../../core/models/book.dart';
 import '../../core/settings/settings_service.dart';
+import '../../core/storage/book_dao.dart';
+import '../../core/storage/database.dart';
 import '../../core/theme/app_theme.dart';
 import '../../services/llm_service.dart';
 import '../../services/mlkit_translation_service.dart';
 import '../../services/model_store.dart';
 import '../../services/rag/embedding_service.dart';
 import '../../services/rag/rag_retrieval_service.dart';
+import '../../services/rag/vector_index.dart';
+import '../../services/vosk_asr_service.dart';
 
 /// [v0.3.0] 设置页：翻译引擎配置 + 模型下载管理。
 ///
@@ -71,6 +76,9 @@ class _SettingsPageState extends State<SettingsPage> {
 
   // [v0.1.38] Vosk 语音模型状态
   bool _voskBusy = false;
+  String? _voskModelPath;
+  bool _voskModelExists = false;
+  bool _voskLoaded = false;
 
   bool _initDone = false;
 
@@ -135,6 +143,7 @@ class _SettingsPageState extends State<SettingsPage> {
     _autoLoadLocal = await _settings.getAutoLoadLocalModel();
     _defaultLocalModel = await _settings.getDefaultLocalModel();
     unawaited(_refreshRagStatus());
+    unawaited(_refreshVoskStatus());
 
     // 检查常用语言模型下载状态
     for (final (code, _) in _langs) {
@@ -688,8 +697,36 @@ class _SettingsPageState extends State<SettingsPage> {
 
   // ===== [v0.1.38] Vosk 语音模型管理 =====
 
+  Future<void> _refreshVoskStatus() async {
+    final path = await _settings.getVoskModelPath();
+    var exists = false;
+    if (path != null && path.isNotEmpty) {
+      exists = await Directory(path).exists();
+    }
+    final loaded = VoskAsrService().isLoaded;
+    if (mounted) {
+      setState(() {
+        _voskModelPath = path;
+        _voskModelExists = exists;
+        _voskLoaded = loaded;
+      });
+    }
+  }
+
   /// Vosk 模型状态 + 在线下载 / 文件导入。
   Widget _buildVoskSection() {
+    final hasConfig = _voskModelPath != null && _voskModelPath!.isNotEmpty;
+    final statusText =
+        !hasConfig
+            ? '未配置语音模型'
+            : (!_voskModelExists
+                ? '模型文件已丢失，请重新导入或下载'
+                : (_voskLoaded ? '模型已就绪 ✓' : '模型已配置（使用时自动加载）'));
+    final statusColor =
+        !hasConfig || !_voskModelExists
+            ? StudyPalette.ember
+            : (_voskLoaded ? StudyPalette.moss : StudyPalette.inkSoft);
+
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(12),
@@ -699,12 +736,39 @@ class _SettingsPageState extends State<SettingsPage> {
             Row(
               children: [
                 Expanded(
-                  child: Text(
-                    _voskBusy ? '操作中…' : 'Vosk 中文小模型',
-                    style: const TextStyle(
-                      fontSize: 13,
-                      color: StudyPalette.ink,
-                    ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        _voskBusy ? '操作中…' : 'Vosk 语音识别模型',
+                        style: const TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w600,
+                          color: StudyPalette.ink,
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        statusText,
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: statusColor,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                      if (hasConfig) ...[
+                        const SizedBox(height: 2),
+                        Text(
+                          '路径：${_voskModelPath!}',
+                          style: const TextStyle(
+                            fontSize: 11,
+                            color: StudyPalette.inkSoft,
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ],
+                    ],
                   ),
                 ),
                 if (_voskBusy)
@@ -715,12 +779,15 @@ class _SettingsPageState extends State<SettingsPage> {
                   ),
               ],
             ),
-            const SizedBox(height: 8),
+            const SizedBox(height: 10),
             SizedBox(
               width: double.infinity,
               child: OutlinedButton.icon(
                 icon: const Icon(Icons.download, size: 16),
-                label: const Text('在线下载', style: TextStyle(fontSize: 12)),
+                label: const Text(
+                  '在线下载（魔塔/镜像）',
+                  style: TextStyle(fontSize: 12),
+                ),
                 onPressed: _voskBusy ? null : _downloadVoskModel,
               ),
             ),
@@ -729,7 +796,7 @@ class _SettingsPageState extends State<SettingsPage> {
               width: double.infinity,
               child: OutlinedButton.icon(
                 icon: const Icon(Icons.file_open, size: 16),
-                label: const Text('从文件导入', style: TextStyle(fontSize: 12)),
+                label: const Text('从 zip 文件导入', style: TextStyle(fontSize: 12)),
                 onPressed: _voskBusy ? null : _importVoskModel,
               ),
             ),
@@ -744,6 +811,7 @@ class _SettingsPageState extends State<SettingsPage> {
     try {
       final modelPath = await ModelStore.ensureVoskCnModel();
       await SettingsService.instance.setVoskModelPath(modelPath);
+      await _refreshVoskStatus();
       if (!mounted) return;
       ScaffoldMessenger.of(
         context,
@@ -772,6 +840,7 @@ class _SettingsPageState extends State<SettingsPage> {
     try {
       final modelPath = await ModelStore.importFromZip(path);
       await SettingsService.instance.setVoskModelPath(modelPath);
+      await _refreshVoskStatus();
       if (!mounted) return;
       ScaffoldMessenger.of(
         context,
@@ -861,27 +930,110 @@ class _SettingsPageState extends State<SettingsPage> {
               ),
             ),
             const SizedBox(height: 12),
-            // 索引状态
-            Row(
-              children: [
-                const Icon(
-                  Icons.storage,
-                  size: 18,
-                  color: StudyPalette.inkSoft,
+            // 索引状态（点击查看已索引书籍详情）
+            InkWell(
+              borderRadius: BorderRadius.circular(8),
+              onTap: _indexedBooks.isEmpty ? null : _showIndexedBooksDialog,
+              child: Padding(
+                padding: const EdgeInsets.symmetric(vertical: 4),
+                child: Row(
+                  children: [
+                    const Icon(
+                      Icons.storage,
+                      size: 18,
+                      color: StudyPalette.inkSoft,
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        '已索引 ${_indexedBooks.length} 本书籍',
+                        style: const TextStyle(
+                          fontSize: 13,
+                          color: StudyPalette.inkSoft,
+                        ),
+                      ),
+                    ),
+                    if (_indexedBooks.isNotEmpty)
+                      const Icon(
+                        Icons.chevron_right,
+                        size: 16,
+                        color: StudyPalette.inkSoft,
+                      ),
+                  ],
                 ),
-                const SizedBox(width: 8),
-                Text(
-                  '已索引 ${_indexedBooks.length} 本书籍',
-                  style: const TextStyle(
-                    fontSize: 13,
-                    color: StudyPalette.inkSoft,
-                  ),
-                ),
-              ],
+              ),
             ),
           ],
         ),
       ),
+    );
+  }
+
+  /// [v0.1.42] 弹出已索引书籍列表详情弹窗
+  Future<void> _showIndexedBooksDialog() async {
+    final db = await DatabaseProvider.database;
+    final bookDao = BookDao(db);
+    final allBooks = await bookDao.getAll();
+    final bookMap = {for (final b in allBooks) b.id: b.title};
+
+    if (!mounted) return;
+    showDialog(
+      context: context,
+      builder:
+          (ctx) => AlertDialog(
+            title: const Text('已向量化书籍列表'),
+            content: SizedBox(
+              width: double.maxFinite,
+              child: ListView.separated(
+                shrinkWrap: true,
+                itemCount: _indexedBooks.length,
+                separatorBuilder: (_, _) => const Divider(height: 1),
+                itemBuilder: (context, i) {
+                  final bookId = _indexedBooks[i];
+                  final title = bookMap[bookId] ?? '未知书籍 ($bookId)';
+                  return ListTile(
+                    dense: true,
+                    leading: const Icon(
+                      Icons.auto_stories,
+                      size: 20,
+                      color: StudyPalette.spinePdf,
+                    ),
+                    title: Text(
+                      title,
+                      style: const TextStyle(
+                        fontSize: 14,
+                        color: StudyPalette.ink,
+                      ),
+                    ),
+                    trailing: IconButton(
+                      icon: const Icon(
+                        Icons.delete_outline,
+                        size: 18,
+                        color: StudyPalette.ember,
+                      ),
+                      tooltip: '清理此书索引',
+                      onPressed: () async {
+                        await RagRetrievalService.instance.deleteIndex(bookId);
+                        await _refreshRagStatus();
+                        if (ctx.mounted) Navigator.pop(ctx);
+                        if (mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(content: Text('已清除《$title》的向量索引')),
+                          );
+                        }
+                      },
+                    ),
+                  );
+                },
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx),
+                child: const Text('关闭'),
+              ),
+            ],
+          ),
     );
   }
 
