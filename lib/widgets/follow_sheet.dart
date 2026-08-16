@@ -35,10 +35,11 @@ class FollowSheetContent extends StatefulWidget {
     String? bookTitle,
     int? pageNumber,
   }) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     return showModalBottomSheet(
       context: context,
       isScrollControlled: true,
-      backgroundColor: StudyPalette.parchment,
+      backgroundColor: isDark ? StudyPalette.darkCard : StudyPalette.parchment,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(18)),
       ),
@@ -184,10 +185,10 @@ class _FollowSheetContentState extends State<FollowSheetContent> {
               padding: const EdgeInsets.all(14),
               child: Text(
                 widget.sentence,
-                style: const TextStyle(
+                style: TextStyle(
                   fontSize: 18,
                   height: 1.6,
-                  color: StudyPalette.ink,
+                  color: StudyPalette.onSurfaceResolved(context),
                 ),
                 textAlign: TextAlign.center,
               ),

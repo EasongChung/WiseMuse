@@ -279,14 +279,14 @@ class _SettingsPageState extends State<SettingsPage> {
     );
   }
 
-  // ===== 1. 翻译引擎（优化为 Chip 横向排版，解决竖排问题） =====
+  // ===== 1. 翻译引擎（优化为下拉选择模式） =====
 
   Widget _buildEngineSelector() {
     final options = [
-      ('auto', '自动模式', '云端优先 → 本地 AI → ML Kit'),
-      ('cloud', '云端模型', 'OpenAI 兼容 API，翻译质量最高'),
-      ('llm', '本地 AI', '本地 GGUF 模型，无网强语义'),
-      ('mlkit', '离线快', 'Google ML Kit，极速轻量'),
+      ('auto', '智能自动', '云端优先 → 本地 AI → 谷歌机器翻译 逐级自动回落'),
+      ('cloud', '云端大模型', 'OpenAI 兼容 API，翻译质量最高'),
+      ('llm', '本地大模型', '本地 GGUF 模型，无网强语义'),
+      ('mlkit', '离线快速', '谷歌机器翻译，极速轻量无需联网'),
     ];
 
     return Card(
@@ -295,43 +295,61 @@ class _SettingsPageState extends State<SettingsPage> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children:
-                  options.map((opt) {
-                    final selected = _engine == opt.$1;
-                    return ChoiceChip(
-                      selected: selected,
-                      label: Text(
-                        opt.$2,
-                        style: TextStyle(
-                          fontSize: 13,
-                          fontWeight:
-                              selected ? FontWeight.w600 : FontWeight.normal,
-                          color:
-                              selected ? StudyPalette.ember : StudyPalette.ink,
-                        ),
-                      ),
-                      selectedColor: StudyPalette.emberSoft,
-                      backgroundColor: Colors.transparent,
-                      side: BorderSide(
-                        color:
-                            selected ? StudyPalette.ember : StudyPalette.linen,
-                      ),
-                      onSelected: (_) => _saveEngine(opt.$1),
-                    );
-                  }).toList(),
+            Row(
+              children: [
+                const SizedBox(width: 8),
+                const Icon(
+                  Icons.auto_mode,
+                  size: 20,
+                  color: StudyPalette.ember,
+                ),
+                const SizedBox(width: 8),
+                Text('翻译引擎', style: titleStyle(fontSize: 14)),
+                const Spacer(),
+                DropdownButton<String>(
+                  value: _engine,
+                  underline: const SizedBox(),
+                  items:
+                      options.map((opt) {
+                        return DropdownMenuItem(
+                          value: opt.$1,
+                          child: Text(
+                            opt.$2,
+                            style: TextStyle(
+                              fontSize: 14,
+                              fontWeight:
+                                  _engine == opt.$1
+                                      ? FontWeight.w600
+                                      : FontWeight.normal,
+                              color:
+                                  _engine == opt.$1
+                                      ? StudyPalette.ember
+                                      : StudyPalette.onSurfaceResolved(context),
+                            ),
+                          ),
+                        );
+                      }).toList(),
+                  onChanged: (v) {
+                    if (v != null) _saveEngine(v);
+                  },
+                ),
+              ],
             ),
-            const SizedBox(height: 10),
-            Text(
-              options
-                  .firstWhere(
-                    (o) => o.$1 == _engine,
-                    orElse: () => options.first,
-                  )
-                  .$3,
-              style: const TextStyle(fontSize: 12, color: StudyPalette.inkSoft),
+            const Divider(height: 8, indent: 8),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(8, 4, 8, 2),
+              child: Text(
+                options
+                    .firstWhere(
+                      (o) => o.$1 == _engine,
+                      orElse: () => options.first,
+                    )
+                    .$3,
+                style: const TextStyle(
+                  fontSize: 12,
+                  color: StudyPalette.inkSoft,
+                ),
+              ),
             ),
           ],
         ),
@@ -1489,7 +1507,7 @@ class _SettingsPageState extends State<SettingsPage> {
     );
   }
 
-  // ===== 8. 本地大模型管理（合入 AI 离线优先 + 模型名称与删除按钮） =====
+  // ===== 8. 本地大模型管理（合入 AI 离线优先 + 模型弹窗选择与删除） =====
 
   static const _presetModels = [
     ('Qwen3-0.6B Q4_K_M', 'qwen3-0.6b-instruct-q4_k_m.gguf'),
@@ -1497,6 +1515,14 @@ class _SettingsPageState extends State<SettingsPage> {
   ];
 
   Widget _buildLocalModelManager() {
+    // 获取当前默认模型文件名
+    final currentDefaultName =
+        _defaultLocalModel != null && _defaultLocalModel!.isNotEmpty
+            ? p.basename(_defaultLocalModel!)
+            : '未配置（点击选择）';
+    final hasDefault =
+        _defaultLocalModel != null && _defaultLocalModel!.isNotEmpty;
+
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(12),
@@ -1545,73 +1571,40 @@ class _SettingsPageState extends State<SettingsPage> {
             ),
             const Divider(height: 8),
 
-            // 已下载/导入的 GGUF 模型列表
-            Text('已配置的本地模型', style: titleStyle(fontSize: 14)),
-            const SizedBox(height: 6),
-            if (_localModels.isEmpty)
-              const Padding(
-                padding: EdgeInsets.symmetric(vertical: 8),
-                child: Text(
-                  '暂无本地 GGUF 模型，请在线下载或从文件导入',
-                  style: TextStyle(fontSize: 12, color: StudyPalette.inkSoft),
+            // 当前配置的模型卡片（点击弹出选择列表弹窗）
+            ListTile(
+              dense: true,
+              contentPadding: EdgeInsets.zero,
+              leading: Icon(
+                hasDefault ? Icons.check_circle : Icons.model_training,
+                color: hasDefault ? StudyPalette.moss : StudyPalette.inkSoft,
+                size: 24,
+              ),
+              title: Text(
+                '当前生效模型：$currentDefaultName',
+                style: TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w600,
+                  color:
+                      hasDefault
+                          ? StudyPalette.onSurfaceResolved(context)
+                          : StudyPalette.inkSoft,
                 ),
-              )
-            else
-              ...List.generate(_localModels.length, (i) {
-                final m = _localModels[i];
-                final isDefault = _defaultLocalModel == m.path;
-                return ListTile(
-                  dense: true,
-                  contentPadding: EdgeInsets.zero,
-                  leading: Icon(
-                    isDefault ? Icons.check_circle : Icons.model_training,
-                    color: isDefault ? StudyPalette.moss : StudyPalette.inkSoft,
-                    size: 20,
-                  ),
-                  title: Text(
-                    m.name,
-                    style: TextStyle(
-                      fontSize: 13,
-                      fontWeight:
-                          isDefault ? FontWeight.w600 : FontWeight.normal,
-                      color: StudyPalette.ink,
-                    ),
-                  ),
-                  subtitle: Text(
-                    '${_formatSize(m.sizeBytes)}${isDefault ? ' · 默认模型' : ''}',
-                    style: const TextStyle(
-                      fontSize: 11,
-                      color: StudyPalette.inkSoft,
-                    ),
-                  ),
-                  trailing: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      if (!isDefault)
-                        TextButton(
-                          style: TextButton.styleFrom(
-                            padding: const EdgeInsets.symmetric(horizontal: 8),
-                            textStyle: const TextStyle(fontSize: 12),
-                          ),
-                          onPressed: () {
-                            setState(() => _defaultLocalModel = m.path);
-                            _settings.setDefaultLocalModel(m.path);
-                          },
-                          child: const Text('设为默认'),
-                        ),
-                      IconButton(
-                        icon: const Icon(
-                          Icons.delete_outline,
-                          size: 18,
-                          color: StudyPalette.ember,
-                        ),
-                        tooltip: '删除此模型',
-                        onPressed: () => _confirmDeleteGgufModel(m),
-                      ),
-                    ],
-                  ),
-                );
-              }),
+              ),
+              subtitle: Text(
+                '已导入 ${_localModels.length} 个模型 · 点击切换或管理模型',
+                style: const TextStyle(
+                  fontSize: 12,
+                  color: StudyPalette.inkSoft,
+                ),
+              ),
+              trailing: const Icon(
+                Icons.chevron_right,
+                size: 20,
+                color: StudyPalette.inkSoft,
+              ),
+              onTap: _showLocalModelSelectorDialog,
+            ),
             const Divider(height: 12),
 
             // 预设模型下载
@@ -1626,7 +1619,13 @@ class _SettingsPageState extends State<SettingsPage> {
                 child: Row(
                   children: [
                     Expanded(
-                      child: Text(name, style: const TextStyle(fontSize: 13)),
+                      child: Text(
+                        name,
+                        style: TextStyle(
+                          fontSize: 13,
+                          color: StudyPalette.onSurfaceResolved(context),
+                        ),
+                      ),
                     ),
                     SizedBox(
                       height: 28,
@@ -1660,7 +1659,153 @@ class _SettingsPageState extends State<SettingsPage> {
     );
   }
 
-  Future<void> _confirmDeleteGgufModel(_GgufModelInfo info) async {
+  /// 弹出本地模型选择与管理弹窗：列出所有已导入模型，支持点击选择为默认模型，右侧设置单独删除按钮。
+  void _showLocalModelSelectorDialog() {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor:
+          Theme.of(context).brightness == Brightness.dark
+              ? StudyPalette.darkCard
+              : StudyPalette.parchment,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(18)),
+      ),
+      builder:
+          (ctx) => StatefulBuilder(
+            builder: (ctx, setSheetState) {
+              return Padding(
+                padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Center(
+                      child: Container(
+                        width: 36,
+                        height: 4,
+                        margin: const EdgeInsets.only(bottom: 12),
+                        decoration: BoxDecoration(
+                          color: StudyPalette.linen,
+                          borderRadius: BorderRadius.circular(2),
+                        ),
+                      ),
+                    ),
+                    Text('选择本地 GGUF 模型', style: titleStyle(fontSize: 16)),
+                    const SizedBox(height: 4),
+                    const Text(
+                      '点击设为当前生效模型，右侧可删除文件',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: StudyPalette.inkSoft,
+                      ),
+                    ),
+                    const Divider(height: 16),
+                    if (_localModels.isEmpty)
+                      const Padding(
+                        padding: EdgeInsets.symmetric(vertical: 24),
+                        child: Center(
+                          child: Text(
+                            '暂无已导入的模型文件\n请在设置页在线下载或从文件导入',
+                            textAlign: TextAlign.center,
+                            style: TextStyle(
+                              fontSize: 13,
+                              color: StudyPalette.inkSoft,
+                            ),
+                          ),
+                        ),
+                      )
+                    else
+                      Flexible(
+                        child: ListView.separated(
+                          shrinkWrap: true,
+                          itemCount: _localModels.length,
+                          separatorBuilder:
+                              (_, _) => const Divider(height: 1, indent: 8),
+                          itemBuilder: (ctx, idx) {
+                            final m = _localModels[idx];
+                            final isDefault = _defaultLocalModel == m.path;
+                            return ListTile(
+                              dense: true,
+                              contentPadding: const EdgeInsets.symmetric(
+                                horizontal: 4,
+                              ),
+                              leading: Icon(
+                                isDefault
+                                    ? Icons.check_circle
+                                    : Icons.radio_button_unchecked,
+                                color:
+                                    isDefault
+                                        ? StudyPalette.moss
+                                        : StudyPalette.inkSoft,
+                                size: 20,
+                              ),
+                              title: Text(
+                                m.name,
+                                style: TextStyle(
+                                  fontSize: 14,
+                                  fontWeight:
+                                      isDefault
+                                          ? FontWeight.w600
+                                          : FontWeight.normal,
+                                  color:
+                                      isDefault
+                                          ? StudyPalette.ember
+                                          : StudyPalette.onSurfaceResolved(
+                                            context,
+                                          ),
+                                ),
+                              ),
+                              subtitle: Text(
+                                '${_formatSize(m.sizeBytes)}${isDefault ? ' · 当前默认' : ''}',
+                                style: const TextStyle(
+                                  fontSize: 11,
+                                  color: StudyPalette.inkSoft,
+                                ),
+                              ),
+                              trailing: IconButton(
+                                icon: const Icon(
+                                  Icons.delete_outline,
+                                  size: 20,
+                                  color: StudyPalette.ember,
+                                ),
+                                tooltip: '删除模型',
+                                onPressed: () async {
+                                  final deleted = await _confirmDeleteGgufModel(
+                                    m,
+                                  );
+                                  if (deleted && mounted) {
+                                    setSheetState(() {});
+                                    setState(() {});
+                                  }
+                                },
+                              ),
+                              onTap: () async {
+                                setState(() => _defaultLocalModel = m.path);
+                                await _settings.setDefaultLocalModel(m.path);
+                                await _settings.setLocalModelPath(m.path);
+                                setSheetState(() {});
+                                if (ctx.mounted) {
+                                  Navigator.pop(ctx);
+                                  ScaffoldMessenger.of(ctx).showSnackBar(
+                                    SnackBar(
+                                      content: Text('已将 ${m.name} 设为当前生效模型'),
+                                    ),
+                                  );
+                                }
+                              },
+                            );
+                          },
+                        ),
+                      ),
+                  ],
+                ),
+              );
+            },
+          ),
+    );
+  }
+
+  Future<bool> _confirmDeleteGgufModel(_GgufModelInfo info) async {
     final confirm = await showDialog<bool>(
       context: context,
       builder:
@@ -1682,7 +1827,7 @@ class _SettingsPageState extends State<SettingsPage> {
             ],
           ),
     );
-    if (confirm != true || !mounted) return;
+    if (confirm != true || !mounted) return false;
 
     try {
       final f = File(info.path);
@@ -1692,20 +1837,28 @@ class _SettingsPageState extends State<SettingsPage> {
       if (_defaultLocalModel == info.path) {
         _defaultLocalModel = null;
         await _settings.setDefaultLocalModel('');
+        await _settings.setLocalModelPath('');
       }
       _localModels = await _scanLocalModels();
+      if (_defaultLocalModel == null && _localModels.isNotEmpty) {
+        _defaultLocalModel = _localModels.first.path;
+        await _settings.setDefaultLocalModel(_defaultLocalModel!);
+        await _settings.setLocalModelPath(_defaultLocalModel!);
+      }
       if (mounted) {
         setState(() {});
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(SnackBar(content: Text('模型 ${info.name} 已删除')));
       }
+      return true;
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(SnackBar(content: Text('删除失败: $e')));
       }
+      return false;
     }
   }
 
@@ -1728,11 +1881,17 @@ class _SettingsPageState extends State<SettingsPage> {
       final savePath = '${dir.path}/$filename';
       await _downloadFile(url, savePath);
       if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('$label 下载完成')));
         _localModels = await _scanLocalModels();
-        if (mounted) setState(() {});
+        if (!mounted) return;
+        // 自动设为生效模型
+        setState(() => _defaultLocalModel = savePath);
+        await _settings.setDefaultLocalModel(savePath);
+        await _settings.setLocalModelPath(savePath);
+        if (mounted) {
+          ScaffoldMessenger.of(
+            context,
+          ).showSnackBar(SnackBar(content: Text('$label 下载完成并已自动配置为生效模型 ✓')));
+        }
       }
     } catch (e) {
       if (mounted) {
@@ -1752,13 +1911,19 @@ class _SettingsPageState extends State<SettingsPage> {
     final path = result.files.single.path;
     if (path == null) return;
     try {
-      await ModelStore.importGguf(path);
+      final savedPath = await ModelStore.importGguf(path);
       if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('GGUF 模型导入成功')));
       _localModels = await _scanLocalModels();
-      if (mounted) setState(() {});
+      if (!mounted) return;
+      // 导入后自动设为生效默认模型
+      setState(() => _defaultLocalModel = savedPath);
+      await _settings.setDefaultLocalModel(savedPath);
+      await _settings.setLocalModelPath(savedPath);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('GGUF 模型导入成功并已自动配置为生效模型 ✓')),
+        );
+      }
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(

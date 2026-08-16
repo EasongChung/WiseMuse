@@ -354,10 +354,10 @@ class _BookCard extends StatelessWidget {
                     book.title,
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
+                    style: TextStyle(
                       fontSize: 14,
                       fontWeight: FontWeight.w600,
-                      color: StudyPalette.ink,
+                      color: StudyPalette.onSurfaceResolved(context),
                       height: 1.3,
                     ),
                   ),

@@ -662,9 +662,11 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
     final result = await TranslationEngine.translateWithSettings(text);
     if (!mounted) return;
     if (result != null) {
+      final isDark = Theme.of(context).brightness == Brightness.dark;
       showModalBottomSheet(
         context: context,
-        backgroundColor: StudyPalette.parchment,
+        backgroundColor:
+            isDark ? StudyPalette.darkCard : StudyPalette.parchment,
         shape: const RoundedRectangleBorder(
           borderRadius: BorderRadius.vertical(top: Radius.circular(18)),
         ),
@@ -701,9 +703,9 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
                   const SizedBox(height: 10),
                   Text(
                     text,
-                    style: const TextStyle(
+                    style: TextStyle(
                       fontSize: 16,
-                      color: StudyPalette.ink,
+                      color: StudyPalette.onSurfaceResolved(context),
                       height: 1.5,
                     ),
                   ),
@@ -794,13 +796,31 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
       content = _buildTextView();
     }
 
-    // 全局手势：横向滑动左右翻页 + 原文模式上滑唤出文本弹窗
+    // 全局手势：横向滑动左右翻页 + 原文模式上滑唤出文本弹窗 + 滑动/点击空白隐藏操作栏
     content = GestureDetector(
       behavior: HitTestBehavior.translucent,
-      onHorizontalDragEnd: _isMultiPage ? _onTextSwipePage : null,
+      onTap: () {
+        if (_activeSentenceText != null) {
+          setState(() => _activeSentenceText = null);
+        }
+      },
+      onPanDown: (_) {
+        if (_activeSentenceText != null && !_continuousPlaying) {
+          setState(() => _activeSentenceText = null);
+        }
+      },
+      onHorizontalDragEnd: (d) {
+        if (_activeSentenceText != null) {
+          setState(() => _activeSentenceText = null);
+        }
+        if (_isMultiPage) _onTextSwipePage(d);
+      },
       onVerticalDragEnd:
           (_useOriginal && _hasOriginal())
               ? (d) {
+                if (_activeSentenceText != null) {
+                  setState(() => _activeSentenceText = null);
+                }
                 if (d.primaryVelocity != null && d.primaryVelocity! < -350) {
                   _showTextSheet();
                 }

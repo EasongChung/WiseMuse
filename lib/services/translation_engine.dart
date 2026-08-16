@@ -14,14 +14,14 @@ enum TranslationEngineType {
   /// llama 本地大模型（Qwen3 等，需加载 GGUF，强但慢）。
   llm,
 
-  /// ML Kit 翻译（standalone SDK，CDN 直连，无 GMS 依赖，快但质量一般）。
+  /// 谷歌机器翻译（standalone SDK，CDN 直连，无 GMS 依赖，快但质量一般）。
   mlkit,
 
   /// 自动：cloud → llm → mlkit 逐级回落。
   auto,
 }
 
-/// [v0.3.0] 翻译引擎编排：三级回落（ML Kit → llama → 云端）。
+/// [v0.3.0] 翻译引擎编排：三级回落（云端 → llama → 谷歌机器翻译）。
 ///
 /// 用法：
 /// ```dart
@@ -67,7 +67,7 @@ class TranslationEngine {
     return TranslationEngine()._translate(text, source, target, engineType);
   }
 
-  /// 按设置页配置翻译 [text]：源语种为 `auto` 时先用 ML Kit 自动识别，
+  /// 按设置页配置翻译 [text]：源语种为 `auto` 时先用谷歌机器翻译自动识别，
   /// 识别失败（`und`）或未知时兜底 `zh`。
   ///
   /// 返回 [TranslationResult] 包含译文文本与实际使用的源/目标语种。
@@ -129,7 +129,7 @@ class TranslationEngine {
     }
   }
 
-  /// 三级自动回落：云端 → llama → ML Kit。
+  /// 三级自动回落：云端 → llama → 谷歌机器翻译。
   Future<String?> _tryAuto(String text, String source, String target) async {
     // 1) 云端（质量最高）
     final cloud = await _tryCloud(text, source, target);
@@ -139,13 +139,13 @@ class TranslationEngine {
     final llm = await _tryLlm(text, source, target);
     if (llm != null) return llm;
 
-    // 3) ML Kit（极轻量离线兜底）
+    // 3) 谷歌机器翻译（极轻量离线兜底）
     return _tryMlkit(text, source, target);
   }
 
-  /// ML Kit 翻译（快，离线优先）。
+  /// 谷歌机器翻译（快，离线优先）。
   Future<String?> _tryMlkit(String text, String source, String target) async {
-    AppLog.d(_tag, '尝试 ML Kit 翻译');
+    AppLog.d(_tag, '尝试谷歌机器翻译');
     try {
       final result = await _mlkit.translate(
         text: text,
@@ -153,11 +153,11 @@ class TranslationEngine {
         target: target,
       );
       if (result != null) {
-        AppLog.d(_tag, 'ML Kit 翻译成功');
+        AppLog.d(_tag, '谷歌机器翻译成功');
         return result;
       }
     } catch (e) {
-      AppLog.e(_tag, 'ML Kit 翻译异常: $e');
+      AppLog.e(_tag, '谷歌机器翻译异常: $e');
     }
     return null;
   }

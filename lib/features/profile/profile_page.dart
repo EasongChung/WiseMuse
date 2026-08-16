@@ -92,7 +92,7 @@ class _ProfilePageState extends State<ProfilePage> {
                                 _currentProfile?.id == p.id
                                     ? FontWeight.w700
                                     : FontWeight.w400,
-                            color: StudyPalette.ink,
+                            color: StudyPalette.onSurfaceResolved(context),
                           ),
                         ),
                         subtitle: Text(
@@ -211,10 +211,10 @@ class _ProfilePageState extends State<ProfilePage> {
                       const SizedBox(height: 10),
                       Text(
                         p?.name ?? '小读者',
-                        style: const TextStyle(
+                        style: TextStyle(
                           fontSize: 18,
                           fontWeight: FontWeight.w600,
-                          color: StudyPalette.ink,
+                          color: StudyPalette.onSurfaceResolved(context),
                         ),
                       ),
                       const SizedBox(height: 4),
@@ -382,9 +382,9 @@ class _ProfilePageState extends State<ProfilePage> {
       leading: Icon(icon, color: StudyPalette.ember, size: 24),
       title: Text(
         title,
-        style: const TextStyle(
+        style: TextStyle(
           fontWeight: FontWeight.w600,
-          color: StudyPalette.ink,
+          color: StudyPalette.onSurfaceResolved(context),
         ),
       ),
       subtitle: Text(

@@ -176,10 +176,10 @@ class PracticePage extends StatelessWidget {
                   children: [
                     Text(
                       title,
-                      style: const TextStyle(
+                      style: TextStyle(
                         fontSize: 16,
                         fontWeight: FontWeight.w600,
-                        color: StudyPalette.ink,
+                        color: StudyPalette.onSurfaceResolved(context),
                       ),
                     ),
                     const SizedBox(height: 4),

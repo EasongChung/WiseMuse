@@ -34,10 +34,11 @@ class KnowledgeScope {
 /// 返回 [KnowledgeScope] 或 null（取消）。
 class KnowledgeScopePicker {
   static Future<KnowledgeScope?> show(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     return showModalBottomSheet<KnowledgeScope>(
       context: context,
       isScrollControlled: true,
-      backgroundColor: StudyPalette.parchment,
+      backgroundColor: isDark ? StudyPalette.darkCard : StudyPalette.parchment,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(18)),
       ),
@@ -180,7 +181,9 @@ class _ScopePickerContentState extends State<_ScopePickerContent> {
               ),
               title: Text(
                 book.title,
-                style: const TextStyle(color: StudyPalette.ink),
+                style: TextStyle(
+                  color: StudyPalette.onSurfaceResolved(context),
+                ),
               ),
               trailing: const Icon(
                 Icons.chevron_right,
@@ -206,7 +209,7 @@ class _ScopePickerContentState extends State<_ScopePickerContent> {
             size: 18,
             color: StudyPalette.ember,
           ),
-          title: Text(
+          title: const Text(
             '返回选书',
             style: TextStyle(fontSize: 13, color: StudyPalette.ember),
           ),
@@ -215,7 +218,10 @@ class _ScopePickerContentState extends State<_ScopePickerContent> {
         const Divider(height: 1),
         // 「全部单元」选项
         ListTile(
-          title: const Text('全部单元', style: TextStyle(color: StudyPalette.ink)),
+          title: Text(
+            '全部单元',
+            style: TextStyle(color: StudyPalette.onSurfaceResolved(context)),
+          ),
           trailing: const Icon(
             Icons.chevron_right,
             color: StudyPalette.inkSoft,
@@ -225,7 +231,10 @@ class _ScopePickerContentState extends State<_ScopePickerContent> {
         ...sorted.map((e) {
           final label = e.key <= 0 ? '未分类' : '第 ${e.key} 单元';
           return ListTile(
-            title: Text(label, style: const TextStyle(color: StudyPalette.ink)),
+            title: Text(
+              label,
+              style: TextStyle(color: StudyPalette.onSurfaceResolved(context)),
+            ),
             trailing: const Icon(
               Icons.chevron_right,
               color: StudyPalette.inkSoft,
@@ -251,7 +260,7 @@ class _ScopePickerContentState extends State<_ScopePickerContent> {
             size: 18,
             color: StudyPalette.ember,
           ),
-          title: Text(
+          title: const Text(
             '返回选单元',
             style: TextStyle(fontSize: 13, color: StudyPalette.ember),
           ),
@@ -260,7 +269,10 @@ class _ScopePickerContentState extends State<_ScopePickerContent> {
         const Divider(height: 1),
         // 「全部课」选项
         ListTile(
-          title: const Text('全部课/页', style: TextStyle(color: StudyPalette.ink)),
+          title: Text(
+            '全部课/页',
+            style: TextStyle(color: StudyPalette.onSurfaceResolved(context)),
+          ),
           onTap: () {
             setState(() => _selectedPage = 0);
             _confirm();
@@ -269,7 +281,10 @@ class _ScopePickerContentState extends State<_ScopePickerContent> {
         ...sorted.map((e) {
           final label = e.key <= 0 ? '通用' : '第 ${e.key} 课';
           return ListTile(
-            title: Text(label, style: const TextStyle(color: StudyPalette.ink)),
+            title: Text(
+              label,
+              style: TextStyle(color: StudyPalette.onSurfaceResolved(context)),
+            ),
             subtitle: Text(
               '${e.value.length} 个知识点',
               style: const TextStyle(fontSize: 11, color: StudyPalette.inkSoft),

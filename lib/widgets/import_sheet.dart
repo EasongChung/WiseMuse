@@ -21,9 +21,10 @@ class ImportSheet {
 
   /// 展示导入方式选择弹窗，返回用户选择；关闭返回 null。
   static Future<ImportAction?> show(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     return showModalBottomSheet<ImportAction>(
       context: context,
-      backgroundColor: StudyPalette.parchment,
+      backgroundColor: isDark ? StudyPalette.darkCard : StudyPalette.parchment,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(22)),
       ),
@@ -121,10 +122,10 @@ class _ImportOption extends StatelessWidget {
       ),
       title: Text(
         title,
-        style: const TextStyle(
+        style: TextStyle(
           fontSize: 15,
           fontWeight: FontWeight.w600,
-          color: StudyPalette.ink,
+          color: StudyPalette.onSurfaceResolved(context),
         ),
       ),
       subtitle: Text(
