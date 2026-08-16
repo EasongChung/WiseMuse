@@ -136,7 +136,7 @@ class _SettingsPageState extends State<SettingsPage> {
     _providers = await _settings.getProviders();
     _activeProviderId =
         (await _settings.getActiveProviderId()) ?? 'siliconflow';
-    _syncActiveProviderToFields();
+    await _syncActiveProviderToFields();
 
     // 扫描本地 GGUF 模型
     _localModels = await _scanLocalModels();
@@ -172,10 +172,21 @@ class _SettingsPageState extends State<SettingsPage> {
     );
   }
 
-  void _syncActiveProviderToFields() {
+  Future<void> _syncActiveProviderToFields() async {
     final p = _activeProvider;
     _baseUrlCtrl.text = p.baseUrl;
     _apiKeyCtrl.text = p.apiKey;
+    if (p.models.isNotEmpty) {
+      _customModelCtrl.text = p.models.first;
+    }
+    // 同步写入活跃 API 设置
+    if (p.baseUrl.isNotEmpty) {
+      await _settings.setApiBaseUrl(p.baseUrl);
+    }
+    await _settings.setApiKey(p.apiKey);
+    if (p.models.isNotEmpty) {
+      await _settings.setApiModel(p.models.first);
+    }
   }
 
   Future<void> _saveEngine(String v) async {
@@ -949,7 +960,7 @@ class _SettingsPageState extends State<SettingsPage> {
                       if (id == null) return;
                       setState(() => _activeProviderId = id);
                       await _settings.setActiveProviderId(id);
-                      _syncActiveProviderToFields();
+                      await _syncActiveProviderToFields();
                     },
                   ),
                 ),
@@ -1510,8 +1521,16 @@ class _SettingsPageState extends State<SettingsPage> {
   // ===== 8. 本地大模型管理（合入 AI 离线优先 + 模型弹窗选择与删除） =====
 
   static const _presetModels = [
-    ('Qwen3-0.6B Q4_K_M', 'qwen3-0.6b-instruct-q4_k_m.gguf'),
-    ('MiniCPM5-1B Q4_K_M', 'minicpm5-1b-q4_k_m.gguf'),
+    (
+      'Qwen3-0.6B Q8_0',
+      'Qwen3-0.6B-Q8_0.gguf',
+      'https://modelscope.cn/models/Qwen/Qwen3-0.6B-GGUF/resolve/master/Qwen3-0.6B-Q8_0.gguf',
+    ),
+    (
+      'MiniCPM5-1B Q4_K_M',
+      'MiniCPM5-1B-Q4_K_M.gguf',
+      'https://modelscope.cn/models/OpenBMB/MiniCPM5-1B-GGUF/resolve/master/MiniCPM5-1B-Q4_K_M.gguf',
+    ),
   ];
 
   Widget _buildLocalModelManager() {
@@ -1609,11 +1628,11 @@ class _SettingsPageState extends State<SettingsPage> {
 
             // 预设模型下载
             const Text(
-              '在线下载预设模型（魔塔镜像）',
+              '在线下载预设模型（魔塔社区）',
               style: TextStyle(fontSize: 12, color: StudyPalette.inkSoft),
             ),
             const SizedBox(height: 4),
-            for (final (name, filename) in _presetModels) ...[
+            for (final (name, filename, url) in _presetModels) ...[
               Padding(
                 padding: const EdgeInsets.symmetric(vertical: 2),
                 child: Row(
@@ -1634,7 +1653,8 @@ class _SettingsPageState extends State<SettingsPage> {
                           padding: const EdgeInsets.symmetric(horizontal: 10),
                           textStyle: const TextStyle(fontSize: 11),
                         ),
-                        onPressed: () => _downloadPresetModel(filename, name),
+                        onPressed:
+                            () => _downloadPresetModel(filename, name, url),
                         child: const Text('下载'),
                       ),
                     ),
@@ -1870,16 +1890,18 @@ class _SettingsPageState extends State<SettingsPage> {
     await File(savePath).writeAsBytes(resp.bodyBytes, flush: true);
   }
 
-  Future<void> _downloadPresetModel(String filename, String label) async {
+  Future<void> _downloadPresetModel(
+    String filename,
+    String label,
+    String downloadUrl,
+  ) async {
     ScaffoldMessenger.of(
       context,
     ).showSnackBar(SnackBar(content: Text('开始下载 $label…')));
     try {
-      final url =
-          'https://modelscope.cn/models/qwen/Qwen3-0.6B-GGUF/resolve/master/$filename';
       final dir = await ModelStore.llmModelsDir();
       final savePath = '${dir.path}/$filename';
-      await _downloadFile(url, savePath);
+      await _downloadFile(downloadUrl, savePath);
       if (mounted) {
         _localModels = await _scanLocalModels();
         if (!mounted) return;
@@ -1938,7 +1960,7 @@ class _SettingsPageState extends State<SettingsPage> {
       final dir = await ModelStore.modelsDir();
       if (!await dir.exists()) return const [];
       final files = <_GgufModelInfo>[];
-      await for (final entity in dir.list()) {
+      await for (final entity in dir.list(recursive: true)) {
         if (entity is! File) continue;
         if (!entity.path.toLowerCase().endsWith('.gguf')) continue;
         final stat = await entity.stat();

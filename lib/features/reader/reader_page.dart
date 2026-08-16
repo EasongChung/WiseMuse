@@ -1218,9 +1218,10 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
 
   /// [v0.1.35] 提取的对话框渲染逻辑，被 _showPageKnowledge 与 LRU 缓存共用。
   void _showKnowledgeSheet(int page, List<KnowledgePoint> points) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     showModalBottomSheet(
       context: context,
-      backgroundColor: StudyPalette.parchment,
+      backgroundColor: isDark ? StudyPalette.darkCard : StudyPalette.parchment,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(18)),
       ),
@@ -1237,7 +1238,8 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
                     height: 4,
                     margin: const EdgeInsets.only(bottom: 12),
                     decoration: BoxDecoration(
-                      color: StudyPalette.linen,
+                      color:
+                          isDark ? StudyPalette.darkBorder : StudyPalette.linen,
                       borderRadius: BorderRadius.circular(2),
                     ),
                   ),
@@ -1245,9 +1247,14 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
                 Text('第 ${page + 1} 页知识点', style: titleStyle(fontSize: 16)),
                 const SizedBox(height: 12),
                 if (points.isEmpty)
-                  const Text(
+                  Text(
                     '本页暂无知识点',
-                    style: TextStyle(color: StudyPalette.inkSoft),
+                    style: TextStyle(
+                      color:
+                          isDark
+                              ? StudyPalette.darkInkSoft
+                              : StudyPalette.inkSoft,
+                    ),
                   ),
                 ...points.map(
                   (p) => ListTile(
@@ -1263,8 +1270,24 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
                       size: 20,
                       color: StudyPalette.ember,
                     ),
-                    title: Text(p.text),
-                    subtitle: p.definition != null ? Text(p.definition!) : null,
+                    title: Text(
+                      p.text,
+                      style: TextStyle(
+                        color: StudyPalette.onSurfaceResolved(context),
+                      ),
+                    ),
+                    subtitle:
+                        p.definition != null
+                            ? Text(
+                              p.definition!,
+                              style: TextStyle(
+                                color:
+                                    isDark
+                                        ? StudyPalette.darkInkSoft
+                                        : StudyPalette.inkSoft,
+                              ),
+                            )
+                            : null,
                     onTap: () => KnowledgeDetailSheet.show(context, p),
                   ),
                 ),
@@ -1281,10 +1304,11 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
   Future<void> _showTextSheet() async {
     _sheetRebuild = null;
     if (_sheetScrollController.hasClients) _sheetScrollController.jumpTo(0);
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     await showModalBottomSheet(
       context: context,
       isScrollControlled: true,
-      backgroundColor: StudyPalette.parchment,
+      backgroundColor: isDark ? StudyPalette.darkCard : StudyPalette.parchment,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(18)),
       ),
@@ -1313,7 +1337,10 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
                           width: 40,
                           height: 4,
                           decoration: BoxDecoration(
-                            color: StudyPalette.linen,
+                            color:
+                                isDark
+                                    ? StudyPalette.darkBorder
+                                    : StudyPalette.linen,
                             borderRadius: BorderRadius.circular(2),
                           ),
                         ),
@@ -1324,10 +1351,10 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
                       padding: const EdgeInsets.fromLTRB(12, 0, 8, 0),
                       child: Row(
                         children: [
-                          const Icon(
+                          Icon(
                             Icons.text_fields,
                             size: 16,
-                            color: StudyPalette.ink,
+                            color: StudyPalette.onSurfaceResolved(context),
                           ),
                           const SizedBox(width: 6),
                           Text(
@@ -1345,16 +1372,22 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
                               minimumSize: const Size(0, 0),
                               tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                             ),
-                            icon: const Icon(
+                            icon: Icon(
                               Icons.close,
                               size: 16,
-                              color: StudyPalette.inkSoft,
+                              color:
+                                  isDark
+                                      ? StudyPalette.darkInkSoft
+                                      : StudyPalette.inkSoft,
                             ),
-                            label: const Text(
+                            label: Text(
                               '关闭',
                               style: TextStyle(
                                 fontSize: 12,
-                                color: StudyPalette.inkSoft,
+                                color:
+                                    isDark
+                                        ? StudyPalette.darkInkSoft
+                                        : StudyPalette.inkSoft,
                               ),
                             ),
                             onPressed: () {
@@ -1414,10 +1447,10 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
             onPressed: total > 1 ? _showPageSelector : null,
             child: Text(
               '${_pdfCurrentPage + 1} / $total',
-              style: const TextStyle(
+              style: TextStyle(
                 fontSize: 13,
                 fontWeight: FontWeight.w600,
-                color: StudyPalette.ink,
+                color: StudyPalette.onSurfaceResolved(context),
               ),
             ),
           ),
@@ -1452,10 +1485,11 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
   void _showPageSelector() {
     final pages = _pageTexts;
     if (pages.length <= 1) return;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     showModalBottomSheet(
       context: context,
       isScrollControlled: false,
-      backgroundColor: StudyPalette.parchment,
+      backgroundColor: isDark ? StudyPalette.darkCard : StudyPalette.parchment,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(18)),
       ),
@@ -1470,7 +1504,8 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
                     height: 4,
                     margin: const EdgeInsets.only(top: 12, bottom: 8),
                     decoration: BoxDecoration(
-                      color: StudyPalette.linen,
+                      color:
+                          isDark ? StudyPalette.darkBorder : StudyPalette.linen,
                       borderRadius: BorderRadius.circular(2),
                     ),
                   ),
@@ -1485,8 +1520,24 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
                       Text('选择页码', style: titleStyle(fontSize: 16)),
                       const Spacer(),
                       TextButton.icon(
-                        icon: const Icon(Icons.close, size: 16),
-                        label: const Text('关闭', style: TextStyle(fontSize: 12)),
+                        icon: Icon(
+                          Icons.close,
+                          size: 16,
+                          color:
+                              isDark
+                                  ? StudyPalette.darkInkSoft
+                                  : StudyPalette.inkSoft,
+                        ),
+                        label: Text(
+                          '关闭',
+                          style: TextStyle(
+                            fontSize: 12,
+                            color:
+                                isDark
+                                    ? StudyPalette.darkInkSoft
+                                    : StudyPalette.inkSoft,
+                          ),
+                        ),
                         onPressed: () => Navigator.of(context).pop(),
                       ),
                     ],
@@ -1524,7 +1575,11 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
                               '${i + 1}',
                               style: TextStyle(
                                 color:
-                                    selected ? Colors.white : StudyPalette.ink,
+                                    selected
+                                        ? Colors.white
+                                        : StudyPalette.onSurfaceResolved(
+                                          context,
+                                        ),
                                 fontSize: 18,
                                 fontWeight: FontWeight.w600,
                               ),
@@ -1714,7 +1769,7 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
     );
   }
 
-  /// [v0.1.35] 浮底句操作栏：6 按钮均匀栅格（连读/停止、跟读、翻译、生词、讲解、问AI）。
+  /// [v0.1.35] 浮底句操作栏：多页文件融合全宽页码导航条与 6 按钮操作栏，一同唤出与关闭。
   Widget _buildSentenceActionsBar() {
     final text = _activeSentenceText ?? '';
     final isPlaying = _continuousPlaying || _ttsSpeaking;
@@ -1724,75 +1779,89 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
       borderRadius: BorderRadius.circular(14),
       color: isDark ? StudyPalette.darkCard : StudyPalette.parchment,
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
-        child: Row(
+        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
           children: [
-            // 1. 连读/停止
-            _sentenceActionButton(
-              icon:
-                  isPlaying
-                      ? Icons.stop_circle_outlined
-                      : Icons.play_circle_outline,
-              label: isPlaying ? '停止' : '连读',
-              color: isPlaying ? StudyPalette.inkSoft : StudyPalette.ember,
-              onTap: () {
-                if (isPlaying) {
-                  _stopAutoPlay();
-                } else {
-                  final idx = _activeSentenceIndex ?? 0;
-                  _startContinuousPlayFrom(idx);
-                }
-              },
-            ),
-            // 2. 跟读
-            _sentenceActionButton(
-              icon: Icons.record_voice_over_outlined,
-              label: '跟读',
-              color: StudyPalette.ember,
-              onTap: () {
-                setState(() => _activeSentenceText = null);
-                _openFollow(text);
-              },
-            ),
-            // 3. 翻译
-            _sentenceActionButton(
-              icon: Icons.translate,
-              label: '翻译',
-              color: isDark ? StudyPalette.darkInkSoft : StudyPalette.inkSoft,
-              onTap: () {
-                setState(() => _activeSentenceText = null);
-                _translate(text);
-              },
-            ),
-            // 4. 生词
-            _sentenceActionButton(
-              icon: Icons.bookmark_add_outlined,
-              label: '生词',
-              color: isDark ? StudyPalette.darkInkSoft : StudyPalette.inkSoft,
-              onTap: () {
-                _markWord(text);
-                setState(() => _activeSentenceText = null);
-              },
-            ),
-            // 5. 讲解
-            _sentenceActionButton(
-              icon: Icons.auto_awesome,
-              label: '讲解',
-              color: StudyPalette.moss,
-              onTap: () {
-                setState(() => _activeSentenceText = null);
-                KnowledgeExplainSheet.show(context, text);
-              },
-            ),
-            // 6. 问AI
-            _sentenceActionButton(
-              icon: Icons.psychology,
-              label: '问AI',
-              color: StudyPalette.spinePdf,
-              onTap: () {
-                setState(() => _activeSentenceText = null);
-                _askRag(widget.book.id, text);
-              },
+            if (_isMultiPage) ...[
+              _buildSheetPageNav(),
+              Divider(
+                height: 4,
+                color: isDark ? StudyPalette.darkBorder : StudyPalette.linen,
+              ),
+            ],
+            Row(
+              children: [
+                // 1. 连读/停止
+                _sentenceActionButton(
+                  icon:
+                      isPlaying
+                          ? Icons.stop_circle_outlined
+                          : Icons.play_circle_outline,
+                  label: isPlaying ? '停止' : '连读',
+                  color: isPlaying ? StudyPalette.inkSoft : StudyPalette.ember,
+                  onTap: () {
+                    if (isPlaying) {
+                      _stopAutoPlay();
+                    } else {
+                      final idx = _activeSentenceIndex ?? 0;
+                      _startContinuousPlayFrom(idx);
+                    }
+                  },
+                ),
+                // 2. 跟读
+                _sentenceActionButton(
+                  icon: Icons.record_voice_over_outlined,
+                  label: '跟读',
+                  color: StudyPalette.ember,
+                  onTap: () {
+                    setState(() => _activeSentenceText = null);
+                    _openFollow(text);
+                  },
+                ),
+                // 3. 翻译
+                _sentenceActionButton(
+                  icon: Icons.translate,
+                  label: '翻译',
+                  color:
+                      isDark ? StudyPalette.darkInkSoft : StudyPalette.inkSoft,
+                  onTap: () {
+                    setState(() => _activeSentenceText = null);
+                    _translate(text);
+                  },
+                ),
+                // 4. 生词
+                _sentenceActionButton(
+                  icon: Icons.bookmark_add_outlined,
+                  label: '生词',
+                  color:
+                      isDark ? StudyPalette.darkInkSoft : StudyPalette.inkSoft,
+                  onTap: () {
+                    _markWord(text);
+                    setState(() => _activeSentenceText = null);
+                  },
+                ),
+                // 5. 讲解
+                _sentenceActionButton(
+                  icon: Icons.auto_awesome,
+                  label: '讲解',
+                  color: StudyPalette.moss,
+                  onTap: () {
+                    setState(() => _activeSentenceText = null);
+                    KnowledgeExplainSheet.show(context, text);
+                  },
+                ),
+                // 6. 问AI
+                _sentenceActionButton(
+                  icon: Icons.psychology,
+                  label: '问AI',
+                  color: StudyPalette.spinePdf,
+                  onTap: () {
+                    setState(() => _activeSentenceText = null);
+                    _askRag(widget.book.id, text);
+                  },
+                ),
+              ],
             ),
           ],
         ),
@@ -1822,10 +1891,11 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
 
   /// [v0.1.37] RAG 问答弹窗：输入问题 → AI 回答。
   void _showRagQaSheet(String bookId, String sentenceText) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
-      backgroundColor: StudyPalette.parchment,
+      backgroundColor: isDark ? StudyPalette.darkCard : StudyPalette.parchment,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(18)),
       ),
@@ -1861,9 +1931,10 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
 
     if (!mounted) return;
 
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     showModalBottomSheet(
       context: context,
-      backgroundColor: StudyPalette.parchment,
+      backgroundColor: isDark ? StudyPalette.darkCard : StudyPalette.parchment,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(18)),
       ),
@@ -1880,10 +1951,10 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
                     Expanded(
                       child: Text(
                         trimmed,
-                        style: const TextStyle(
+                        style: TextStyle(
                           fontSize: 22,
                           fontWeight: FontWeight.w700,
-                          color: StudyPalette.ink,
+                          color: StudyPalette.onSurfaceResolved(context),
                         ),
                       ),
                     ),
@@ -1920,9 +1991,15 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
                     ),
                   )
                 else
-                  const Text(
+                  Text(
                     '暂无释义结果',
-                    style: TextStyle(fontSize: 16, color: StudyPalette.inkSoft),
+                    style: TextStyle(
+                      fontSize: 16,
+                      color:
+                          isDark
+                              ? StudyPalette.darkInkSoft
+                              : StudyPalette.inkSoft,
+                    ),
                   ),
                 const SizedBox(height: 16),
                 // 加入生词本
@@ -1969,10 +2046,11 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
     _activeSentenceText = null;
 
     if (!mounted) return;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
-      backgroundColor: StudyPalette.parchment,
+      backgroundColor: isDark ? StudyPalette.darkCard : StudyPalette.parchment,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(18)),
       ),
@@ -2302,9 +2380,9 @@ class _RagQaSheetContentState extends State<_RagQaSheetContent> {
       spans.add(
         TextSpan(
           text: match.group(1),
-          style: const TextStyle(
+          style: TextStyle(
             fontWeight: FontWeight.bold,
-            color: StudyPalette.ink,
+            color: StudyPalette.onSurfaceResolved(context),
           ),
         ),
       );
@@ -2316,9 +2394,9 @@ class _RagQaSheetContentState extends State<_RagQaSheetContent> {
     return Text.rich(
       TextSpan(
         children: spans,
-        style: const TextStyle(
+        style: TextStyle(
           fontSize: 15,
-          color: StudyPalette.ink,
+          color: StudyPalette.onSurfaceResolved(context),
           height: 1.6,
         ),
       ),

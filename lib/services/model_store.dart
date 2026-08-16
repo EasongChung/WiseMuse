@@ -183,7 +183,7 @@ class ModelStore {
     return File(path).existsSync() && File(path).lengthSync() > 0;
   }
 
-  /// 从外部 .gguf 文件导入 LLM 模型（流式复制到私有目录，避免整包读入内存）。
+  /// 从外部 .gguf 文件导入 LLM 模型（流式复制到私有目录，保留原文件名，避免整包读入内存）。
   ///
   /// GGUF 模型 ~500MB，绝不能 `readAsBytes`（与 zip 解压 OOM 教训同源）——
   /// 用 `openWrite` 逐块写入，内存占用恒定。
@@ -196,9 +196,11 @@ class ModelStore {
     final srcSize = await src.length();
     AppLog.d(_tag, '源文件大小: ${_mb(srcSize)}');
 
-    final destPath = await llmGgufPath();
+    final dir = await llmModelsDir();
+    final fileName = p.basename(srcPath);
+    final destPath = p.join(dir.path, fileName);
     final dest = File(destPath);
-    // 已有模型先清理，避免新旧混杂
+    // 已有同名模型先清理，避免新旧混杂
     if (await dest.exists()) {
       AppLog.d(_tag, '清理旧模型: $destPath');
       await dest.delete();
@@ -220,7 +222,7 @@ class ModelStore {
     if (destSize == 0) {
       throw Exception('GGUF 复制后为空文件');
     }
-    AppLog.d(_tag, '=== GGUF 导入完成: $destPath ($_mb(destSize)) ===');
+    AppLog.d(_tag, '=== GGUF 导入完成: $destPath (${_mb(destSize)}) ===');
     return destPath;
   }
 
