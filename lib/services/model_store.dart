@@ -186,8 +186,11 @@ class ModelStore {
   /// 从外部 .gguf 文件导入 LLM 模型（流式复制到私有目录，保留原文件名，避免整包读入内存）。
   ///
   /// GGUF 模型 ~500MB，绝不能 `readAsBytes`（与 zip 解压 OOM 教训同源）——
-  /// 用 `openWrite` 逐块写入，内存占用恒定。
-  static Future<String> importGguf(String srcPath) async {
+  /// 用 `openWrite` 逐块写入，支持 [onProgress] 进度回调，内存占用恒定。
+  static Future<String> importGguf(
+    String srcPath, {
+    void Function(double progress, int copiedBytes, int totalBytes)? onProgress,
+  }) async {
     AppLog.d(_tag, '=== 开始导入 GGUF: $srcPath ===');
     final src = File(srcPath);
     if (!await src.exists()) {
@@ -207,10 +210,16 @@ class ModelStore {
     }
 
     AppLog.d(_tag, '流式复制 → $destPath');
-    // 流式复制：OpenRead → chunk → addStream（内存恒定）
     final out = dest.openWrite();
+    var copiedBytes = 0;
     try {
-      await out.addStream(src.openRead());
+      await for (final chunk in src.openRead()) {
+        out.add(chunk);
+        copiedBytes += chunk.length;
+        if (srcSize > 0) {
+          onProgress?.call(copiedBytes / srcSize, copiedBytes, srcSize);
+        }
+      }
       await out.flush();
     } catch (e) {
       AppLog.e(_tag, '复制失败: $e');

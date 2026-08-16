@@ -91,8 +91,6 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
   VoidCallback? _sheetRebuild;
   final ScrollController _sheetScrollController = ScrollController();
 
-  // 自动连读状态
-  bool _autoPlaying = false;
   // [v0.1.39] 连续朗读激活状态：从当前句子开始连续朗读本页剩余句子，
   // 激活状态下点击其他句子会打断并从新句子继续连读；点击停止则重置为单句模式。
   bool _continuousPlaying = false;
@@ -203,14 +201,6 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
   }
 
   // ===== [v0.1.28] 原文/文本分页同步 =====
-
-  /// 当前页文本（多页文档取 _pdfCurrentPage 对应页）。
-  String get _displayText {
-    final pages = _pageTexts;
-    if (pages.isEmpty) return _sentences.map((s) => s.text).join('\n');
-    final i = _pdfCurrentPage.clamp(0, pages.length - 1);
-    return pages[i];
-  }
 
   /// 当前文档的分页文本列表（多页模式用）。
   List<String> get _pageTexts {
@@ -839,9 +829,23 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
       floatingBar = const SizedBox.shrink();
     }
 
+    // 顶部独立页码弹窗条（多页文件与操作栏一同唤出/关闭）
+    Widget topPageBar;
+    if (_isMultiPage &&
+        _activeSentenceText != null &&
+        _activeSentenceText!.isNotEmpty) {
+      topPageBar = _buildTopPageBar();
+    } else {
+      topPageBar = const SizedBox.shrink();
+    }
+
     return Stack(
       children: [
         content,
+        if (_isMultiPage &&
+            _activeSentenceText != null &&
+            _activeSentenceText!.isNotEmpty)
+          Positioned(top: 8, left: 16, right: 16, child: topPageBar),
         Positioned(left: 8, right: 8, bottom: 8, child: floatingBar),
       ],
     );
@@ -1118,7 +1122,6 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
   /// 从指定句子索引开始连续朗读本页剩余句子。
   Future<void> _startContinuousPlayFrom(int startIndex) async {
     _continuousPlaying = true;
-    _autoPlaying = true;
     final request = ++_speechRequest;
     _speakingStartedAt = request;
     if (mounted) setState(() {});
@@ -1161,21 +1164,14 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
         if (mounted) {
           setState(() {
             _continuousPlaying = false;
-            _autoPlaying = false;
           });
         }
       }
     }
   }
 
-  Future<void> _startAutoPlay() async {
-    if (_autoPlaying || _continuousPlaying) return;
-    await _startContinuousPlayFrom(0);
-  }
-
   void _stopAutoPlay() {
     _continuousPlaying = false;
-    _autoPlaying = false;
     _speechRequest++;
     _speakingStartedAt = 0;
     unawaited(_tts.stop());
@@ -1420,7 +1416,72 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
     });
   }
 
-  /// 文本面板内页导航栏（统一：翻页 + 连读 + 翻译 + 页码选择器）。
+  /// [v0.1.35] 顶部独立页码控制栏（多页文件显示，仅包含 上一页 / 页码选择 / 下一页，无朗读与翻译按键）。
+  Widget _buildTopPageBar() {
+    final total = _pageTexts.length;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    return Material(
+      elevation: 4,
+      borderRadius: BorderRadius.circular(14),
+      color: isDark ? StudyPalette.darkCard : StudyPalette.parchment,
+      child: Container(
+        height: 38,
+        padding: const EdgeInsets.symmetric(horizontal: 8),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(
+            color: isDark ? StudyPalette.darkBorder : StudyPalette.linen,
+          ),
+        ),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            // 上一页
+            _compactIcon(
+              Icons.chevron_left,
+              '上一页',
+              _pdfCurrentPage > 0 && total > 1
+                  ? () => _syncPage(_pdfCurrentPage - 1)
+                  : null,
+            ),
+            const SizedBox(width: 8),
+            // 页码文字（点击弹出全宽选择器）
+            TextButton(
+              style: TextButton.styleFrom(
+                visualDensity: VisualDensity.compact,
+                minimumSize: const Size(0, 0),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 10,
+                  vertical: 4,
+                ),
+                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              ),
+              onPressed: total > 1 ? _showPageSelector : null,
+              child: Text(
+                '第 ${_pdfCurrentPage + 1} / $total 页',
+                style: TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                  color: StudyPalette.onSurfaceResolved(context),
+                ),
+              ),
+            ),
+            const SizedBox(width: 8),
+            // 下一页
+            _compactIcon(
+              Icons.chevron_right,
+              '下一页',
+              _pdfCurrentPage < total - 1 && total > 1
+                  ? () => _syncPage(_pdfCurrentPage + 1)
+                  : null,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// 文本面板内页导航栏（统一：仅包含翻页与页码选择器）。
   Widget _buildSheetPageNav() {
     final total = _pageTexts.length;
     return Padding(
@@ -1441,7 +1502,7 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
             style: TextButton.styleFrom(
               visualDensity: VisualDensity.compact,
               minimumSize: const Size(0, 0),
-              padding: const EdgeInsets.symmetric(horizontal: 2),
+              padding: const EdgeInsets.symmetric(horizontal: 8),
               tapTargetSize: MaterialTapTargetSize.shrinkWrap,
             ),
             onPressed: total > 1 ? _showPageSelector : null,
@@ -1461,20 +1522,6 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
             _pdfCurrentPage < total - 1 && total > 1
                 ? () => _syncPage(_pdfCurrentPage + 1)
                 : null,
-          ),
-          // [v0.1.38] 连读/停止（替代 AppBar 中的全屏连读按钮）
-          if (_isMultiPage)
-            _compactIcon(
-              _autoPlaying
-                  ? Icons.stop_circle_outlined
-                  : Icons.play_circle_outline,
-              _autoPlaying ? '停止连读' : '连读本页',
-              _autoPlaying ? _stopAutoPlay : _startAutoPlay,
-            ),
-          _compactIcon(
-            Icons.translate,
-            '翻译当前页',
-            () => _translate(_displayText),
           ),
         ],
       ),
@@ -1769,7 +1816,7 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
     );
   }
 
-  /// [v0.1.35] 浮底句操作栏：多页文件融合全宽页码导航条与 6 按钮操作栏，一同唤出与关闭。
+  /// [v0.1.35] 浮底句操作栏：6 按钮均匀栅格（连读/停止、跟读、翻译、生词、讲解、问AI）。
   Widget _buildSentenceActionsBar() {
     final text = _activeSentenceText ?? '';
     final isPlaying = _continuousPlaying || _ttsSpeaking;
@@ -1779,89 +1826,75 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
       borderRadius: BorderRadius.circular(14),
       color: isDark ? StudyPalette.darkCard : StudyPalette.parchment,
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
+        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
+        child: Row(
           children: [
-            if (_isMultiPage) ...[
-              _buildSheetPageNav(),
-              Divider(
-                height: 4,
-                color: isDark ? StudyPalette.darkBorder : StudyPalette.linen,
-              ),
-            ],
-            Row(
-              children: [
-                // 1. 连读/停止
-                _sentenceActionButton(
-                  icon:
-                      isPlaying
-                          ? Icons.stop_circle_outlined
-                          : Icons.play_circle_outline,
-                  label: isPlaying ? '停止' : '连读',
-                  color: isPlaying ? StudyPalette.inkSoft : StudyPalette.ember,
-                  onTap: () {
-                    if (isPlaying) {
-                      _stopAutoPlay();
-                    } else {
-                      final idx = _activeSentenceIndex ?? 0;
-                      _startContinuousPlayFrom(idx);
-                    }
-                  },
-                ),
-                // 2. 跟读
-                _sentenceActionButton(
-                  icon: Icons.record_voice_over_outlined,
-                  label: '跟读',
-                  color: StudyPalette.ember,
-                  onTap: () {
-                    setState(() => _activeSentenceText = null);
-                    _openFollow(text);
-                  },
-                ),
-                // 3. 翻译
-                _sentenceActionButton(
-                  icon: Icons.translate,
-                  label: '翻译',
-                  color:
-                      isDark ? StudyPalette.darkInkSoft : StudyPalette.inkSoft,
-                  onTap: () {
-                    setState(() => _activeSentenceText = null);
-                    _translate(text);
-                  },
-                ),
-                // 4. 生词
-                _sentenceActionButton(
-                  icon: Icons.bookmark_add_outlined,
-                  label: '生词',
-                  color:
-                      isDark ? StudyPalette.darkInkSoft : StudyPalette.inkSoft,
-                  onTap: () {
-                    _markWord(text);
-                    setState(() => _activeSentenceText = null);
-                  },
-                ),
-                // 5. 讲解
-                _sentenceActionButton(
-                  icon: Icons.auto_awesome,
-                  label: '讲解',
-                  color: StudyPalette.moss,
-                  onTap: () {
-                    setState(() => _activeSentenceText = null);
-                    KnowledgeExplainSheet.show(context, text);
-                  },
-                ),
-                // 6. 问AI
-                _sentenceActionButton(
-                  icon: Icons.psychology,
-                  label: '问AI',
-                  color: StudyPalette.spinePdf,
-                  onTap: () {
-                    setState(() => _activeSentenceText = null);
-                    _askRag(widget.book.id, text);
-                  },
-                ),
-              ],
+            // 1. 连读/停止
+            _sentenceActionButton(
+              icon:
+                  isPlaying
+                      ? Icons.stop_circle_outlined
+                      : Icons.play_circle_outline,
+              label: isPlaying ? '停止' : '连读',
+              color: isPlaying ? StudyPalette.inkSoft : StudyPalette.ember,
+              onTap: () {
+                if (isPlaying) {
+                  _stopAutoPlay();
+                } else {
+                  final idx = _activeSentenceIndex ?? 0;
+                  _startContinuousPlayFrom(idx);
+                }
+              },
+            ),
+            // 2. 跟读
+            _sentenceActionButton(
+              icon: Icons.record_voice_over_outlined,
+              label: '跟读',
+              color: StudyPalette.ember,
+              onTap: () {
+                setState(() => _activeSentenceText = null);
+                _openFollow(text);
+              },
+            ),
+            // 3. 翻译
+            _sentenceActionButton(
+              icon: Icons.translate,
+              label: '翻译',
+              color: isDark ? StudyPalette.darkInkSoft : StudyPalette.inkSoft,
+              onTap: () {
+                setState(() => _activeSentenceText = null);
+                _translate(text);
+              },
+            ),
+            // 4. 生词
+            _sentenceActionButton(
+              icon: Icons.bookmark_add_outlined,
+              label: '生词',
+              color: isDark ? StudyPalette.darkInkSoft : StudyPalette.inkSoft,
+              onTap: () {
+                _markWord(text);
+                setState(() => _activeSentenceText = null);
+              },
+            ),
+            // 5. 讲解
+            _sentenceActionButton(
+              icon: Icons.auto_awesome,
+              label: '讲解',
+              color: StudyPalette.moss,
+              onTap: () {
+                setState(() => _activeSentenceText = null);
+                KnowledgeExplainSheet.show(context, text);
+              },
+            ),
+            // 6. 问AI
+            _sentenceActionButton(
+              icon: Icons.psychology,
+              label: '问AI',
+              color: StudyPalette.spinePdf,
+              onTap: () {
+                setState(() => _activeSentenceText = null);
+                _askRag(widget.book.id, text);
+              },
             ),
           ],
         ),

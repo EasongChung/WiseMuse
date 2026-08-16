@@ -16,6 +16,7 @@ import '../../core/theme/app_theme.dart';
 import '../../services/mlkit_translation_service.dart';
 import '../../services/model_store.dart';
 import '../../services/native_tts_service.dart';
+import '../../services/openai_client.dart';
 import '../../services/rag/embedding_service.dart';
 import '../../services/rag/rag_retrieval_service.dart';
 import '../../services/vosk_asr_service.dart';
@@ -1019,6 +1020,7 @@ class _SettingsPageState extends State<SettingsPage> {
                                 modelList.contains(current.models.firstOrNull)
                                     ? current.models.firstOrNull
                                     : null,
+                            isExpanded: true,
                             decoration: const InputDecoration(
                               labelText: 'LLM 对话模型',
                               isDense: true,
@@ -1027,10 +1029,12 @@ class _SettingsPageState extends State<SettingsPage> {
                                 modelList.map((m) {
                                   return DropdownMenuItem(
                                     value: m,
-                                    child: Text(
-                                      m,
-                                      style: const TextStyle(fontSize: 12),
-                                      overflow: TextOverflow.ellipsis,
+                                    child: SingleChildScrollView(
+                                      scrollDirection: Axis.horizontal,
+                                      child: Text(
+                                        m,
+                                        style: const TextStyle(fontSize: 12),
+                                      ),
                                     ),
                                   );
                                 }).toList(),
@@ -1052,18 +1056,16 @@ class _SettingsPageState extends State<SettingsPage> {
                 ),
                 const SizedBox(width: 8),
                 SizedBox(
-                  height: 36,
-                  child: FilledButton.tonalIcon(
+                  height: 38,
+                  child: FilledButton.tonal(
+                    style: FilledButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(horizontal: 10),
+                    ),
                     onPressed: _fetchingModels ? null : _fetchModelsFromApi,
-                    icon:
-                        _fetchingModels
-                            ? const SizedBox(
-                              width: 14,
-                              height: 14,
-                              child: CircularProgressIndicator(strokeWidth: 2),
-                            )
-                            : const Icon(Icons.sync, size: 16),
-                    label: const Text('获取模型', style: TextStyle(fontSize: 12)),
+                    child: Text(
+                      _fetchingModels ? '获取中…' : '获取模型',
+                      style: const TextStyle(fontSize: 12),
+                    ),
                   ),
                 ),
               ],
@@ -1085,6 +1087,16 @@ class _SettingsPageState extends State<SettingsPage> {
                   onPressed: _showAddCustomModelDialog,
                 ),
               ],
+            ),
+            const SizedBox(height: 10),
+            // 测试 LLM 连接按钮
+            SizedBox(
+              width: double.infinity,
+              child: OutlinedButton.icon(
+                icon: const Icon(Icons.smart_toy_outlined, size: 16),
+                label: const Text('测试 LLM 连接'),
+                onPressed: _testLlmConnection,
+              ),
             ),
           ],
         ),
@@ -1268,7 +1280,52 @@ class _SettingsPageState extends State<SettingsPage> {
       });
       await _settings.setProviders(list);
       await _settings.setActiveProviderId(list.first.id);
-      _syncActiveProviderToFields();
+      await _syncActiveProviderToFields();
+    }
+  }
+
+  Future<void> _testLlmConnection() async {
+    final configured = await _settings.isApiConfigured();
+    if (!configured) {
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('⚠️ 请先配置云端 API 地址、密钥与模型')));
+      }
+      return;
+    }
+    if (mounted) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('正在测试 LLM 对话连接…')));
+    }
+    try {
+      final client = OpenAiClient();
+      final url = await _settings.getApiBaseUrl() ?? '';
+      final key = await _settings.getApiKey() ?? '';
+      final model = await _settings.getApiModel() ?? '';
+      final answer = await client.chat(
+        user: '你好，请用简短一句话回复“连接成功”。',
+        baseUrl: url,
+        apiKey: key,
+        model: model,
+      );
+      if (!mounted) return;
+      if (answer != null && answer.isNotEmpty) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('✅ LLM 连接正常：$answer')));
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('❌ LLM 测试失败，返回内容为空，请检查模型名称或配置')),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('❌ LLM 连接失败: $e')));
+      }
     }
   }
 
@@ -1522,12 +1579,12 @@ class _SettingsPageState extends State<SettingsPage> {
 
   static const _presetModels = [
     (
-      'Qwen3-0.6B Q8_0',
+      'Qwen3-0.6B Q8_0 (~670MB)',
       'Qwen3-0.6B-Q8_0.gguf',
       'https://modelscope.cn/models/Qwen/Qwen3-0.6B-GGUF/resolve/master/Qwen3-0.6B-Q8_0.gguf',
     ),
     (
-      'MiniCPM5-1B Q4_K_M',
+      'MiniCPM5-1B Q4_K_M (~650MB)',
       'MiniCPM5-1B-Q4_K_M.gguf',
       'https://modelscope.cn/models/OpenBMB/MiniCPM5-1B-GGUF/resolve/master/MiniCPM5-1B-Q4_K_M.gguf',
     ),
@@ -1882,30 +1939,104 @@ class _SettingsPageState extends State<SettingsPage> {
     }
   }
 
-  static Future<void> _downloadFile(String url, String savePath) async {
-    final resp = await http.get(Uri.parse(url));
-    if (resp.statusCode != 200) {
-      throw Exception('下载失败: HTTP ${resp.statusCode}');
-    }
-    await File(savePath).writeAsBytes(resp.bodyBytes, flush: true);
-  }
-
   Future<void> _downloadPresetModel(
     String filename,
     String label,
     String downloadUrl,
   ) async {
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(SnackBar(content: Text('开始下载 $label…')));
+    double progress = 0.0;
+    int received = 0;
+    int total = 0;
+    String status = '正在连接魔塔社区…';
+    StateSetter? dialogSetState;
+
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder:
+          (ctx) => StatefulBuilder(
+            builder: (ctx, setDialogState) {
+              dialogSetState = setDialogState;
+              return AlertDialog(
+                title: Text('下载 $label'),
+                content: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    LinearProgressIndicator(
+                      value: progress > 0 ? progress : null,
+                    ),
+                    const SizedBox(height: 12),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Text(
+                          total > 0
+                              ? '${_formatSize(received)} / ${_formatSize(total)}'
+                              : _formatSize(received),
+                          style: const TextStyle(
+                            fontSize: 12,
+                            color: StudyPalette.inkSoft,
+                          ),
+                        ),
+                        Text(
+                          progress > 0
+                              ? '${(progress * 100).toStringAsFixed(1)}%'
+                              : '',
+                          style: const TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      status,
+                      style: const TextStyle(
+                        fontSize: 11,
+                        color: StudyPalette.inkSoft,
+                      ),
+                    ),
+                  ],
+                ),
+              );
+            },
+          ),
+    );
+
     try {
       final dir = await ModelStore.llmModelsDir();
       final savePath = '${dir.path}/$filename';
-      await _downloadFile(downloadUrl, savePath);
+      final request = http.Request('GET', Uri.parse(downloadUrl));
+      final client = http.Client();
+      final response = await client.send(request);
+      if (response.statusCode != 200) {
+        throw Exception('HTTP ${response.statusCode}');
+      }
+      total = response.contentLength ?? 0;
+      final file = File(savePath);
+      final sink = file.openWrite();
+
+      await for (final chunk in response.stream) {
+        sink.add(chunk);
+        received += chunk.length;
+        if (total > 0) {
+          progress = received / total;
+        }
+        dialogSetState?.call(() {
+          status = '正在下载模型数据…';
+        });
+      }
+
+      await sink.flush();
+      await sink.close();
+      client.close();
+
       if (mounted) {
+        Navigator.of(context, rootNavigator: true).pop();
         _localModels = await _scanLocalModels();
         if (!mounted) return;
-        // 自动设为生效模型
         setState(() => _defaultLocalModel = savePath);
         await _settings.setDefaultLocalModel(savePath);
         await _settings.setLocalModelPath(savePath);
@@ -1917,6 +2048,7 @@ class _SettingsPageState extends State<SettingsPage> {
       }
     } catch (e) {
       if (mounted) {
+        Navigator.of(context, rootNavigator: true).pop();
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(SnackBar(content: Text('下载失败: $e')));
@@ -1932,9 +2064,71 @@ class _SettingsPageState extends State<SettingsPage> {
     if (result == null || result.files.isEmpty || !mounted) return;
     final path = result.files.single.path;
     if (path == null) return;
+
+    double progress = 0.0;
+    int copied = 0;
+    int total = 0;
+    StateSetter? dialogSetState;
+
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder:
+          (ctx) => StatefulBuilder(
+            builder: (ctx, setDialogState) {
+              dialogSetState = setDialogState;
+              return AlertDialog(
+                title: const Text('正在导入 GGUF 模型'),
+                content: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    LinearProgressIndicator(
+                      value: progress > 0 ? progress : null,
+                    ),
+                    const SizedBox(height: 12),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Text(
+                          total > 0
+                              ? '${_formatSize(copied)} / ${_formatSize(total)}'
+                              : _formatSize(copied),
+                          style: const TextStyle(
+                            fontSize: 12,
+                            color: StudyPalette.inkSoft,
+                          ),
+                        ),
+                        Text(
+                          progress > 0
+                              ? '${(progress * 100).toStringAsFixed(1)}%'
+                              : '',
+                          style: const TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              );
+            },
+          ),
+    );
+
     try {
-      final savedPath = await ModelStore.importGguf(path);
+      final savedPath = await ModelStore.importGguf(
+        path,
+        onProgress: (p, c, t) {
+          progress = p;
+          copied = c;
+          total = t;
+          dialogSetState?.call(() {});
+        },
+      );
       if (!mounted) return;
+      Navigator.of(context, rootNavigator: true).pop();
       _localModels = await _scanLocalModels();
       if (!mounted) return;
       // 导入后自动设为生效默认模型
@@ -1948,6 +2142,7 @@ class _SettingsPageState extends State<SettingsPage> {
       }
     } catch (e) {
       if (mounted) {
+        Navigator.of(context, rootNavigator: true).pop();
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(SnackBar(content: Text('导入失败: $e')));
