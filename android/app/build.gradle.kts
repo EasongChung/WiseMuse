@@ -58,6 +58,26 @@ android {
             }
         }
     }
+
+    // [瘦身] 彻底剔除第三方 AAR（Vosk/ML Kit/PDFBox/翻译等）自带的 x86/armeabi-v7a 冗余架构
+    // 在 AGP 9 中，packaging.jniLibs.excludes 可直接拦截并移除无用的 76.2MB 多架构动态库
+    packaging {
+        jniLibs {
+            excludes += listOf(
+                "lib/armeabi-v7a/**",
+                "lib/x86/**",
+                "lib/x86_64/**",
+                "lib/mips/**",
+                "lib/mips64/**"
+            )
+        }
+        resources {
+            excludes += listOf(
+                "META-INF/**",
+                "org/bouncycastle/pqc/crypto/**"
+            )
+        }
+    }
 }
 
 kotlin {
@@ -88,18 +108,4 @@ dependencies {
     // 与 speak_reader feat/mlkit-offline 同栈（google_mlkit_translation 0.13.0 底层即此库）。
     implementation("com.google.mlkit:translate:17.0.3")
     implementation("com.google.mlkit:language-id:17.0.6")
-}
-
-// [瘦身] 只打包 arm64-v8a 原生库。
-// 根因：Flutter 插件的 configureAbiWithoutSplits() 在配置期会无条件
-// abiFilters.clear() + addAll(全部支持 ABI)，覆盖写在 defaultConfig 里的设置，
-// 导致第三方 AAR 依赖（Vosk/ML Kit/PDFBox/翻译）的 .so 仍 3 个 ABI 全打。
-// 已确认 afterEvaluate 在 AGP 9 上生效（splits.abi 在 AGP 9 不再支持）。
-project.afterEvaluate {
-    extensions.configure<com.android.build.api.dsl.ApplicationExtension>("android") {
-        defaultConfig.ndk {
-            abiFilters.clear()
-            abiFilters.add("arm64-v8a")
-        }
-    }
 }
