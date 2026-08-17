@@ -44,7 +44,8 @@ import java.io.IOException
  * @see ai_chat.cpp for the native implementation details
  */
 internal class InferenceEngineImpl private constructor(
-    private val nativeLibDir: String
+    private val nativeLibDir: String,
+    private val isCustomDir: Boolean = false
 ) : InferenceEngine {
 
     companion object {
@@ -56,23 +57,43 @@ internal class InferenceEngineImpl private constructor(
         /**
          * Create or obtain [InferenceEngineImpl]'s single instance.
          *
-         * @param Context for obtaining native library directory
+         * @param context Context for obtaining native library directory
+         * @param customLibDir Optional custom directory where downloaded .so files are stored
          * @throws IllegalArgumentException if native library path is invalid
          * @throws UnsatisfiedLinkError if library failed to load
          */
-        internal fun getInstance(context: Context) =
+        internal fun getInstance(context: Context, customLibDir: String? = null) =
             instance ?: synchronized(this) {
-                val nativeLibDir = context.applicationInfo.nativeLibraryDir
-                require(nativeLibDir.isNotBlank()) { "Expected a valid native library path!" }
+                instance ?: run {
+                    val (effectiveDir, isCustom) = if (!customLibDir.isNullOrBlank() && File(customLibDir, "libai-chat.so").exists()) {
+                        customLibDir to true
+                    } else {
+                        val bundledDir = context.applicationInfo.nativeLibraryDir
+                        bundledDir to false
+                    }
+                    require(effectiveDir.isNotBlank()) { "Expected a valid native library path!" }
 
-                try {
-                    Log.i(TAG, "Instantiating InferenceEngineImpl,,,")
-                    InferenceEngineImpl(nativeLibDir).also { instance = it }
-                } catch (e: UnsatisfiedLinkError) {
-                    Log.e(TAG, "Failed to load native library from $nativeLibDir", e)
-                    throw e
+                    try {
+                        Log.i(TAG, "Instantiating InferenceEngineImpl (dir=$effectiveDir, isCustom=$isCustom)...")
+                        InferenceEngineImpl(effectiveDir, isCustom).also { instance = it }
+                    } catch (e: UnsatisfiedLinkError) {
+                        Log.e(TAG, "Failed to load native library from $effectiveDir", e)
+                        throw e
+                    }
                 }
             }
+
+        /**
+         * Reset the singleton instance (e.g. after downloading or deleting engine).
+         */
+        internal fun resetInstance() {
+            synchronized(this) {
+                try {
+                    instance?.destroy()
+                } catch (_: Throwable) {}
+                instance = null
+            }
+        }
     }
 
     /**
@@ -131,8 +152,34 @@ internal class InferenceEngineImpl private constructor(
                     "Cannot load native library in ${_state.value.javaClass.simpleName}!"
                 }
                 _state.value = InferenceEngine.State.Initializing
-                Log.i(TAG, "Loading native library...")
-                System.loadLibrary("ai-chat")
+                Log.i(TAG, "Loading native library (isCustomDir=$isCustomDir, nativeLibDir=$nativeLibDir)...")
+                if (isCustomDir) {
+                    // 从应用私有目录按依赖层级顺序显式加载 .so
+                    val loadOrder = listOf(
+                        "libomp.so",
+                        "libOpenCL.so",
+                        "libggml-base.so",
+                        "libggml.so",
+                        "libggml-cpu.so",
+                        "libggml-opencl.so",
+                        "libllama-common.so",
+                        "libllama.so",
+                        "libai-chat.so"
+                    )
+                    for (libName in loadOrder) {
+                        val libFile = File(nativeLibDir, libName)
+                        if (libFile.exists()) {
+                            try {
+                                System.load(libFile.absolutePath)
+                                Log.i(TAG, "System.load success: ${libFile.name}")
+                            } catch (e: Throwable) {
+                                Log.w(TAG, "System.load warning for ${libFile.name}: ${e.message}")
+                            }
+                        }
+                    }
+                } else {
+                    System.loadLibrary("ai-chat")
+                }
                 init(nativeLibDir)
                 _state.value = InferenceEngine.State.Initialized
                 Log.i(TAG, "Native library loaded! System info: \n${systemInfo()}")

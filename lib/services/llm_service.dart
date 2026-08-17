@@ -124,4 +124,10 @@ class LlmService {
     await _channel.invokeMethod('destroy');
     _loaded = false;
   }
+
+  /// 重置原生推理引擎实例。
+  Future<void> reset() async {
+    await _channel.invokeMethod('reset');
+    _loaded = false;
+  }
 }

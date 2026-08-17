@@ -76,23 +76,46 @@ class LlamaBridge : FlutterPlugin, MethodChannel.MethodCallHandler {
             )
             "unload" -> unload(result)
             "destroy" -> destroy(result)
+            "reset" -> reset(result)
             else -> result.notImplemented()
         }
     }
 
     /**
-     * 引擎是否在当前设备可用。判定放 Kotlin 侧（与 System.loadLibrary 同址，
+     * 获取动态下载/导入的 llama 引擎存放目录 ({documents}/models/engine)。
+     */
+    private fun getCustomEngineDir(): java.io.File? {
+        val ctx = appContext ?: return null
+        val docDir = ctx.getExternalFilesDir(null) ?: ctx.filesDir
+        // Flutter path_provider 在 Android 上 documents 目录为 getFilesDir() 或 app_flutter
+        val candidate1 = java.io.File(ctx.filesDir, "models/engine")
+        if (candidate1.exists()) return candidate1
+        val candidate2 = java.io.File(ctx.dataDir, "app_flutter/models/engine")
+        if (candidate2.exists()) return candidate2
+        val candidate3 = java.io.File(docDir, "models/engine")
+        if (candidate3.exists()) return candidate3
+        return candidate1
+    }
+
+    /**
+     * 引擎是否在当前设备可用。判定放 Kotlin 侧（与 System.loadLibrary / System.load 同址，
      * 避免 Dart 侧版本判断漂移）。
      *
      * 判定条件：
      * 1. Android 系统版本 >= 30 (Android 11+)
-     * 2. 检查 nativeLibraryDir 中是否存在 libai-chat.so（区分 Standard 标准版 与 Full 增强版）
+     * 2. 检查应用私有目录是否已下载引擎 (models/engine/libai-chat.so) 或内置 nativeLibraryDir 中是否存在 libai-chat.so
      */
     private fun isAvailable(): Boolean {
         if (android.os.Build.VERSION.SDK_INT < 30) return false
-        val libDir = appContext?.applicationInfo?.nativeLibraryDir ?: return false
-        val aiChatSo = java.io.File(libDir, "libai-chat.so")
-        return aiChatSo.exists()
+        val customDir = getCustomEngineDir()
+        if (customDir != null && java.io.File(customDir, "libai-chat.so").exists()) {
+            return true
+        }
+        val libDir = appContext?.applicationInfo?.nativeLibraryDir
+        if (libDir != null && java.io.File(libDir, "libai-chat.so").exists()) {
+            return true
+        }
+        return false
     }
 
     private fun initModel(modelPath: String?, result: MethodChannel.Result) {
@@ -103,7 +126,13 @@ class LlamaBridge : FlutterPlugin, MethodChannel.MethodCallHandler {
         scope.launch {
             try {
                 val ctx = appContext ?: throw IllegalStateException("appContext 缺失")
-                val eng = engine ?: AiChat.getInferenceEngine(ctx).also { engine = it }
+                val customDir = getCustomEngineDir()
+                val customDirPath = if (customDir != null && java.io.File(customDir, "libai-chat.so").exists()) {
+                    customDir.absolutePath
+                } else {
+                    null
+                }
+                val eng = engine ?: AiChat.getInferenceEngine(ctx, customDirPath).also { engine = it }
                 // 引擎是单例（AiChat.getInferenceEngine 缓存 instance）：
                 // 上一次 loadModel 失败后 state 会永久落在 Error，导致后续任何 init
                 // 立即短路（"state=Error" 假失败，换模型也没用）。Error 状态必须先
@@ -214,10 +243,23 @@ class LlamaBridge : FlutterPlugin, MethodChannel.MethodCallHandler {
         try {
             engine?.destroy()
             engine = null
+            AiChat.resetInstance()
             result.success(true)
         } catch (t: Throwable) {
             Log.e(TAG, "destroy 失败", t)
             result.error("destroy_failed", t.message ?: "销毁失败", null)
+        }
+    }
+
+    private fun reset(result: MethodChannel.Result) {
+        try {
+            engine?.destroy()
+            engine = null
+            AiChat.resetInstance()
+            result.success(true)
+        } catch (t: Throwable) {
+            Log.e(TAG, "reset 失败", t)
+            result.error("reset_failed", t.message ?: "重置失败", null)
         }
     }
 }

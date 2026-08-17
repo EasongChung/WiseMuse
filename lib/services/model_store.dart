@@ -235,6 +235,207 @@ class ModelStore {
     return destPath;
   }
 
+  // ===== [v0.1.50] llama 本地 LLM 原生推理引擎（~18MB）=====
+
+  /// 默认 llama 引擎 Release 下载地址（GitHub Release）。
+  static const String llamaEngineUrl =
+      'https://github.com/EasongChung/WiseMuse/releases/download/llama-engine-b10355-9/llama-engine-b10355-arm64-v8a.tar.gz';
+  static const String llamaEngineFallbackUrl =
+      'https://github.com/EasongChung/WiseMuse/releases/download/llama-engine-b10355-8/llama-engine-b10355-arm64-v8a.tar.gz';
+
+  /// llama 引擎解压目录（`{documents}/models/engine`）。
+  static Future<Directory> llamaEngineDir() async {
+    final root = await modelsDir();
+    final dir = Directory(p.join(root.path, 'engine'));
+    if (!await dir.exists()) {
+      await dir.create(recursive: true);
+    }
+    return dir;
+  }
+
+  /// llama 引擎必备关键动态库。
+  static const List<String> llamaRequiredSos = [
+    'libai-chat.so',
+    'libllama.so',
+    'libllama-common.so',
+    'libggml.so',
+    'libggml-base.so',
+    'libggml-cpu.so',
+    'libomp.so',
+  ];
+
+  /// 检查动态下载的 llama 引擎是否完整就绪。
+  static Future<bool> isLlamaEngineDownloaded() async {
+    final root = await modelsDir();
+    final dir = Directory(p.join(root.path, 'engine'));
+    if (!await dir.exists()) return false;
+    for (final so in llamaRequiredSos) {
+      final f = File(p.join(dir.path, so));
+      if (!await f.exists() || await f.length() == 0) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  /// 确保 llama 引擎就绪，返回引擎目录路径。
+  static Future<String> ensureLlamaEngine({
+    void Function(double progress, int received, int total)? onProgress,
+  }) async {
+    final engineDir = await llamaEngineDir();
+    if (await isLlamaEngineDownloaded()) {
+      AppLog.d(_tag, 'llama 引擎已就绪，跳过下载: ${engineDir.path}');
+      return engineDir.path;
+    }
+
+    final root = await modelsDir();
+    final tarGzPath = p.join(root.path, 'llama-engine-download.tar.gz');
+
+    try {
+      AppLog.d(_tag, '开始下载 llama 引擎: $llamaEngineUrl');
+      await _downloadStreaming(
+        llamaEngineUrl,
+        tarGzPath,
+        onProgress: onProgress,
+      );
+    } catch (e) {
+      AppLog.w(_tag, '主源下载失败，尝试回退源: $e');
+      await _downloadStreaming(
+        llamaEngineFallbackUrl,
+        tarGzPath,
+        onProgress: onProgress,
+      );
+    }
+
+    await _extractEngineArchive(tarGzPath, engineDir.path);
+    await File(tarGzPath).delete();
+
+    await _verifyLlamaEngineDir(engineDir);
+    AppLog.d(_tag, '=== llama 引擎下载并解压完成: ${engineDir.path} ===');
+    return engineDir.path;
+  }
+
+  /// 从外部压缩包（tar.gz 或 zip）导入 llama 引擎。
+  static Future<String> importLlamaEngineArchive(
+    String archivePath, {
+    void Function(double progress, int copiedBytes, int totalBytes)? onProgress,
+  }) async {
+    AppLog.d(_tag, '=== 开始导入 llama 引擎压缩包: $archivePath ===');
+    final src = File(archivePath);
+    if (!await src.exists()) {
+      throw Exception('源文件不存在: $archivePath');
+    }
+
+    final engineDir = await llamaEngineDir();
+    if (await engineDir.exists()) {
+      await engineDir.delete(recursive: true);
+    }
+    await engineDir.create(recursive: true);
+
+    await _extractEngineArchive(archivePath, engineDir.path);
+    await _verifyLlamaEngineDir(engineDir);
+    AppLog.d(_tag, '=== llama 引擎导入完成: ${engineDir.path} ===');
+    return engineDir.path;
+  }
+
+  /// 删除本地动态下载的 llama 引擎。
+  static Future<void> deleteLlamaEngine() async {
+    final root = await modelsDir();
+    final dir = Directory(p.join(root.path, 'engine'));
+    if (await dir.exists()) {
+      AppLog.d(_tag, '删除 llama 引擎目录: ${dir.path}');
+      await dir.delete(recursive: true);
+    }
+  }
+
+  /// 解压引擎压缩包（支持 tar.gz / zip，兼容内部多套一层 engine/ 的结构）。
+  static Future<void> _extractEngineArchive(
+    String archivePath,
+    String destDir,
+  ) async {
+    final root = Directory(destDir).parent;
+    final tempExtractDir = Directory(p.join(root.path, 'engine_extract_tmp'));
+    if (await tempExtractDir.exists()) {
+      await tempExtractDir.delete(recursive: true);
+    }
+    await tempExtractDir.create(recursive: true);
+
+    try {
+      AppLog.d(_tag, '解压引擎包 → ${tempExtractDir.path}');
+      await extractFileToDisk(archivePath, tempExtractDir.path);
+
+      // 检查解压出的目录是否包含 engine 子目录或直接包含 .so
+      final targetDir = Directory(destDir);
+      if (!await targetDir.exists()) {
+        await targetDir.create(recursive: true);
+      }
+
+      final entities = await tempExtractDir.list(recursive: true).toList();
+      var movedCount = 0;
+      for (final entity in entities) {
+        if (entity is File && entity.path.endsWith('.so')) {
+          final fileName = p.basename(entity.path);
+          final targetPath = p.join(destDir, fileName);
+          await entity.copy(targetPath);
+          movedCount++;
+        }
+      }
+      AppLog.d(_tag, '成功移动 $movedCount 个 .so 库到 ${destDir}');
+    } finally {
+      if (await tempExtractDir.exists()) {
+        await tempExtractDir.delete(recursive: true);
+      }
+    }
+  }
+
+  /// 校验引擎目录完整性。
+  static Future<void> _verifyLlamaEngineDir(Directory engineDir) async {
+    if (!await engineDir.exists()) {
+      throw Exception('引擎目录未创建: ${engineDir.path}');
+    }
+    final files = await engineDir.list().toList();
+    final names = files.map((e) => p.basename(e.path)).toSet();
+    final missing =
+        llamaRequiredSos.where((so) => !names.contains(so)).toList();
+    if (missing.isNotEmpty) {
+      throw Exception('llama 引擎解压后缺少必要动态库: ${missing.join(', ')}');
+    }
+  }
+
+  /// 带进度回调的流式 HTTP 下载。
+  static Future<void> _downloadStreaming(
+    String url,
+    String savePath, {
+    void Function(double progress, int received, int total)? onProgress,
+  }) async {
+    final client = http.Client();
+    final request = http.Request('GET', Uri.parse(url));
+    final response = await client.send(request);
+    if (response.statusCode != 200) {
+      client.close();
+      throw Exception('下载失败: HTTP ${response.statusCode}');
+    }
+    final total = response.contentLength ?? 0;
+    final file = File(savePath);
+    final sink = file.openWrite();
+    var received = 0;
+
+    try {
+      await for (final chunk in response.stream) {
+        sink.add(chunk);
+        received += chunk.length;
+        if (total > 0) {
+          onProgress?.call(received / total, received, total);
+        }
+      }
+      await sink.flush();
+    } finally {
+      await sink.close();
+      client.close();
+    }
+    AppLog.d(_tag, '流式下载完成: ${_mb(received)}');
+  }
+
   static String _mb(int bytes) =>
       '${(bytes / 1024 / 1024).toStringAsFixed(1)}MB';
 }

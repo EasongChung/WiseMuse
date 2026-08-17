@@ -321,4 +321,18 @@ class SettingsService {
       (await SharedPreferences.getInstance()).getString(kVoskModelPath);
   Future<void> setVoskModelPath(String v) async =>
       (await SharedPreferences.getInstance()).setString(kVoskModelPath, v);
+
+  // ---- [v0.1.50] llama 引擎删除/禁用标记 ----
+
+  /// 用户是否主动删除了 llama 引擎（用于在 Full 版上软屏蔽或在 Standard 版上标记状态）。
+  static const kLlamaEngineDisabled = 'llama_engine_disabled';
+
+  Future<bool> isLlamaEngineDisabled() async =>
+      (await SharedPreferences.getInstance()).getBool(kLlamaEngineDisabled) ??
+      false;
+  Future<void> setLlamaEngineDisabled(bool disabled) async =>
+      (await SharedPreferences.getInstance()).setBool(
+        kLlamaEngineDisabled,
+        disabled,
+      );
 }
