@@ -67,39 +67,6 @@ jobs:
       - name: 运行测试
         run: flutter test
 
-      # ===== llama 本地 LLM 引擎装配（Release + 版本引用小文件）=====
-      # 与 test-apk.yml 同款：android/llama_engine.txt 记录引擎 Release tag，
-      # 构建前下载引擎 tarball 塞 jniLibs 随 APK 打包；未配置则跳过。
-      - name: 装配 llama 引擎 .so
-        shell: bash
-        run: |
-          set -euo pipefail
-          REF="android/llama_engine.txt"
-          if [ -f "$REF" ]; then
-            TAG="$(grep -v '^[[:space:]]*#' "$REF" | tail -1 | tr -d '[:space:]')"
-          else
-            TAG=""
-          fi
-          if [ -z "$TAG" ] || [[ "$TAG" != llama-engine-* ]]; then
-            echo "::warning::未配置有效的引擎 tag（android/llama_engine.txt），本次构建不带本地 LLM 引擎"
-            exit 0
-          fi
-          echo "==> 下载引擎 Release: $TAG"
-          gh release download "$TAG" \
-            --repo "$GITHUB_REPOSITORY" \
-            --pattern 'llama-engine-*.tar.gz' \
-            --dir /tmp/llama-engine || {
-              echo "::error::引擎 Release $TAG 下载失败"
-              exit 1
-            }
-          mkdir -p android/app/src/main/jniLibs/arm64-v8a
-          tar -xzf /tmp/llama-engine/llama-engine-*.tar.gz -C /tmp/llama-engine
-          cp /tmp/llama-engine/engine/*.so android/app/src/main/jniLibs/arm64-v8a/
-          echo "==> 引擎 .so 装配完成："
-          ls -lh android/app/src/main/jniLibs/arm64-v8a/
-        env:
-          GH_TOKEN: ${{ github.token }}
-
       # ===== 签名配置（与本项目此前工程同款方案）=====
       # 如果 Secrets 已配置 KEYSTORE_BASE64，直接解码还原 keystore 复用签名；
       # 否则首次运行自动生成 keystore，并将 keystore+密码打包为 artifact 供下载，
@@ -143,28 +110,74 @@ jobs:
             echo "New keystore generated"
           fi
 
-      - name: 构建 arm64 Release APK
-        # 注入递增版本号: versionName=0.1.x, versionCode=末位x(单调递增, 可覆盖安装)
-        # 注意: 不得使用反斜杠续行, YAML 普通标量会把换行折成空格,
-        # 导致 bash 把 '\ --build-name' 解析为带前导空格的字面参数而失败。
-        run: flutter build apk --release --target-platform android-arm64 --build-name "$VERSION" --build-number "${VERSION##*.}"
+      # ===== [双包策略阶段 1] 构建 Standard 标准版 (~75MB，轻量化首选) =====
+      # 标准版不包含 100MB 本地 llama .so，保留完整离线 OCR/翻译/ASR/TTS 与云端大模型
+      - name: 清理 jniLibs 并构建 Standard 标准版 APK
+        run: |
+          rm -rf android/app/src/main/jniLibs/arm64-v8a/*
+          flutter build apk --release --target-platform android-arm64 --build-name "$VERSION" --build-number "${VERSION##*.}"
         env:
           KEYSTORE_PATH: ${{ env.KEYSTORE_PATH }}
           KEYSTORE_PASSWORD: ${{ env.KEYSTORE_PASSWORD }}
           KEY_ALIAS: ${{ env.KEY_ALIAS }}
           KEY_PASSWORD: ${{ env.KEY_PASSWORD }}
 
-      - name: 校验并重命名 APK
+      - name: 校验并重命名 Standard 标准版 APK
         shell: bash
         run: |
           set -euo pipefail
           SOURCE="build/app/outputs/flutter-apk/app-release.apk"
           test -s "$SOURCE"
           test -n "$VERSION"
-          DEST="build/app/outputs/flutter-apk/wisemuse-${VERSION}-${GITHUB_SHA::7}-arm64-v8a.apk"
+          DEST="build/app/outputs/flutter-apk/wisemuse-${VERSION}-${GITHUB_SHA::7}-standard-arm64-v8a.apk"
           mv "$SOURCE" "$DEST"
           sha256sum "$DEST"
           ls -lh "$DEST"
+
+      # ===== [双包策略阶段 2] 装配 llama 本地引擎并构建 Full 增强版 (~181MB，完全离线) =====
+      - name: 装配 llama 引擎 .so 并构建 Full 增强版 APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          REF="android/llama_engine.txt"
+          if [ -f "$REF" ]; then
+            TAG="$(grep -v '^[[:space:]]*#' "$REF" | tail -1 | tr -d '[:space:]')"
+          else
+            TAG=""
+          fi
+          if [ -z "$TAG" ] || [[ "$TAG" != llama-engine-* ]]; then
+            echo "::warning::未配置有效的引擎 tag（android/llama_engine.txt），跳过 Full 版构建"
+            exit 0
+          fi
+          echo "==> 下载引擎 Release: $TAG"
+          gh release download "$TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --pattern 'llama-engine-*.tar.gz' \
+            --dir /tmp/llama-engine || {
+              echo "::error::引擎 Release $TAG 下载失败"
+              exit 1
+            }
+          mkdir -p android/app/src/main/jniLibs/arm64-v8a
+          tar -xzf /tmp/llama-engine/llama-engine-*.tar.gz -C /tmp/llama-engine
+          cp /tmp/llama-engine/engine/*.so android/app/src/main/jniLibs/arm64-v8a/
+          echo "==> 引擎 .so 装配完成："
+          ls -lh android/app/src/main/jniLibs/arm64-v8a/
+
+          echo "==> 开始构建 Full 增强版 APK"
+          flutter build apk --release --target-platform android-arm64 --build-name "$VERSION" --build-number "${VERSION##*.}"
+
+          SOURCE="build/app/outputs/flutter-apk/app-release.apk"
+          test -s "$SOURCE"
+          DEST="build/app/outputs/flutter-apk/wisemuse-${VERSION}-${GITHUB_SHA::7}-full-arm64-v8a.apk"
+          mv "$SOURCE" "$DEST"
+          sha256sum "$DEST"
+          ls -lh "$DEST"
+        env:
+          GH_TOKEN: ${{ github.token }}
+          KEYSTORE_PATH: ${{ env.KEYSTORE_PATH }}
+          KEYSTORE_PASSWORD: ${{ env.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ env.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ env.KEY_PASSWORD }}
 
       - name: 上传 APK
         uses: actions/upload-artifact@v4
@@ -216,11 +229,23 @@ jobs:
           tag_name: ${{ env.TAG }}
           name: WiseMuse ${{ env.TAG }}
           body: |
-            WiseMuse Android APK
-            版本: ${{ env.TAG }}
-            架构: arm64-v8a
-            构建日期: ${{ steps.tag.outputs.date }}
-            工作流: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
+            智启陪读 WiseMuse Android 安装包发布
+
+            - **版本**: `${{ env.TAG }}`
+            - **架构**: `arm64-v8a`
+            - **构建日期**: ${{ steps.tag.outputs.date }}
+            - **工作流**: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
+
+            ---
+
+            ### 📦 安装包选择指引
+
+            1. **🌟 标准版 (Standard, ~75MB - 强烈推荐首选)**
+               - **文件名**: `wisemuse-${{ env.VERSION }}-${{ github.sha }}-standard-arm64-v8a.apk`
+               - **适用场景**: 日常推荐使用。已内置 Vosk 离线语音跟读识别、Google 离线翻译、ML Kit 离线 OCR 与完整 TTS 原生朗读。AI 对话默认使用云端大模型（DeepSeek / 硅基流动等 API），轻巧省电省空间（立省 106MB）。
+            2. **⚡ 全量增强版 (Full, ~181MB - 完全离线用户选)**
+               - **文件名**: `wisemuse-${{ env.VERSION }}-${{ github.sha }}-full-arm64-v8a.apk`
+               - **适用场景**: 需在完全断网/飞行模式下使用本地离线大模型的用户。内置完整 `llama.android` 原生推理引擎（支持 OpenCL GPU / CPU 加速）。
           files: build/app/outputs/flutter-apk/wisemuse-*-arm64-v8a.apk
           draft: false
           prerelease: false

@@ -82,13 +82,17 @@ class LlamaBridge : FlutterPlugin, MethodChannel.MethodCallHandler {
 
     /**
      * 引擎是否在当前设备可用。判定放 Kotlin 侧（与 System.loadLibrary 同址，
-     * 避免 Dart 侧版本判断漂移）。docs/16 方案 A：编译档 = API 30，<30 机型回落云端。
+     * 避免 Dart 侧版本判断漂移）。
      *
-     * **不能只信版本号**：`loadLibrary` 仍可能因 ABI 不符、.so 被裁剪等失败，
-     * 但 UI 入口用此方法即可（实际加载失败会在 init 阶段抛错）。
+     * 判定条件：
+     * 1. Android 系统版本 >= 30 (Android 11+)
+     * 2. 检查 nativeLibraryDir 中是否存在 libai-chat.so（区分 Standard 标准版 与 Full 增强版）
      */
     private fun isAvailable(): Boolean {
-        return android.os.Build.VERSION.SDK_INT >= 30
+        if (android.os.Build.VERSION.SDK_INT < 30) return false
+        val libDir = appContext?.applicationInfo?.nativeLibraryDir ?: return false
+        val aiChatSo = java.io.File(libDir, "libai-chat.so")
+        return aiChatSo.exists()
     }
 
     private fun initModel(modelPath: String?, result: MethodChannel.Result) {

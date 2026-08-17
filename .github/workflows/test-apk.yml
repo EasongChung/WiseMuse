@@ -84,11 +84,31 @@ jobs:
             echo "::warning::未配置 KEYSTORE_BASE64，将用临时签名，无法覆盖安装正式版"
           fi
 
-      # ===== llama 本地 LLM 引擎装配（Release + 版本引用小文件）=====
-      # android/llama_engine.txt 记录引擎 Release tag（值必须形如 llama-engine-<...>，
-      # 首行为 # 的注释会被忽略）。构建前用 gh release download 拉取引擎 tarball
-      # 并塞进 jniLibs，随 APK 打包。值缺失/为空/不含 llama-engine- 前缀 → 跳过。
-      - name: 装配 llama 引擎 .so
+      # ===== [双包策略阶段 1] 构建 Standard 标准测试版 (~75MB，轻量化首选) =====
+      - name: 清理 jniLibs 并构建 Standard 标准版 APK
+        run: |
+          rm -rf android/app/src/main/jniLibs/arm64-v8a/*
+          flutter build apk --release --target-platform android-arm64 --build-name "$VERSION_NAME" --build-number "$VERSION_CODE"
+        env:
+          KEYSTORE_PATH: ${{ env.KEYSTORE_PATH }}
+          KEYSTORE_PASSWORD: ${{ env.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ env.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ env.KEY_PASSWORD }}
+
+      - name: 校验并重命名 Standard 标准版 APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          SOURCE="build/app/outputs/flutter-apk/app-release.apk"
+          test -s "$SOURCE"
+          test -n "$VERSION_NAME"
+          DEST="build/app/outputs/flutter-apk/wisemuse-${VERSION_NAME}-${GITHUB_SHA::7}-standard-arm64-v8a.apk"
+          mv "$SOURCE" "$DEST"
+          sha256sum "$DEST"
+          ls -lh "$DEST"
+
+      # ===== [双包策略阶段 2] 装配 llama 本地引擎并构建 Full 增强测试版 (~181MB，完全离线) =====
+      - name: 装配 llama 引擎 .so 并构建 Full 增强版 APK
         shell: bash
         run: |
           set -euo pipefail
@@ -99,7 +119,7 @@ jobs:
             TAG=""
           fi
           if [ -z "$TAG" ] || [[ "$TAG" != llama-engine-* ]]; then
-            echo "::warning::未配置有效的引擎 tag（android/llama_engine.txt），本次构建不带本地 LLM 引擎"
+            echo "::warning::未配置有效的引擎 tag（android/llama_engine.txt），跳过 Full 版构建"
             exit 0
           fi
           echo "==> 下载引擎 Release: $TAG"
@@ -115,31 +135,22 @@ jobs:
           cp /tmp/llama-engine/engine/*.so android/app/src/main/jniLibs/arm64-v8a/
           echo "==> 引擎 .so 装配完成："
           ls -lh android/app/src/main/jniLibs/arm64-v8a/
+
+          echo "==> 开始构建 Full 增强版 APK"
+          flutter build apk --release --target-platform android-arm64 --build-name "$VERSION_NAME" --build-number "$VERSION_CODE"
+
+          SOURCE="build/app/outputs/flutter-apk/app-release.apk"
+          test -s "$SOURCE"
+          DEST="build/app/outputs/flutter-apk/wisemuse-${VERSION_NAME}-${GITHUB_SHA::7}-full-arm64-v8a.apk"
+          mv "$SOURCE" "$DEST"
+          sha256sum "$DEST"
+          ls -lh "$DEST"
         env:
           GH_TOKEN: ${{ github.token }}
-
-      - name: 构建 arm64 Release APK
-        # 注意: 不得使用反斜杠续行, YAML 普通标量会把换行折成空格,
-        # 导致 bash 把 '\ --build-name' 解析为带前导空格的字面参数而失败。
-        run: flutter build apk --release --target-platform android-arm64 --build-name "$VERSION_NAME" --build-number "$VERSION_CODE"
-        env:
           KEYSTORE_PATH: ${{ env.KEYSTORE_PATH }}
           KEYSTORE_PASSWORD: ${{ env.KEYSTORE_PASSWORD }}
           KEY_ALIAS: ${{ env.KEY_ALIAS }}
           KEY_PASSWORD: ${{ env.KEY_PASSWORD }}
-
-      - name: 重命名 APK
-        shell: bash
-        run: |
-          set -euo pipefail
-          SOURCE="build/app/outputs/flutter-apk/app-release.apk"
-          test -s "$SOURCE"
-          test -n "$VERSION_NAME"
-          DEST="build/app/outputs/flutter-apk/wisemuse-${VERSION_NAME}-${GITHUB_SHA::7}-arm64-v8a.apk"
-          mv "$SOURCE" "$DEST"
-          echo "APK_PATH=${DEST}" >> "$GITHUB_ENV"
-          sha256sum "$DEST"
-          ls -lh "$DEST"
 
       - name: 上传 APK
         uses: actions/upload-artifact@v4
@@ -155,6 +166,7 @@ jobs:
         run: |
           set -euo pipefail
           test -n "$BUILD_N"
+          TS="$(date -u '+%Y%m%d-%H%M%S') prime"
           TS="$(date -u '+%Y%m%d-%H%M%S')"
           TAG="test-${BUILD_N}-${TS}"
           echo "TAG=${TAG}" >> "$GITHUB_ENV"
@@ -171,7 +183,7 @@ jobs:
           tag_name: ${{ env.TAG }}
           name: "[测试版] WiseMuse ${{ env.VERSION_NAME }}"
           body: |
-            ## WiseMuse 测试版（非正式发布）
+            ## WiseMuse 测试版（双包架构：Standard 标准版 + Full 增强版）
 
             - 版本: `${{ env.VERSION_NAME }}` (versionCode `${{ env.VERSION_CODE }}`)
             - 架构: arm64-v8a
@@ -179,11 +191,14 @@ jobs:
             - 构建日期: ${{ steps.tag.outputs.date }}
             - 工作流: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
 
-            ### 用途
-            验证智启陪读 WiseMuse 开发阶段功能在真机上的可用性。
+            ---
+
+            ### 📦 测试包文件
+            - **标准版 (Standard, ~75MB)**: `wisemuse-${{ env.VERSION_NAME }}-${{ github.sha }}-standard-arm64-v8a.apk`（日常推荐，轻量化）
+            - **增强版 (Full, ~181MB)**: `wisemuse-${{ env.VERSION_NAME }}-${{ github.sha }}-full-arm64-v8a.apk`（内置完整 llama.android 离线推理库）
 
             ### 使用须知
             本包 versionCode 高于正式版，**装过本包后要装回正式版须先卸载**。
-          files: ${{ env.APK_PATH }}
+          files: build/app/outputs/flutter-apk/wisemuse-*-arm64-v8a.apk
           draft: false
           prerelease: true
