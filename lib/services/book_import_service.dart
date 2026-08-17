@@ -7,25 +7,14 @@ import '../core/storage/book_dao.dart';
 import '../core/storage/database.dart';
 import '../core/storage/file_store.dart';
 import '../core/storage/sentence_dao.dart';
+import '../core/utils/pinyin_filter_util.dart';
 import 'import_service.dart';
 import 'ocr_geometry_service.dart';
 import 'ocr_service.dart';
 import 'pdf_service.dart';
 import 'sentence_splitter.dart';
 
-/// [v0.2.0] 书籍导入编排：复制原文件 → 解析/OCR → 切句 → 写库。
-///
-/// 数据流：
-/// - **PDF 有文本层**：PdfService.extractTexts → 逐页 splitTextToSentences →
-///   Sentence(page=i)；原文件保留（原文模式 PDFView）。
-/// - **PDF 扫描件**（抛 PdfHasNoTextLayerException）：逐页 renderPage → OCR →
-///   页文本 → Sentence(page=i)（文本模式为验收主路径）。
-/// - **docx**：ImportService 提取文本 → Sentence(page=0)；原文件保留（原文 HTML）。
-/// - **txt**：提取文本 → Sentence(page=0)。
-/// - **图片**（camera/gallery）：OCR → blocks → OcrGeometryService.buildSentences →
-///   Sentence(text + geometry JSON)，page=0。
-///
-/// 失败回滚：删除已复制原文件 + 清空已入库句子，再 rethrow（由页面 toast）。
+/// [v0.2.0] [v0.1.48] 书籍导入编排：支持流式后台进度更新与拼音智能过滤。
 class BookImportService {
   static const _tag = 'import';
 
@@ -34,100 +23,218 @@ class BookImportService {
   final ImportService _import = ImportService();
 
   /// 导入文档（PDF/docx/txt）。成功返回入库的 Book。
-  Future<Book> importFile(String path) async {
+  Future<Book> importFile(
+    String path, {
+    void Function(String message, double progress)? onProgress,
+  }) async {
     final fileName = _fileName(path);
     AppLog.d(_tag, '导入文档: $fileName');
+    final db = await DatabaseProvider.database;
+    final bookDao = BookDao(db);
+
+    // 1) 先创建 Book 实体并存库（importStatus: 1 导入中）
+    final copied = await FileStore.copyToOriginals(path, _ext(path));
+    final initialSource =
+        path.toLowerCase().endsWith('.pdf')
+            ? BookSource.pdf
+            : (path.toLowerCase().endsWith('.docx')
+                ? BookSource.word
+                : BookSource.txt);
+
+    final initialBook = Book.create(
+      title: fileName,
+      source: initialSource,
+      originalFilePath: copied,
+      importStatus: 1,
+      importProgress: '准备解析...',
+    );
+    await bookDao.insert(initialBook);
+
     try {
+      onProgress?.call('正在解析文件...', 0.1);
+      await bookDao.updateImportStatus(
+        initialBook.id,
+        status: 1,
+        progress: '正在解析文件...',
+      );
+
       final result = await _import.importFile(
         path,
         pdfExtractor: _extractPdfText,
       );
-      // PDF：按页切句；docx/txt：整篇 page=0
+
       final sentences = <Sentence>[];
       if (result.pageTexts != null) {
         for (var i = 0; i < result.pageTexts!.length; i++) {
-          _appendSentences(sentences, result.pageTexts![i], page: i);
+          final cleaned = PinyinFilterUtil.clean(result.pageTexts![i]);
+          _appendSentences(sentences, cleaned, page: i, bookId: initialBook.id);
         }
       } else {
-        _appendSentences(sentences, result.content, page: 0);
+        final cleaned = PinyinFilterUtil.clean(result.content);
+        _appendSentences(sentences, cleaned, page: 0, bookId: initialBook.id);
       }
+
       final pageCount =
           result.source == BookSource.pdf
               ? await _pdf.getPageCount(path)
-              : null;
-      return _persist(
-        title: result.title,
-        source: result.source,
-        originalPath: path,
+              : (result.pageTexts?.length ?? 1);
+
+      await SentenceDao(db).insertAll(sentences);
+      await bookDao.updateImportStatus(
+        initialBook.id,
+        status: 0,
+        progress: null,
         pageCount: pageCount,
-        sentences: sentences,
       );
+
+      initialBook.pageCount = pageCount;
+      initialBook.importStatus = 0;
+      initialBook.importProgress = null;
+      initialBook.title = result.title;
+      await bookDao.update(initialBook);
+
+      AppLog.d(_tag, '文档导入完成: ${initialBook.id}');
+      return initialBook;
     } on PdfHasNoTextLayerException {
       AppLog.d(_tag, '扫描件 PDF，走逐页 OCR');
-      final sentences = await _ocrPdfPages(path);
-      final pageCount = await _pdf.getPageCount(path);
-      return _persist(
-        title: fileName,
-        source: BookSource.pdf,
-        originalPath: path,
-        pageCount: pageCount,
-        sentences: sentences,
+      try {
+        final sentences = await _ocrPdfPages(
+          path,
+          bookId: initialBook.id,
+          onProgress: (done, total) async {
+            final msg = '识别中 $done/$total 页';
+            onProgress?.call(msg, done / total);
+            await bookDao.updateImportStatus(
+              initialBook.id,
+              status: 1,
+              progress: msg,
+            );
+          },
+        );
+        final pageCount = await _pdf.getPageCount(path) ?? 1;
+        await SentenceDao(db).insertAll(sentences);
+        await bookDao.updateImportStatus(
+          initialBook.id,
+          status: 0,
+          progress: null,
+          pageCount: pageCount,
+        );
+
+        initialBook.pageCount = pageCount;
+        initialBook.importStatus = 0;
+        initialBook.importProgress = null;
+        await bookDao.update(initialBook);
+        return initialBook;
+      } catch (e, s) {
+        AppLog.e(_tag, '扫描件 OCR 失败: $e\n$s');
+        await bookDao.updateImportStatus(
+          initialBook.id,
+          status: 2,
+          progress: 'OCR 失败',
+        );
+        rethrow;
+      }
+    } catch (e, s) {
+      AppLog.e(_tag, '导入文档失败: $e\n$s');
+      await bookDao.updateImportStatus(
+        initialBook.id,
+        status: 2,
+        progress: '解析失败',
       );
+      rethrow;
     }
   }
 
-  /// 导入图片（拍照/相册）。OCR 后按几何切句（文本 + 归一化坐标同源入库）。
-  Future<Book> importImage(String path, BookSource source) async {
+  /// 导入图片（拍照/相册）。
+  Future<Book> importImage(
+    String path,
+    BookSource source, {
+    void Function(String message, double progress)? onProgress,
+  }) async {
     AppLog.d(_tag, '导入图片: $source');
     final title = source == BookSource.camera ? '拍照识别' : '相册识别';
-    final result = await _ocr.recognizeFile(path);
-    if (result == null) {
-      throw Exception('识别失败：图片无法识别出文字');
-    }
-    // 句子直接来自 OcrGeometryService.buildSentences（canMergeLines 判据，
-    // 与 PDF 点击朗读同一套合并规则），文本与几何同源，杜绝两套切句再对齐。
-    // 归一化分母用图片真实像素尺寸（OcrBridge 从 InputImage 取），
-    // 与阅读页点击坐标 BoxFit.contain 映射同源。
-    final width = result.width?.toDouble() ?? 0;
-    final height = result.height?.toDouble() ?? 0;
-    final sentences = <Sentence>[];
-    if (width > 0 && height > 0) {
-      final ocrSentences = OcrGeometryService.buildSentences(
-        result.blocks,
-        imageWidth: width,
-        imageHeight: height,
-      );
-      for (var i = 0; i < ocrSentences.length; i++) {
-        final o = ocrSentences[i];
-        if (o.text.trim().isEmpty) continue;
-        sentences.add(
-          Sentence.create(
-            bookId: '',
-            page: 0,
-            chapter: 0,
-            index: i,
-            text: o.text,
-            geometry: encodeSentenceGeometry(o.rects),
-          ),
-        );
-      }
-    } else {
-      // 兜底：拿不到图片尺寸时退化为纯文本切句（无几何，点击朗读不可用）
-      AppLog.w(_tag, 'OCR 未返回图片尺寸，退化为纯文本切句');
-      _appendSentences(sentences, result.text, page: 0);
-    }
-    return _persist(
+    final db = await DatabaseProvider.database;
+    final bookDao = BookDao(db);
+
+    final copied = await FileStore.copyToOriginals(path, _ext(path));
+    final initialBook = Book.create(
       title: title,
       source: source,
-      originalPath: path,
-      pageCount: 1,
-      sentences: sentences,
+      originalFilePath: copied,
+      importStatus: 1,
+      importProgress: '识别文字中...',
     );
+    await bookDao.insert(initialBook);
+
+    try {
+      onProgress?.call('识别文字中...', 0.3);
+      final result = await _ocr.recognizeFile(path);
+      if (result == null) {
+        throw Exception('识别失败：图片无法识别出文字');
+      }
+
+      final width = result.width?.toDouble() ?? 0;
+      final height = result.height?.toDouble() ?? 0;
+      final sentences = <Sentence>[];
+
+      if (width > 0 && height > 0) {
+        final ocrSentences = OcrGeometryService.buildSentences(
+          result.blocks,
+          imageWidth: width,
+          imageHeight: height,
+        );
+        for (var i = 0; i < ocrSentences.length; i++) {
+          final o = ocrSentences[i];
+          final cleaned = PinyinFilterUtil.clean(o.text);
+          if (cleaned.trim().isEmpty) continue;
+          sentences.add(
+            Sentence.create(
+              bookId: initialBook.id,
+              page: 0,
+              chapter: 0,
+              index: i,
+              text: cleaned,
+              geometry: encodeSentenceGeometry(o.rects),
+            ),
+          );
+        }
+      } else {
+        AppLog.w(_tag, 'OCR 未返回图片尺寸，退化为纯文本切句');
+        final cleaned = PinyinFilterUtil.clean(result.text);
+        _appendSentences(sentences, cleaned, page: 0, bookId: initialBook.id);
+      }
+
+      await SentenceDao(db).insertAll(sentences);
+      await bookDao.updateImportStatus(
+        initialBook.id,
+        status: 0,
+        progress: null,
+        pageCount: 1,
+      );
+
+      initialBook.pageCount = 1;
+      initialBook.importStatus = 0;
+      initialBook.importProgress = null;
+      await bookDao.update(initialBook);
+      return initialBook;
+    } catch (e, s) {
+      AppLog.e(_tag, '图片识别失败: $e\n$s');
+      await bookDao.updateImportStatus(
+        initialBook.id,
+        status: 2,
+        progress: '识别失败',
+      );
+      rethrow;
+    }
   }
 
   // ===== 扫描件 PDF 逐页 OCR =====
 
-  Future<List<Sentence>> _ocrPdfPages(String path) async {
+  Future<List<Sentence>> _ocrPdfPages(
+    String path, {
+    required String bookId,
+    void Function(int done, int total)? onProgress,
+  }) async {
     final count = await _pdf.getPageCount(path);
     final pages = count ?? 0;
     final sentences = <Sentence>[];
@@ -135,19 +242,19 @@ class BookImportService {
       AppLog.d(_tag, '扫描 PDF 第 $i 页 OCR');
       final png = await _pdf.renderPage(path, i, scale: 1.5);
       if (png == null) continue;
-      // renderPage 返回 PNG 字节，OcrBridge 按文件路径识别；
-      // 此处把 PNG 写临时文件再识别。
       final tmp = await _writeTempPng(png);
       try {
         final result = await _ocr.recognizeFile(tmp);
         if (result != null && result.text.trim().isNotEmpty) {
-          _appendSentences(sentences, result.text, page: i);
+          final cleaned = PinyinFilterUtil.clean(result.text);
+          _appendSentences(sentences, cleaned, page: i, bookId: bookId);
         }
       } finally {
         try {
           await File(tmp).delete();
         } catch (_) {}
       }
+      onProgress?.call(i + 1, pages);
     }
     return sentences;
   }
@@ -159,7 +266,7 @@ class BookImportService {
     return f.path;
   }
 
-  // ===== PDF 文本层提取（注入 ImportService） =====
+  // ===== PDF 文本层提取 =====
 
   Future<PdfExtractResult> _extractPdfText(String path) async {
     final pages = await _pdf.extractTexts(path);
@@ -175,13 +282,17 @@ class BookImportService {
 
   // ===== 句子构造与几何 =====
 
-  void _appendSentences(List<Sentence> out, String text, {required int page}) {
+  void _appendSentences(
+    List<Sentence> out,
+    String text, {
+    required int page,
+    required String bookId,
+  }) {
     final sentences = splitTextToSentences(text);
     for (var i = 0; i < sentences.length; i++) {
-      // bookId 在 _persist 里统一绑定；此处用占位避免泄漏临时状态
       out.add(
         Sentence.create(
-          bookId: '',
+          bookId: bookId,
           page: page,
           chapter: 0,
           index: i,
@@ -191,83 +302,14 @@ class BookImportService {
     }
   }
 
-  // ===== 入库与回滚 =====
-
-  Future<Book> _persist({
-    required String title,
-    required BookSource source,
-    required String originalPath,
-    int? pageCount,
-    required List<Sentence> sentences,
-  }) async {
-    AppLog.d(_tag, '入库: $title（$source，${sentences.length} 句）');
-    String? copied;
-    String? bookId;
-    try {
-      // 1) 复制原文件到私有目录（大文件流式）
-      copied = await FileStore.copyToOriginals(
-        originalPath,
-        _ext(originalPath),
-      );
-      // 2) 建 Book
-      final book = Book.create(
-        title: title,
-        source: source,
-        originalFilePath: copied,
-      );
-      if (pageCount != null) {
-        book.pageCount = pageCount;
-      }
-      bookId = book.id;
-      // 3) 写库（Book + 句子事务）
-      final db = await DatabaseProvider.database;
-      final fixed =
-          sentences
-              .map(
-                (s) => Sentence.create(
-                  bookId: book.id,
-                  page: s.page,
-                  chapter: s.chapter,
-                  index: s.index,
-                  text: s.text,
-                  geometry: s.geometry,
-                ),
-              )
-              .toList();
-      await BookDao(db).insert(book);
-      await SentenceDao(db).insertAll(fixed);
-      AppLog.d(_tag, '入库成功: ${book.id}');
-      return book;
-    } catch (e, s) {
-      AppLog.e(_tag, '入库失败: $e\n$s');
-      // 回滚：删除复制件 + 清句子 + 删 Book（若已插入）
-      if (copied != null) {
-        try {
-          await FileStore.delete(copied);
-        } catch (_) {}
-      }
-      if (bookId != null) {
-        try {
-          final db = await DatabaseProvider.database;
-          await BookDao(db).delete(bookId);
-        } catch (_) {}
-      }
-      rethrow;
-    }
-  }
-
-  // ===== 工具 =====
-
   String _fileName(String path) {
-    final parts = path.split(RegExp(r'[/\\]'));
-    return parts.isEmpty ? '文档' : parts.last;
+    final name = path.split(Platform.pathSeparator).last;
+    final dot = name.lastIndexOf('.');
+    return dot > 0 ? name.substring(0, dot) : name;
   }
 
   String _ext(String path) {
-    final name = _fileName(path);
-    final dot = name.lastIndexOf('.');
-    if (dot < 0) return 'bin';
-    final e = name.substring(dot + 1).toLowerCase();
-    return e.isEmpty ? 'bin' : e;
+    final dot = path.lastIndexOf('.');
+    return dot >= 0 ? path.substring(dot) : '';
   }
 }

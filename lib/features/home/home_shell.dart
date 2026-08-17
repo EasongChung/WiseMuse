@@ -1,12 +1,13 @@
 import 'package:flutter/material.dart';
 
 import '../../core/theme/app_theme.dart';
+import '../ai_chat/ai_chat_page.dart';
 import '../home/home_page.dart';
 import '../knowledge/knowledge_page.dart';
 import '../practice/practice_page.dart';
 import '../profile/profile_page.dart';
 
-/// [v0.3.0] 底部导航壳（4 Tab：书架/知识库/练习/我的）。
+/// [v0.3.0] [v0.1.48] 底部导航壳（5 Tab：书架/知识库/练习/问AI/我的）。
 ///
 /// IndexedStack 保留各 Tab 状态，切 Tab 不销毁。
 /// 主题沿用「暖色书房」。
@@ -24,6 +25,7 @@ class _HomeShellState extends State<HomeShell> {
     HomePage(),
     KnowledgePage(),
     PracticePage(),
+    AiChatPage(),
     ProfilePage(),
   ];
 
@@ -57,6 +59,11 @@ class _HomeShellState extends State<HomeShell> {
             icon: Icon(Icons.edit_note_outlined),
             selectedIcon: Icon(Icons.edit_note),
             label: '练习',
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.chat_bubble_outline),
+            selectedIcon: Icon(Icons.chat_bubble),
+            label: '问AI',
           ),
           NavigationDestination(
             icon: Icon(Icons.person_outline),

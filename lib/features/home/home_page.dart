@@ -13,11 +13,7 @@ import '../../services/rag/rag_retrieval_service.dart';
 import '../../widgets/import_sheet.dart';
 import '../reader/reader_page.dart';
 
-/// [v0.3.0] 书架 Tab body（HomeShell 的 Tab 0）。
-///
-/// - AppBar：标题「我的书架」
-/// - body：书本形态卡片网格（书脊色按来源区分，点击进 ReaderPage）
-/// - FAB：导入 → ImportSheet 三分支
+/// [v0.3.0] [v0.1.48] 书架 Tab：支持后台流式导入、卡片页数位置进度显示、即时加入书架。
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
 
@@ -32,13 +28,34 @@ class _HomePageState extends State<HomePage> {
   bool _loading = true;
   bool _importing = false;
 
-  // [v0.1.37] RAG 知识库索引状态：bookId → isIndexed
   Map<String, bool> _ragStatus = const {};
+  Timer? _progressTimer;
 
   @override
   void initState() {
     super.initState();
     _refresh();
+    // 轮询导入状态
+    _progressTimer = Timer.periodic(const Duration(milliseconds: 1500), (_) {
+      if (_books.any((b) => b.importStatus == 1)) {
+        _refreshQuietly();
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _progressTimer?.cancel();
+    super.dispose();
+  }
+
+  Future<void> _refreshQuietly() async {
+    try {
+      final db = await DatabaseProvider.database;
+      final list = await BookDao(db).getAll();
+      if (!mounted) return;
+      setState(() => _books = list);
+    } catch (_) {}
   }
 
   Future<void> _refreshRagStatus() async {
@@ -78,7 +95,6 @@ class _HomePageState extends State<HomePage> {
         _books = list;
         _loading = false;
       });
-      // 刷新后同步 RAG 状态
       unawaited(_refreshRagStatus());
     } catch (e, s) {
       AppLog.e(_tag, '加载书架失败: $e\n$s');
@@ -94,30 +110,31 @@ class _HomePageState extends State<HomePage> {
 
     setState(() => _importing = true);
     try {
-      final book = await _runImport(action);
-      if (book == null || !mounted) return;
-      AppLog.d(_tag, '导入成功: ${book.title}');
+      // 启动异步导入
+      _runImport(action)
+          .then((book) {
+            if (book != null) {
+              _refresh();
+              unawaited(_buildRagIndex(book));
+            }
+          })
+          .catchError((e) {
+            if (mounted) {
+              ScaffoldMessenger.of(
+                context,
+              ).showSnackBar(SnackBar(content: Text('导入失败：$e')));
+              _refresh();
+            }
+          });
+
+      // 立即刷新书架展示初始加入的书籍
+      await Future.delayed(const Duration(milliseconds: 300));
       await _refresh();
-      // [v0.1.37] 导入完成后异步构建 RAG 知识库
-      unawaited(_buildRagIndex(book));
-      if (!mounted) return;
-      // 打开阅读页
-      await Navigator.of(
-        context,
-      ).push(MaterialPageRoute<void>(builder: (_) => ReaderPage(book: book)));
-      await _refresh();
-    } catch (e, s) {
-      AppLog.e(_tag, '导入失败: $e\n$s');
-      if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text('导入失败：$e')));
     } finally {
       if (mounted) setState(() => _importing = false);
     }
   }
 
-  /// 按用户选择执行导入；用户取消（未选文件/图片）返回 null。
   Future<Book?> _runImport(ImportAction action) async {
     switch (action) {
       case ImportAction.camera:
@@ -137,12 +154,10 @@ class _HomePageState extends State<HomePage> {
     }
   }
 
-  /// 直接删除书籍（不弹确认——弹窗已由 [_BookCard._confirmDelete] 完成）。
   Future<void> _deleteBook(Book book) async {
     try {
       final db = await DatabaseProvider.database;
       await BookDao(db).delete(book.id);
-      // [v0.1.37] 同步删除 RAG 索引
       unawaited(RagRetrievalService.instance.deleteIndex(book.id));
       AppLog.d(_tag, '删除书籍: ${book.title}');
       await _refresh();
@@ -155,9 +170,7 @@ class _HomePageState extends State<HomePage> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(title: const Text('我的书架')),
-      body: Stack(
-        children: [_buildBody(), if (_importing) _buildImportOverlay()],
-      ),
+      body: _buildBody(),
       floatingActionButton: FloatingActionButton.extended(
         onPressed: _importing ? null : _onImport,
         icon: const Icon(Icons.add),
@@ -173,32 +186,6 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
-  /// 导入中的全屏遮罩（暖色书房风格）。
-  Widget _buildImportOverlay() {
-    return Container(
-      color: StudyPalette.ink.withValues(alpha: 0.35),
-      alignment: Alignment.center,
-      child: Card(
-        color: StudyPalette.parchment,
-        child: const Padding(
-          padding: EdgeInsets.symmetric(horizontal: 28, vertical: 20),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              SizedBox(
-                width: 32,
-                height: 32,
-                child: CircularProgressIndicator(strokeWidth: 3),
-              ),
-              SizedBox(height: 14),
-              Text('正在导入课本…', style: TextStyle(color: StudyPalette.ink)),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
   Widget _buildBody() {
     if (_loading) {
       return const Center(child: CircularProgressIndicator());
@@ -206,7 +193,6 @@ class _HomePageState extends State<HomePage> {
     if (_books.isEmpty) {
       return _buildEmptyShelf();
     }
-    // 书本形态卡片网格：两列，卡片含书脊 + 封面色 + 标题
     return GridView.builder(
       padding: const EdgeInsets.fromLTRB(16, 8, 16, 96),
       gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
@@ -223,6 +209,12 @@ class _HomePageState extends State<HomePage> {
           book: book,
           isIndexed: isIndexed,
           onTap: () async {
+            if (book.importStatus == 1) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('书籍正在后台解析/OCR中，请稍候…')),
+              );
+              return;
+            }
             await Navigator.of(context).push(
               MaterialPageRoute<void>(builder: (_) => ReaderPage(book: book)),
             );
@@ -243,7 +235,7 @@ class _HomePageState extends State<HomePage> {
           Container(
             width: 96,
             height: 96,
-            decoration: BoxDecoration(
+            decoration: const BoxDecoration(
               color: StudyPalette.parchmentDeep,
               shape: BoxShape.circle,
             ),
@@ -266,11 +258,6 @@ class _HomePageState extends State<HomePage> {
   }
 }
 
-/// 书本形态卡片：书脊（来源色）+ 封面色 + 标题 + RAG 索引状态。
-///
-/// 整体观感像一本书立在书架上，来源类型映射为不同书脊色
-/// （PDF=靛蓝 / 图片=橙 / Word=苔绿 / TXT=灰紫，见 [StudyPalette.spineFor]）。
-/// [v0.1.37] 新增 RAG 索引状态指示和「构建知识库」按钮。
 class _BookCard extends StatelessWidget {
   const _BookCard({
     required this.book,
@@ -289,6 +276,9 @@ class _BookCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final spine = StudyPalette.spineFor(book.source);
+    final isImporting = book.importStatus == 1;
+    final isFailed = book.importStatus == 2;
+
     return GestureDetector(
       onTap: onTap,
       onLongPress: () => _confirmDelete(context),
@@ -344,7 +334,7 @@ class _BookCard extends StatelessWidget {
                 ),
               ),
             ),
-            // 标题区
+            // 标题区与页数/进度区
             Padding(
               padding: const EdgeInsets.fromLTRB(14, 10, 14, 10),
               child: Column(
@@ -362,17 +352,48 @@ class _BookCard extends StatelessWidget {
                     ),
                   ),
                   const SizedBox(height: 4),
-                  Text(
-                    '${book.source.label}'
-                    '${book.pageCount != null ? ' · ${book.pageCount} 页' : ''}',
-                    style: const TextStyle(
-                      fontSize: 11,
-                      color: StudyPalette.inkSoft,
+                  if (isImporting)
+                    Row(
+                      children: [
+                        const SizedBox(
+                          width: 10,
+                          height: 10,
+                          child: CircularProgressIndicator(strokeWidth: 1.5),
+                        ),
+                        const SizedBox(width: 6),
+                        Expanded(
+                          child: Text(
+                            book.importProgress ?? '识别导入中...',
+                            style: const TextStyle(
+                              fontSize: 11,
+                              color: StudyPalette.ember,
+                              fontWeight: FontWeight.w500,
+                            ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                      ],
+                    )
+                  else if (isFailed)
+                    Text(
+                      book.importProgress ?? '导入失败',
+                      style: const TextStyle(
+                        fontSize: 11,
+                        color: Colors.redAccent,
+                      ),
+                    )
+                  else
+                    Text(
+                      '${book.source.label}'
+                      '${book.pageCount != null ? ' · ${book.pageCount} 页' : ''}',
+                      style: const TextStyle(
+                        fontSize: 11,
+                        color: StudyPalette.inkSoft,
+                      ),
                     ),
-                  ),
                   const SizedBox(height: 6),
-                  // [v0.1.37] RAG 知识库状态指示
-                  _buildRagStatus(),
+                  if (!isImporting && !isFailed) _buildRagStatus(),
                 ],
               ),
             ),
@@ -382,67 +403,54 @@ class _BookCard extends StatelessWidget {
     );
   }
 
-  /// [v0.1.37] RAG 知识库索引状态指示。
   Widget _buildRagStatus() {
     if (isIndexed) {
-      return Row(
+      return const Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          const Icon(Icons.check_circle, size: 12, color: StudyPalette.moss),
-          const SizedBox(width: 4),
-          const Text(
+          Icon(Icons.check_circle, size: 12, color: StudyPalette.moss),
+          SizedBox(width: 4),
+          Text(
             '知识库就绪',
             style: TextStyle(fontSize: 10, color: StudyPalette.moss),
           ),
         ],
       );
     }
-    return GestureDetector(
-      onTap: onBuildIndex,
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          const Icon(Icons.auto_awesome, size: 12, color: StudyPalette.ember),
-          const SizedBox(width: 4),
-          const Text(
-            '构建知识库',
-            style: TextStyle(
-              fontSize: 10,
-              color: StudyPalette.ember,
-              decoration: TextDecoration.underline,
-            ),
-          ),
-        ],
-      ),
-    );
+    return const SizedBox.shrink();
   }
 
-  Future<void> _confirmDelete(BuildContext context) async {
-    final confirmed = await showDialog<bool>(
+  void _confirmDelete(BuildContext context) {
+    showDialog<void>(
       context: context,
       builder:
-          (context) => AlertDialog(
+          (ctx) => AlertDialog(
             title: const Text('删除书籍'),
-            content: Text('确定删除「${book.title}」吗？相关句子会一并删除。'),
+            content: Text('确定要删除《${book.title}》吗？\n相关的句子和知识库索引也将被清除。'),
             actions: [
               TextButton(
-                onPressed: () => Navigator.of(context).pop(false),
+                onPressed: () => Navigator.of(ctx).pop(),
                 child: const Text('取消'),
               ),
-              FilledButton(
-                onPressed: () => Navigator.of(context).pop(true),
-                child: const Text('删除'),
+              TextButton(
+                onPressed: () {
+                  Navigator.of(ctx).pop();
+                  onDelete();
+                },
+                child: const Text(
+                  '删除',
+                  style: TextStyle(color: StudyPalette.ember),
+                ),
               ),
             ],
           ),
     );
-    if (confirmed == true) onDelete();
   }
 
   IconData _sourceIcon(BookSource source) {
     switch (source) {
       case BookSource.camera:
-        return Icons.photo_camera_outlined;
+        return Icons.camera_alt_outlined;
       case BookSource.gallery:
         return Icons.photo_library_outlined;
       case BookSource.pdf:
@@ -450,7 +458,7 @@ class _BookCard extends StatelessWidget {
       case BookSource.word:
         return Icons.description_outlined;
       case BookSource.txt:
-        return Icons.notes;
+        return Icons.article_outlined;
     }
   }
 }

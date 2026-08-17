@@ -48,16 +48,46 @@ class BookDao {
     return rows.isEmpty ? null : Book.fromMap(rows.first);
   }
 
-  /// 更新书籍（title/pageCount 等），同步刷新 updated_at。
+  /// 更新书籍（title/pageCount/lastReadPage 等），同步刷新 updated_at。
   Future<int> update(Book book) async {
     final data = book.toMap();
     data['updated_at'] = DateTime.now().microsecondsSinceEpoch;
     return db.update(_table, data, where: 'id = ?', whereArgs: [book.id]);
   }
 
+  /// [v0.1.48] 更新上次阅读位置
+  Future<int> updateLastRead(String bookId, int page) async {
+    return db.update(
+      _table,
+      {
+        'last_read_page': page,
+        'updated_at': DateTime.now().microsecondsSinceEpoch,
+      },
+      where: 'id = ?',
+      whereArgs: [bookId],
+    );
+  }
+
+  /// [v0.1.48] 更新导入进度
+  Future<int> updateImportStatus(
+    String bookId, {
+    required int status,
+    String? progress,
+    int? pageCount,
+  }) async {
+    final data = <String, dynamic>{
+      'import_status': status,
+      'import_progress': progress,
+      'updated_at': DateTime.now().microsecondsSinceEpoch,
+    };
+    if (pageCount != null) {
+      data['page_count'] = pageCount;
+    }
+    return db.update(_table, data, where: 'id = ?', whereArgs: [bookId]);
+  }
+
   /// 删除书籍及其引用。
   Future<int> delete(String id) async {
-    // 关联清理：生词引用置空、学习记录保留（历史）、句子级联删。
     await db.update(
       'word_entries',
       {'from_book_id': null},
@@ -65,7 +95,6 @@ class BookDao {
       whereArgs: [id],
     );
     await SentenceDao(db).deleteByBook(id);
-    // 知识库与测验级联（v3）
     await db.delete('knowledge_points', where: 'book_id = ?', whereArgs: [id]);
     await db.delete('quiz_attempts', where: 'book_id = ?', whereArgs: [id]);
     return db.delete(_table, where: 'id = ?', whereArgs: [id]);

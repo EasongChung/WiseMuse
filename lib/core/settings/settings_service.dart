@@ -251,11 +251,47 @@ class SettingsService {
   /// Embedding 模型名（默认 text-embedding-3-small）。
   static const kEmbeddingModel = 'embedding_model';
 
+  /// [v0.1.47] Embedding 可独立选择供应商（与 LLM 供应商解耦）。
+  static const kEmbeddingProviderId = 'embedding_provider_id';
+  static const kEmbeddingBaseUrl = 'embedding_api_base_url';
+  static const kEmbeddingApiKey = 'embedding_api_key';
+
   Future<String> getEmbeddingModel() async =>
       (await SharedPreferences.getInstance()).getString(kEmbeddingModel) ??
       'text-embedding-3-small';
   Future<void> setEmbeddingModel(String v) async =>
       (await SharedPreferences.getInstance()).setString(kEmbeddingModel, v);
+
+  Future<String?> getEmbeddingProviderId() async =>
+      (await SharedPreferences.getInstance()).getString(kEmbeddingProviderId);
+  Future<void> setEmbeddingProviderId(String v) async =>
+      (await SharedPreferences.getInstance()).setString(
+        kEmbeddingProviderId,
+        v,
+      );
+
+  Future<String> getEmbeddingBaseUrl() async =>
+      (await SharedPreferences.getInstance()).getString(kEmbeddingBaseUrl) ??
+      '';
+  Future<void> setEmbeddingBaseUrl(String v) async =>
+      (await SharedPreferences.getInstance()).setString(kEmbeddingBaseUrl, v);
+
+  Future<String> getEmbeddingApiKey() async =>
+      (await SharedPreferences.getInstance()).getString(kEmbeddingApiKey) ?? '';
+  Future<void> setEmbeddingApiKey(String v) async =>
+      (await SharedPreferences.getInstance()).setString(kEmbeddingApiKey, v);
+
+  /// Embedding 是否已配置：优先用专用 embedding 供应商配置，缺失时回退主 API 配置。
+  Future<bool> isEmbeddingConfigured() async {
+    final prefs = await SharedPreferences.getInstance();
+    final embUrl = prefs.getString(kEmbeddingBaseUrl) ?? '';
+    final embKey = prefs.getString(kEmbeddingApiKey) ?? '';
+    final url =
+        embUrl.isNotEmpty ? embUrl : (prefs.getString(kApiBaseUrl) ?? '');
+    final key = embKey.isNotEmpty ? embKey : (prefs.getString(kApiKey) ?? '');
+    final model = (await getEmbeddingModel()).trim();
+    return url.isNotEmpty && key.isNotEmpty && model.isNotEmpty;
+  }
 
   // ---- [v0.1.37] 本地模型管理 ----
 

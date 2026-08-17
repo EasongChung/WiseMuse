@@ -12,6 +12,7 @@ import '../../core/models/knowledge_point.dart';
 import '../../core/models/sentence.dart';
 import '../../core/models/word_entry.dart';
 import '../../core/settings/settings_service.dart';
+import '../../core/storage/book_dao.dart';
 import '../../core/storage/database.dart';
 import '../../core/storage/knowledge_point_dao.dart';
 import '../../core/storage/sentence_dao.dart';
@@ -157,6 +158,12 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
         await _tts.setVoice(voice);
       }
       await _loadSentences();
+      // [v0.1.48] 恢复上次阅读位置
+      final savedPage = widget.book.lastReadPage;
+      if (savedPage > 0) {
+        _pdfCurrentPage = savedPage;
+        _textPageIndex = savedPage;
+      }
       if (widget.book.source == BookSource.pdf) {
         await _initPdf();
       } else if (widget.book.source == BookSource.camera ||
@@ -232,6 +239,13 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
       _pdfSentenceCache.clear();
       _pageGeomCache.clear();
     });
+    // [v0.1.48] 保存阅读进度
+    DatabaseProvider.database
+        .then((db) {
+          BookDao(db).updateLastRead(widget.book.id, next);
+          widget.book.lastReadPage = next;
+        })
+        .catchError((_) {});
     if (_useOriginal && _pdfController != null) {
       _pdfController!.setPage(next);
     }
@@ -897,8 +911,12 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
     if (path == null) return const Text('缺少图片文件');
     return InteractiveViewer(
       transformationController: _imgTransformCtrl,
+      minScale: 0.8,
+      maxScale: 5.0,
+      panEnabled: true,
+      scaleEnabled: true,
       child: GestureDetector(
-        behavior: HitTestBehavior.opaque,
+        behavior: HitTestBehavior.translucent,
         onTapUp: (d) => _onImageTap(d),
         child: LayoutBuilder(
           builder: (context, constraints) {
@@ -1137,17 +1155,67 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
         if (!_isSpeechRequestCurrent(request)) break;
         if (!mounted) return;
 
+        final currentSentence = sentences[i];
+
         setState(() {
           _textHighlightIndex = i;
           _activeSentenceIndex = i;
-          _activeSentenceText = sentences[i].text;
+          _activeSentenceText = currentSentence.text;
         });
+
+        // [v0.1.48] 连续朗读时同步高亮：如果是 PDF 视图下发原生高亮，如果是图片视图高亮几何
+        if (_useOriginal &&
+            widget.book.source == BookSource.pdf &&
+            _pdfController != null) {
+          final c = _pdfController!;
+          final geom = await _getPageGeom(
+            widget.book.originalFilePath ?? '',
+            _pdfCurrentPage,
+          );
+          if (geom != null && geom.chars.isNotEmpty) {
+            final pdfSentences = _pdfSentenceCache.putIfAbsent(
+              _pdfCurrentPage,
+              () {
+                return buildSentences(geom.chars);
+              },
+            );
+            final matched =
+                pdfSentences
+                    .where(
+                      (s) =>
+                          s.text.contains(currentSentence.text) ||
+                          currentSentence.text.contains(s.text),
+                    )
+                    .firstOrNull;
+            if (matched != null) {
+              await c.setHighlights(_pdfCurrentPage, matched.rects);
+            }
+          }
+        } else if (_useOriginal &&
+            (widget.book.source == BookSource.camera ||
+                widget.book.source == BookSource.gallery)) {
+          final matched =
+              _imgSentences
+                  .where(
+                    (s) =>
+                        s.text.contains(currentSentence.text) ||
+                        currentSentence.text.contains(s.text),
+                  )
+                  .firstOrNull;
+          if (matched != null) {
+            setState(() => _imgHighlight = matched);
+          }
+        }
+
         _sheetRebuild?.call();
 
-        AppLog.d(_tag, '连读句子 ($i/${sentences.length}): "${sentences[i].text}"');
-        final ok = await _tts.speak(sentences[i].text);
+        AppLog.d(
+          _tag,
+          '连读句子 ($i/${sentences.length}): "${currentSentence.text}"',
+        );
+        final ok = await _tts.speak(currentSentence.text);
         if (!ok && _isSpeechRequestCurrent(request)) {
-          AppLog.w(_tag, '连读 TTS 未完成: "${sentences[i].text}"');
+          AppLog.w(_tag, '连读 TTS 未完成: "${currentSentence.text}"');
           break;
         }
 

@@ -3,7 +3,6 @@ import 'package:flutter/material.dart';
 import '../../core/debug/app_log.dart';
 import '../../core/models/book.dart';
 import '../../core/models/knowledge_point.dart';
-import '../../core/settings/settings_service.dart';
 import '../../core/storage/book_dao.dart';
 import '../../core/storage/database.dart';
 import '../../core/storage/knowledge_point_dao.dart';
@@ -13,9 +12,16 @@ import '../../services/knowledge_extraction_service.dart';
 import 'knowledge_detail_sheet.dart';
 import 'knowledge_edit_sheet.dart';
 
-/// [v0.3.0] [v0.1.38] 知识库页：三级钻取 书→单元→课/页→知识点。
-///
-/// 顶部 Chips 筛选类型，主体按书/单元/课三层展开浏览，FAB 添加。
+enum KnowledgeSortOrder {
+  updatedAtDesc('最近更新'),
+  titleAsc('书名 (A-Z)'),
+  countDesc('知识点数量');
+
+  const KnowledgeSortOrder(this.label);
+  final String label;
+}
+
+/// [v0.3.0] [v0.1.48] 知识库页：三级钻取 书→单元/页→课/页→知识点，支持后台提取与排序管理。
 class KnowledgePage extends StatefulWidget {
   const KnowledgePage({super.key});
 
@@ -27,21 +33,40 @@ class _KnowledgePageState extends State<KnowledgePage> {
   static const _tag = 'knowledge';
 
   KnowledgeType? _filterType;
+  KnowledgeSortOrder _sortOrder = KnowledgeSortOrder.updatedAtDesc;
   List<Book> _books = const [];
   Map<String, Map<int, Map<int, List<KnowledgePoint>>>> _groupedPoints =
       const {};
   bool _loading = true;
 
+  KnowledgeTaskProgress? _backgroundProgress;
+
   @override
   void initState() {
     super.initState();
+    KnowledgeExtractionService.instance.addListener(_onProgressUpdate);
     _load();
+  }
+
+  @override
+  void dispose() {
+    KnowledgeExtractionService.instance.removeListener(_onProgressUpdate);
+    super.dispose();
+  }
+
+  void _onProgressUpdate(KnowledgeTaskProgress p) {
+    if (mounted) {
+      setState(() => _backgroundProgress = p);
+      if (!p.isRunning && p.done == p.total) {
+        _load();
+      }
+    }
   }
 
   Future<void> _load() async {
     try {
       final db = await DatabaseProvider.database;
-      final books = await BookDao(db).getAll();
+      var books = await BookDao(db).getAll();
       final dao = KnowledgePointDao(db);
       final allPoints = await dao.getAll(type: _filterType);
 
@@ -52,6 +77,19 @@ class _KnowledgePageState extends State<KnowledgePage> {
         final unitMap = grouped.putIfAbsent(bookId, () => {});
         final pageMap = unitMap.putIfAbsent(p.chapter ?? 0, () => {});
         pageMap.putIfAbsent(p.page ?? 0, () => []).add(p);
+      }
+
+      // 排序逻辑
+      if (_sortOrder == KnowledgeSortOrder.titleAsc) {
+        books.sort((a, b) => a.title.compareTo(b.title));
+      } else if (_sortOrder == KnowledgeSortOrder.countDesc) {
+        books.sort((a, b) {
+          final countA = _countPoints(grouped[a.id] ?? const {});
+          final countB = _countPoints(grouped[b.id] ?? const {});
+          return countB.compareTo(countA);
+        });
+      } else {
+        books.sort((a, b) => b.updatedAt.compareTo(a.updatedAt));
       }
 
       if (!mounted) return;
@@ -107,13 +145,10 @@ class _KnowledgePageState extends State<KnowledgePage> {
     return StudyPalette.moss;
   }
 
-  /// 单元标签（chapter=0 表示无单元分配）。
-  String _unitLabel(int chapter) => chapter <= 0 ? '未分类' : '第 $chapter 单元';
+  String _unitLabel(int chapter) => chapter <= 0 ? '按页浏览' : '第 $chapter 单元';
 
-  /// 课/页标签（page=0 表示无页码）。
-  String _pageLabel(int page) => page <= 0 ? '通用' : '第 $page 课';
+  String _pageLabel(int page) => page <= 0 ? '第 1 页' : '第 ${page + 1} 页';
 
-  /// 统计叶子知识点数。
   int _countPoints(Map<int, Map<int, List<KnowledgePoint>>> unitMap) {
     var count = 0;
     for (final pageMap in unitMap.values) {
@@ -127,12 +162,45 @@ class _KnowledgePageState extends State<KnowledgePage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('知识库')),
+      appBar: AppBar(
+        title: const Text('知识库'),
+        actions: [
+          PopupMenuButton<KnowledgeSortOrder>(
+            icon: const Icon(Icons.sort),
+            tooltip: '排序方式',
+            onSelected: (order) {
+              setState(() {
+                _sortOrder = order;
+                _loading = true;
+              });
+              _load();
+            },
+            itemBuilder:
+                (context) => [
+                  const PopupMenuItem(
+                    value: KnowledgeSortOrder.updatedAtDesc,
+                    child: Text('最近更新'),
+                  ),
+                  const PopupMenuItem(
+                    value: KnowledgeSortOrder.titleAsc,
+                    child: Text('书名 (A-Z)'),
+                  ),
+                  const PopupMenuItem(
+                    value: KnowledgeSortOrder.countDesc,
+                    child: Text('知识点数量'),
+                  ),
+                ],
+          ),
+        ],
+      ),
       body:
           _loading
               ? const Center(child: CircularProgressIndicator())
               : Column(
                 children: [
+                  if (_backgroundProgress != null &&
+                      _backgroundProgress!.isRunning)
+                    _buildBackgroundProgressBar(),
                   _buildFilterChips(),
                   const Divider(height: 1),
                   Expanded(child: _buildKnowledgeTree()),
@@ -145,6 +213,43 @@ class _KnowledgePageState extends State<KnowledgePage> {
           '添加',
           style: TextStyle(fontFamily: 'ZCOOLKuaiLe', fontSize: 16),
         ),
+      ),
+    );
+  }
+
+  Widget _buildBackgroundProgressBar() {
+    final p = _backgroundProgress!;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      color: StudyPalette.parchmentDeep,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const SizedBox(
+                width: 14,
+                height: 14,
+                child: CircularProgressIndicator(strokeWidth: 2),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  '正在提取《${p.bookTitle}》知识库 (${p.done}/${p.total}页，发现${p.pointCount}个)',
+                  style: const TextStyle(fontSize: 12, color: StudyPalette.ink),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          LinearProgressIndicator(
+            value: p.progress,
+            backgroundColor: StudyPalette.linen,
+            color: StudyPalette.ember,
+          ),
+        ],
       ),
     );
   }
@@ -186,66 +291,77 @@ class _KnowledgePageState extends State<KnowledgePage> {
     );
   }
 
-  /// 知识库树：书 → 单元 → 课/页 → 知识点条目。
   Widget _buildKnowledgeTree() {
     if (_groupedPoints.isEmpty) {
       return Center(
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(
+            const Icon(
               Icons.psychology_outlined,
               size: 48,
               color: StudyPalette.inkSoft,
             ),
             const SizedBox(height: 12),
+            Text('知识库暂无内容', style: titleStyle(fontSize: 16)),
+            const SizedBox(height: 6),
             const Text(
-              '知识库暂无内容',
-              style: TextStyle(color: StudyPalette.inkSoft),
-            ),
-            const SizedBox(height: 4),
-            const Text(
-              '通过「添加」手动录入或使用 AI 提取',
-              style: TextStyle(fontSize: 12, color: StudyPalette.inkSoft),
+              '点击右下角「添加」提取或录入知识点',
+              style: TextStyle(fontSize: 13, color: StudyPalette.inkSoft),
             ),
           ],
         ),
       );
     }
 
-    final sortedBooks =
-        _books.where((b) => _groupedPoints.containsKey(b.id)).toList();
-    final orphanKeys = _groupedPoints.keys.where(
-      (k) => k.isEmpty || !_books.any((b) => b.id == k),
-    );
+    final booksWithPoints = <Book>[];
+    for (final b in _books) {
+      if (_groupedPoints.containsKey(b.id)) {
+        booksWithPoints.add(b);
+      }
+    }
+    for (final entry in _groupedPoints.entries) {
+      if (!booksWithPoints.any((b) => b.id == entry.key)) {
+        booksWithPoints.add(
+          Book.create(
+            title: entry.key.isEmpty ? '自定义录入' : '已删除书籍',
+            source: BookSource.txt,
+          ),
+        );
+      }
+    }
 
-    return ListView(
-      padding: const EdgeInsets.fromLTRB(12, 4, 12, 96),
-      children: [
-        // 已关联书籍 → 三级钻取
-        ...sortedBooks.map((book) => _buildBookSection(book)),
-        // 未关联书籍的知识点
-        ...orphanKeys.map((key) => _buildOrphanSection(key)),
-      ],
+    return ListView.builder(
+      padding: const EdgeInsets.fromLTRB(12, 4, 12, 80),
+      itemCount: booksWithPoints.length,
+      itemBuilder: (context, index) {
+        final book = booksWithPoints[index];
+        final unitMap = _groupedPoints[book.id] ?? const {};
+        return _buildBookSection(book, unitMap);
+      },
     );
   }
 
-  /// 书层级：可展开显示单元列表。
-  Widget _buildBookSection(Book book) {
-    final unitMap = _groupedPoints[book.id] ?? {};
-    if (unitMap.isEmpty) return const SizedBox.shrink();
+  Widget _buildBookSection(
+    Book book,
+    Map<int, Map<int, List<KnowledgePoint>>> unitMap,
+  ) {
     final totalPoints = _countPoints(unitMap);
     final sortedUnits =
         unitMap.entries.toList()..sort((a, b) => a.key.compareTo(b.key));
 
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 4),
+    return Card(
+      margin: const EdgeInsets.symmetric(vertical: 4),
+      elevation: 0,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
+        side: const BorderSide(color: StudyPalette.linen),
+      ),
       child: ExpansionTile(
-        initiallyExpanded: false,
-        leading: const Icon(
-          Icons.library_books,
-          size: 20,
-          color: StudyPalette.spinePdf,
+        tilePadding: const EdgeInsets.symmetric(horizontal: 12),
+        leading: Icon(
+          Icons.menu_book,
+          color: StudyPalette.spineFor(book.source),
         ),
         title: Text(book.title, style: titleStyle(fontSize: 15)),
         trailing: Row(
@@ -265,10 +381,58 @@ class _KnowledgePageState extends State<KnowledgePage> {
                 ),
               ),
             ),
-            const Icon(
-              Icons.expand_more,
-              size: 20,
-              color: StudyPalette.inkSoft,
+            PopupMenuButton<String>(
+              icon: const Icon(Icons.more_vert, size: 18),
+              onSelected: (action) async {
+                if (action == 'clear') {
+                  final ok = await showDialog<bool>(
+                    context: context,
+                    builder:
+                        (ctx) => AlertDialog(
+                          title: const Text('清空知识点'),
+                          content: Text('确定要清空《${book.title}》的所有知识点吗？'),
+                          actions: [
+                            TextButton(
+                              onPressed: () => Navigator.pop(ctx, false),
+                              child: const Text('取消'),
+                            ),
+                            TextButton(
+                              onPressed: () => Navigator.pop(ctx, true),
+                              child: const Text(
+                                '清空',
+                                style: TextStyle(color: Colors.red),
+                              ),
+                            ),
+                          ],
+                        ),
+                  );
+                  if (ok == true) {
+                    final db = await DatabaseProvider.database;
+                    await db.delete(
+                      'knowledge_points',
+                      where: 'book_id = ?',
+                      whereArgs: [book.id],
+                    );
+                    _load();
+                  }
+                } else if (action == 're_extract') {
+                  KnowledgeExtractionService.instance.extractBook(book);
+                }
+              },
+              itemBuilder:
+                  (context) => [
+                    const PopupMenuItem(
+                      value: 're_extract',
+                      child: Text('重新提取知识库'),
+                    ),
+                    const PopupMenuItem(
+                      value: 'clear',
+                      child: Text(
+                        '清空本书知识点',
+                        style: TextStyle(color: Colors.red),
+                      ),
+                    ),
+                  ],
             ),
           ],
         ),
@@ -280,7 +444,6 @@ class _KnowledgePageState extends State<KnowledgePage> {
     );
   }
 
-  /// 单元层级：可展开显示课/页列表。
   Widget _buildUnitSection(
     String bookId,
     int chapter,
@@ -334,7 +497,6 @@ class _KnowledgePageState extends State<KnowledgePage> {
     );
   }
 
-  /// 课/页层级：知识点条目列表。
   Widget _buildPageSection(
     String bookId,
     int chapter,
@@ -348,7 +510,7 @@ class _KnowledgePageState extends State<KnowledgePage> {
         leading: const Icon(
           Icons.description_outlined,
           size: 16,
-          color: StudyPalette.spineWord,
+          color: StudyPalette.inkSoft,
         ),
         title: Text(
           _pageLabel(page),
@@ -360,12 +522,15 @@ class _KnowledgePageState extends State<KnowledgePage> {
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
               decoration: BoxDecoration(
-                color: StudyPalette.mossSoft.withValues(alpha: 0.5),
+                color: StudyPalette.parchmentDeep,
                 borderRadius: BorderRadius.circular(8),
               ),
               child: Text(
                 '${points.length}',
-                style: const TextStyle(fontSize: 11, color: StudyPalette.moss),
+                style: const TextStyle(
+                  fontSize: 10,
+                  color: StudyPalette.inkSoft,
+                ),
               ),
             ),
             const Icon(
@@ -375,68 +540,31 @@ class _KnowledgePageState extends State<KnowledgePage> {
             ),
           ],
         ),
-        children: points.map((p) => _buildKnowledgeTile(p)).toList(),
+        children: points.map((p) => _buildPointTile(p)).toList(),
       ),
     );
   }
 
-  /// 未关联书籍的知识点。
-  Widget _buildOrphanSection(String bookId) {
-    final unitMap = _groupedPoints[bookId] ?? {};
-    if (unitMap.isEmpty) return const SizedBox.shrink();
-
-    // 拍平所有知识点
-    final points = <KnowledgePoint>[];
-    for (final pageMap in unitMap.values) {
-      for (final lst in pageMap.values) {
-        points.addAll(lst);
-      }
-    }
-    if (points.isEmpty) return const SizedBox.shrink();
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Padding(
-          padding: const EdgeInsets.symmetric(vertical: 8),
-          child: Row(
-            children: [
-              Icon(
-                Icons.bookmark_border,
-                size: 18,
-                color: StudyPalette.inkSoft,
-              ),
-              const SizedBox(width: 6),
-              Text(
-                '其他',
-                style: titleStyle(fontSize: 15, color: StudyPalette.inkSoft),
-              ),
-            ],
-          ),
-        ),
-        ...points.map((p) => _buildKnowledgeTile(p)),
-        const SizedBox(height: 4),
-      ],
-    );
-  }
-
-  /// 单个知识点条目（与之前一致）。
-  Widget _buildKnowledgeTile(KnowledgePoint kp) {
-    return Card(
-      margin: const EdgeInsets.only(bottom: 4),
+  Widget _buildPointTile(KnowledgePoint kp) {
+    return Container(
+      margin: const EdgeInsets.only(left: 48, right: 8, top: 2, bottom: 2),
+      decoration: BoxDecoration(
+        color: StudyPalette.parchment.withValues(alpha: 0.5),
+        borderRadius: BorderRadius.circular(8),
+      ),
       child: ListTile(
         dense: true,
+        contentPadding: const EdgeInsets.symmetric(horizontal: 8),
         leading: Icon(
           _typeIcon(kp.type),
+          size: 16,
           color: _typeIconColor(kp.type),
-          size: 22,
         ),
         title: Text(
           kp.text,
-          style: TextStyle(
-            fontWeight: FontWeight.w600,
-            color: StudyPalette.onSurfaceResolved(context),
-          ),
+          style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
         ),
         subtitle:
             kp.definition != null && kp.definition!.isNotEmpty
@@ -445,7 +573,7 @@ class _KnowledgePageState extends State<KnowledgePage> {
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: const TextStyle(
-                    fontSize: 12,
+                    fontSize: 11,
                     color: StudyPalette.inkSoft,
                   ),
                 )
@@ -485,7 +613,7 @@ class _KnowledgePageState extends State<KnowledgePage> {
                 ListTile(
                   leading: const Icon(Icons.auto_awesome),
                   title: const Text('AI 提取知识点'),
-                  subtitle: const Text('从已有书籍中自动提取'),
+                  subtitle: const Text('从已有书籍中后台提取'),
                   onTap: () {
                     Navigator.pop(context);
                     _showAiExtract();
@@ -508,7 +636,6 @@ class _KnowledgePageState extends State<KnowledgePage> {
   }
 
   Future<void> _showAiExtract() async {
-    // 选择有句子的书籍
     final db = await DatabaseProvider.database;
     final sentenceDao = SentenceDao(db);
     final booksWithSentences = <Book>[];
@@ -525,7 +652,6 @@ class _KnowledgePageState extends State<KnowledgePage> {
       return;
     }
 
-    // 选书
     final book = await showDialog<Book>(
       context: context,
       builder:
@@ -548,150 +674,14 @@ class _KnowledgePageState extends State<KnowledgePage> {
     );
     if (book == null || !mounted) return;
 
-    // 获取当前模型配置信息（用于弹窗呈现）
-    final preferOffline = await SettingsService.instance.getPreferOffline();
-    final localModel = await SettingsService.instance.getDefaultLocalModel();
-    final apiModel = await SettingsService.instance.getApiModel();
-    final engineInfo =
-        preferOffline
-            ? '本地模型优先（${localModel ?? '未选默认'}）'
-            : '在线模型（${(apiModel != null && apiModel.isNotEmpty) ? apiModel : 'OpenAI兼容'}）';
-
-    // 进度弹窗
-    if (!mounted) return;
-    void Function(void Function())? updateDialog;
-    var currentDone = 0;
-    var currentTotal = 0;
-    var currentPoints = 0;
-    var currentErrors = <String>[];
-    var currentStatus = '正在连接模型并准备提取…';
-
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder:
-          (ctx) => StatefulBuilder(
-            builder: (ctx, setDialogState) {
-              updateDialog = setDialogState;
-              return AlertDialog(
-                title: const Text('AI 提取知识点'),
-                content: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 8,
-                        vertical: 4,
-                      ),
-                      decoration: BoxDecoration(
-                        color: StudyPalette.linen,
-                        borderRadius: BorderRadius.circular(6),
-                      ),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          const Icon(
-                            Icons.psychology,
-                            size: 16,
-                            color: StudyPalette.spinePdf,
-                          ),
-                          const SizedBox(width: 6),
-                          Flexible(
-                            child: Text(
-                              '模型：$engineInfo',
-                              style: const TextStyle(
-                                fontSize: 11,
-                                color: StudyPalette.ink,
-                                fontWeight: FontWeight.w500,
-                              ),
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-                    const LinearProgressIndicator(),
-                    const SizedBox(height: 12),
-                    Text(
-                      currentTotal > 0
-                          ? '正在分析第 $currentDone/$currentTotal 页…'
-                          : currentStatus,
-                      style: const TextStyle(
-                        fontSize: 13,
-                        fontWeight: FontWeight.w500,
-                        color: StudyPalette.ink,
-                      ),
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      '已提炼 $currentPoints 条知识点'
-                      '${currentErrors.isNotEmpty ? '，${currentErrors.length} 个错误' : ''}',
-                      style: const TextStyle(
-                        fontSize: 12,
-                        color: StudyPalette.inkSoft,
-                      ),
-                    ),
-                  ],
-                ),
-              );
-            },
-          ),
-    );
-
-    // 开始提取
-    final service = KnowledgeExtractionService();
-    final result = await service.extractBook(
-      book,
-      onProgress: (d, t) {
-        currentDone = d;
-        currentTotal = t;
-        currentStatus = '正在提取第 $d/$t 页知识点…';
-        updateDialog?.call(() {});
-      },
-    );
-
-    // 关闭进度弹窗
-    if (mounted) Navigator.of(context).pop();
-
-    // 显示结果
-    if (!mounted) return;
-    showDialog(
-      context: context,
-      builder:
-          (ctx) => AlertDialog(
-            title: const Text('提取完成'),
-            content: Text(
-              '从 「${book.title}」 中提取了 ${result.points.length} 条知识点\n'
-              '${result.errors.isEmpty ? '' : '${result.errors.length} 个页面提取失败'}',
-            ),
-            actions: [
-              FilledButton(
-                onPressed: () => Navigator.pop(ctx),
-                child: const Text('确定'),
-              ),
-            ],
-          ),
-    );
-    _load();
+    KnowledgeExtractionService.instance.extractBook(book);
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text('已启动《${book.title}》后台提取知识点')));
   }
 
   Future<void> _showManualAdd() async {
-    final result = await KnowledgeEditSheet.show(context, books: _books);
-    if (result != null && mounted) {
-      try {
-        final db = await DatabaseProvider.database;
-        await KnowledgePointDao(db).insert(result);
-        AppLog.d(_tag, '手动添加知识点: ${result.text}');
-        _load();
-      } catch (e, s) {
-        AppLog.e(_tag, '添加知识点失败: $e\n$s');
-        if (!mounted) return;
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('添加失败：$e')));
-      }
-    }
+    final result = await KnowledgeEditSheet.show(context);
+    if (result != null) _load();
   }
 }

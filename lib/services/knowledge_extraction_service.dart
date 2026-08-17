@@ -9,30 +9,64 @@ import 'ai_service.dart';
 import 'chapter_indexer.dart';
 import 'sentence_splitter.dart';
 
-/// [v0.3.0] AI 知识提取服务：按页/章节提取知识点并落知识库。
-///
-/// 流程：
-/// 1. 拼接 scope 句子 → 超长按句分块
-/// 2. AiService.complete(prompt, jsonObject:true) → 双引擎回落
-/// 3. parseLooseJsonObject 解析 → 校验/去重/批内+库内去重
-/// 4. KnowledgePointDao.upsertByText 落库（AI 重复提取不建重复行）
-///
-/// 依赖 AiService（S2）+ KnowledgePointDao（S1）。
+/// 知识库提取任务状态。
+class KnowledgeTaskProgress {
+  final String bookId;
+  final String bookTitle;
+  final int done;
+  final int total;
+  final int pointCount;
+  final bool isRunning;
+  final String? error;
+
+  const KnowledgeTaskProgress({
+    required this.bookId,
+    required this.bookTitle,
+    required this.done,
+    required this.total,
+    required this.pointCount,
+    required this.isRunning,
+    this.error,
+  });
+
+  double get progress => total > 0 ? (done / total).clamp(0.0, 1.0) : 0.0;
+}
+
+/// [v0.3.0] AI 知识提取服务：按页/章节提取知识点并落知识库（支持按页回落与全局后台任务）。
 class KnowledgeExtractionService {
   KnowledgeExtractionService({AiService? ai}) : _ai = ai ?? AiService();
 
+  static final KnowledgeExtractionService instance =
+      KnowledgeExtractionService();
+
   final AiService _ai;
 
-  /// 单次调用文本上限（安全 token 预算，约 750 token 按中文）。
+  /// 全局任务状态回调列表。
+  final List<void Function(KnowledgeTaskProgress)> _listeners = [];
+  KnowledgeTaskProgress? _currentTask;
+
+  KnowledgeTaskProgress? get currentTask => _currentTask;
+
+  void addListener(void Function(KnowledgeTaskProgress) listener) {
+    _listeners.add(listener);
+    if (_currentTask != null) listener(_currentTask!);
+  }
+
+  void removeListener(void Function(KnowledgeTaskProgress) listener) {
+    _listeners.remove(listener);
+  }
+
+  void _notify(KnowledgeTaskProgress p) {
+    _currentTask = p;
+    for (final l in List.from(_listeners)) {
+      l(p);
+    }
+  }
+
+  /// 单次调用文本上限（安全 token 预算）。
   static const int maxCharsPerCall = 3000;
 
   /// 按 scope 提取知识点。
-  ///
-  /// [bookId] 书籍 id；[page]/[chapter] 可选（null 时提取整本或整章）；
-  /// [sentences] 该 scope 的句子列表（调用方预取）。
-  /// [persist] 是否写库（false 返回预览结果，用于测试）。
-  ///
-  /// 返回提取结果（summary + 知识点列表 + 错误信息）。
   Future<KnowledgeExtractionResult> extractForScope({
     required String bookId,
     int? page,
@@ -41,10 +75,9 @@ class KnowledgeExtractionService {
     bool persist = true,
   }) async {
     if (sentences.isEmpty) {
-      return KnowledgeExtractionResult(errors: ['该范围无文本内容']);
+      return const KnowledgeExtractionResult(errors: ['该范围无文本内容']);
     }
 
-    // 拼合文本
     final fullText = sentences.map((s) => s.text).join('\n');
     final chunks = _splitIntoChunks(fullText);
 
@@ -74,7 +107,6 @@ class KnowledgeExtractionService {
         continue;
       }
 
-      // 提取 summary
       if (summary == null) {
         summary = parsed['summary'] as String?;
       } else {
@@ -82,7 +114,6 @@ class KnowledgeExtractionService {
         if (extra != null) summary = '$summary\n$extra';
       }
 
-      // 提取知识点
       final kps = parsed['knowledge_points'] as List?;
       if (kps == null) {
         errors.add('第 ${i + 1}/${chunks.length} 块未提取到知识点');
@@ -111,7 +142,7 @@ class KnowledgeExtractionService {
       }
     }
 
-    // 批内去重（按 bookId+type+text 去重，已存在则更新旧条目的归属）
+    // 批内去重
     final seen = <String>{};
     final deduped = <KnowledgePoint>[];
     for (final kp in allPoints) {
@@ -145,22 +176,23 @@ class KnowledgeExtractionService {
     );
   }
 
-  /// 整本批量提取，按页逐页处理，带回调和进度。
+  /// 整本批量提取（支持后台运行与通知）。
   Future<KnowledgeExtractionResult> extractBook(
     Book book, {
     void Function(int done, int total)? onProgress,
-    AiService? aiOverride,
   }) async {
     final db = await DatabaseProvider.database;
     final sentenceDao = SentenceDao(db);
     final allSentences = await sentenceDao.getByBook(book.id);
 
     if (allSentences.isEmpty) {
-      return KnowledgeExtractionResult(errors: ['书籍无可提取文本']);
+      return const KnowledgeExtractionResult(errors: ['书籍无可提取文本']);
     }
 
-    // 章节索引
+    // [v0.1.48] 章节索引与智能按页回落
     final indexedSentences = ChapterIndexer.assignChapters(allSentences);
+    final detectedChapters = indexedSentences.map((s) => s.chapter).toSet();
+    final hasValidChapters = detectedChapters.length >= 2;
 
     // 按页分组
     final pageGroups = <int, List<Sentence>>{};
@@ -174,10 +206,22 @@ class KnowledgeExtractionService {
     var done = 0;
     final total = pageGroups.length;
 
+    _notify(
+      KnowledgeTaskProgress(
+        bookId: book.id,
+        bookTitle: book.title,
+        done: 0,
+        total: total,
+        pointCount: 0,
+        isRunning: true,
+      ),
+    );
+
     for (final entry in pageGroups.entries) {
       final page = entry.key;
       final sentences = entry.value;
-      final chapter = sentences.first.chapter;
+      // 若章节结构不清晰，回落为 0（UI 侧显示按页）
+      final chapter = hasValidChapters ? sentences.first.chapter : 0;
 
       final result = await extractForScope(
         bookId: book.id,
@@ -196,7 +240,28 @@ class KnowledgeExtractionService {
 
       done++;
       onProgress?.call(done, total);
+      _notify(
+        KnowledgeTaskProgress(
+          bookId: book.id,
+          bookTitle: book.title,
+          done: done,
+          total: total,
+          pointCount: allPoints.length,
+          isRunning: done < total,
+        ),
+      );
     }
+
+    _notify(
+      KnowledgeTaskProgress(
+        bookId: book.id,
+        bookTitle: book.title,
+        done: total,
+        total: total,
+        pointCount: allPoints.length,
+        isRunning: false,
+      ),
+    );
 
     return KnowledgeExtractionResult(
       summary: summary,
@@ -205,7 +270,6 @@ class KnowledgeExtractionService {
     );
   }
 
-  /// 构造 AI prompt。
   String _buildPrompt(
     String text, {
     int? page,
@@ -214,12 +278,10 @@ class KnowledgeExtractionService {
     int chunkIndex = 0,
   }) {
     final scopeTag =
-        page != null && chapter != null
-            ? '（第 $page 页，第 $chapter 章）'
+        page != null && chapter != null && chapter > 0
+            ? '（第 $page 页，第 $chapter 单元）'
             : page != null
             ? '（第 $page 页）'
-            : chapter != null
-            ? '（第 $chapter 章）'
             : '（全书）';
     final chunkTag =
         totalChunks > 1 ? '（第 ${chunkIndex + 1}/$totalChunks 块）' : '';
@@ -244,7 +306,6 @@ $text
 只输出 JSON，不要多余文字。''';
   }
 
-  /// 超长文本按句分块（保持句子完整）。
   List<String> _splitIntoChunks(String text) {
     if (text.length <= maxCharsPerCall) return [text];
 
@@ -271,12 +332,7 @@ class KnowledgeExtractionResult {
     this.errors = const [],
   });
 
-  /// 全文概要（各块拼接）。
   final String? summary;
-
-  /// 本次提取的知识点（已去重、已落库？看 persist 参数）。
   final List<KnowledgePoint> points;
-
-  /// 失败信息（非致命，UI 可提示用户重试该块）。
   final List<String> errors;
 }
