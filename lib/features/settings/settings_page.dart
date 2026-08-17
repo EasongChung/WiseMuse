@@ -81,10 +81,12 @@ class _SettingsPageState extends State<SettingsPage> {
   // [v0.1.44] 供应商管理
   List<ApiProvider> _providers = const [];
   String _activeProviderId = 'siliconflow';
+  String _activeEmbeddingProviderId = 'siliconflow';
   final _baseUrlCtrl = TextEditingController();
   final _apiKeyCtrl = TextEditingController();
   final _customModelCtrl = TextEditingController();
   bool _fetchingModels = false;
+  String _currentLlmModel = '';
 
   bool _initDone = false;
 
@@ -140,13 +142,17 @@ class _SettingsPageState extends State<SettingsPage> {
     _providers = await _settings.getProviders();
     _activeProviderId =
         (await _settings.getActiveProviderId()) ?? 'siliconflow';
+    _activeEmbeddingProviderId =
+        (await _settings.getEmbeddingProviderId()) ?? _activeProviderId;
+    _currentLlmModel = (await _settings.getApiModel()) ?? '';
+    _embeddingModel = await _settings.getEmbeddingModel();
+
     await _syncActiveProviderToFields();
 
     // 扫描本地 GGUF 模型
     _localModels = await _scanLocalModels();
 
     // RAG / 本地模型管理
-    _embeddingModel = await _settings.getEmbeddingModel();
     _autoLoadLocal = await _settings.getAutoLoadLocalModel();
     _defaultLocalModel = await _settings.getDefaultLocalModel();
     unawaited(_refreshRagStatus());
@@ -179,20 +185,33 @@ class _SettingsPageState extends State<SettingsPage> {
     );
   }
 
+  ApiProvider get _activeEmbeddingProvider {
+    return _providers.firstWhere(
+      (p) => p.id == _activeEmbeddingProviderId,
+      orElse: () => _activeProvider,
+    );
+  }
+
   Future<void> _syncActiveProviderToFields() async {
     final p = _activeProvider;
     _baseUrlCtrl.text = p.baseUrl;
     _apiKeyCtrl.text = p.apiKey;
-    if (p.models.isNotEmpty) {
-      _customModelCtrl.text = p.models.first;
+
+    // 记忆模型：若当前已有生效模型且在列表中则保留，否则优先用列表第一个
+    if (_currentLlmModel.isEmpty || !p.models.contains(_currentLlmModel)) {
+      if (p.models.isNotEmpty) {
+        _currentLlmModel = p.models.first;
+      }
     }
+    _customModelCtrl.text = _currentLlmModel;
+
     // 同步写入活跃 API 设置
     if (p.baseUrl.isNotEmpty) {
       await _settings.setApiBaseUrl(p.baseUrl);
     }
     await _settings.setApiKey(p.apiKey);
-    if (p.models.isNotEmpty) {
-      await _settings.setApiModel(p.models.first);
+    if (_currentLlmModel.isNotEmpty) {
+      await _settings.setApiModel(_currentLlmModel);
     }
   }
 
@@ -1023,9 +1042,11 @@ class _SettingsPageState extends State<SettingsPage> {
                       modelList.isNotEmpty
                           ? DropdownButtonFormField<String>(
                             initialValue:
-                                modelList.contains(current.models.firstOrNull)
-                                    ? current.models.firstOrNull
-                                    : null,
+                                modelList.contains(_currentLlmModel)
+                                    ? _currentLlmModel
+                                    : (modelList.isNotEmpty
+                                        ? modelList.first
+                                        : null),
                             isExpanded: true,
                             decoration: const InputDecoration(
                               labelText: 'LLM 对话模型',
@@ -1046,6 +1067,7 @@ class _SettingsPageState extends State<SettingsPage> {
                                 }).toList(),
                             onChanged: (v) async {
                               if (v != null) {
+                                setState(() => _currentLlmModel = v);
                                 await _settings.setApiModel(v);
                               }
                             },
@@ -1057,15 +1079,19 @@ class _SettingsPageState extends State<SettingsPage> {
                               hintText: 'gpt-4o-mini',
                               isDense: true,
                             ),
-                            onChanged: (v) => _settings.setApiModel(v.trim()),
+                            onChanged: (v) async {
+                              final text = v.trim();
+                              setState(() => _currentLlmModel = text);
+                              await _settings.setApiModel(text);
+                            },
                           ),
                 ),
                 const SizedBox(width: 8),
                 SizedBox(
-                  height: 38,
+                  height: 42,
                   child: FilledButton.tonal(
                     style: FilledButton.styleFrom(
-                      padding: const EdgeInsets.symmetric(horizontal: 10),
+                      padding: const EdgeInsets.symmetric(horizontal: 12),
                     ),
                     onPressed: _fetchingModels ? null : _fetchModelsFromApi,
                     child: Text(
@@ -1379,8 +1405,8 @@ class _SettingsPageState extends State<SettingsPage> {
   }
 
   Widget _buildRagSection() {
-    final cur = _activeProvider;
-    final models = cur.models;
+    final embProvider = _activeEmbeddingProvider;
+    final models = embProvider.models;
 
     return Card(
       child: Padding(
@@ -1388,6 +1414,57 @@ class _SettingsPageState extends State<SettingsPage> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            // 独立的 Embedding 供应商选择行
+            Row(
+              children: [
+                const Icon(
+                  Icons.cloud_outlined,
+                  size: 20,
+                  color: StudyPalette.ink,
+                ),
+                const SizedBox(width: 8),
+                Text('向量供应商', style: titleStyle(fontSize: 14)),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: DropdownButton<String>(
+                    value:
+                        _providers.any(
+                              (p) => p.id == _activeEmbeddingProviderId,
+                            )
+                            ? _activeEmbeddingProviderId
+                            : (_providers.isNotEmpty
+                                ? _providers.first.id
+                                : 'default'),
+                    isExpanded: true,
+                    underline: const SizedBox(),
+                    items:
+                        _providers.map((p) {
+                          return DropdownMenuItem(
+                            value: p.id,
+                            child: Text(
+                              p.name,
+                              style: const TextStyle(fontSize: 13),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          );
+                        }).toList(),
+                    onChanged: (id) async {
+                      if (id == null) return;
+                      final selectedP = _providers.firstWhere(
+                        (p) => p.id == id,
+                        orElse: () => _activeProvider,
+                      );
+                      setState(() => _activeEmbeddingProviderId = id);
+                      await _settings.setEmbeddingProviderId(id);
+                      await _settings.setEmbeddingBaseUrl(selectedP.baseUrl);
+                      await _settings.setEmbeddingApiKey(selectedP.apiKey);
+                    },
+                  ),
+                ),
+              ],
+            ),
+            const Divider(height: 12),
+
             // Embedding 模型选择（支持下拉或手动输入）
             Row(
               children: [
@@ -1404,7 +1481,8 @@ class _SettingsPageState extends State<SettingsPage> {
                             initialValue:
                                 models.contains(_embeddingModel)
                                     ? _embeddingModel
-                                    : null,
+                                    : (models.isNotEmpty ? models.first : null),
+                            isExpanded: true,
                             decoration: const InputDecoration(
                               labelText: 'Embedding 向量模型',
                               isDense: true,
@@ -1413,17 +1491,19 @@ class _SettingsPageState extends State<SettingsPage> {
                                 models.map((m) {
                                   return DropdownMenuItem(
                                     value: m,
-                                    child: Text(
-                                      m,
-                                      style: const TextStyle(fontSize: 12),
-                                      overflow: TextOverflow.ellipsis,
+                                    child: SingleChildScrollView(
+                                      scrollDirection: Axis.horizontal,
+                                      child: Text(
+                                        m,
+                                        style: const TextStyle(fontSize: 12),
+                                      ),
                                     ),
                                   );
                                 }).toList(),
-                            onChanged: (v) {
+                            onChanged: (v) async {
                               if (v != null) {
                                 setState(() => _embeddingModel = v);
-                                _settings.setEmbeddingModel(v);
+                                await _settings.setEmbeddingModel(v);
                               }
                             },
                           )
@@ -1436,9 +1516,10 @@ class _SettingsPageState extends State<SettingsPage> {
                               hintText: 'text-embedding-3-small',
                               isDense: true,
                             ),
-                            onChanged: (v) {
-                              _embeddingModel = v.trim();
-                              _settings.setEmbeddingModel(_embeddingModel);
+                            onChanged: (v) async {
+                              final text = v.trim();
+                              setState(() => _embeddingModel = text);
+                              await _settings.setEmbeddingModel(text);
                             },
                           ),
                 ),

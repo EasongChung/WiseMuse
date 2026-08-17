@@ -10,6 +10,8 @@ library;
 
 import 'dart:math' as math;
 
+import '../core/utils/pinyin_filter_util.dart';
+
 /// 句子终止标点（与 `text_position_service._sentenceTerms` 对齐）。
 const String sentenceTerms = '。！？!?；;';
 
@@ -20,11 +22,13 @@ const int maxSpeakLength = 120;
 ///
 /// - 空行视为段落边界（保留为句间分隔，不产生空句）；
 /// - 终止标点归入前句；
+/// - 自动清洗行内与整行拼音注音杂质；
 /// - 超过 [maxSpeakLength] 的句子按 `，,、：:` 二次切分兜底。
 ///
 /// 结果按原顺序返回，无空串。
 List<String> splitTextToSentences(String text) {
-  final normalized = text.replaceAll('\r\n', '\n');
+  final cleanedText = PinyinFilterUtil.clean(text);
+  final normalized = cleanedText.replaceAll('\r\n', '\n');
   final result = <String>[];
 
   // 空行 = 段落边界，段内连续文本直接按标点切
@@ -32,7 +36,7 @@ List<String> splitTextToSentences(String text) {
     final trimmed = para.trim();
     if (trimmed.isEmpty) continue;
     for (final part in trimmed.split(RegExp(r'(?<=[。！？!?；;])'))) {
-      final sentence = part.trim();
+      final sentence = PinyinFilterUtil.cleanInlinePinyin(part.trim());
       if (sentence.isEmpty) continue;
       result.addAll(_splitLong(sentence));
     }

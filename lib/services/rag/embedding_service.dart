@@ -53,14 +53,21 @@ class EmbeddingService {
     _client = null;
   }
 
-  /// 从 SharedPreferences 读取 embedding 相关配置。
+  /// 从 SharedPreferences 读取 embedding 相关配置（优先使用独立 embedding 供应商配置，回落主 API 配置）。
   static Future<(String, String, String)> _loadSettings() async {
     final prefs = await SharedPreferences.getInstance();
-    return (
-      prefs.getString('api_base_url') ?? '',
-      prefs.getString('api_key') ?? '',
-      prefs.getString('embedding_model') ?? 'text-embedding-3-small',
-    );
+    final embBaseUrl = prefs.getString('embedding_api_base_url') ?? '';
+    final embApiKey = prefs.getString('embedding_api_key') ?? '';
+    final embModel =
+        prefs.getString('embedding_model') ?? 'text-embedding-3-small';
+
+    final effectiveUrl =
+        embBaseUrl.isNotEmpty
+            ? embBaseUrl
+            : (prefs.getString('api_base_url') ?? '');
+    final effectiveKey =
+        embApiKey.isNotEmpty ? embApiKey : (prefs.getString('api_key') ?? '');
+    return (effectiveUrl, effectiveKey, embModel);
   }
 
   // ---------- 包内工具 ----------

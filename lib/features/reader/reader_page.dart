@@ -85,12 +85,7 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
   int _textPageIndex = 0;
   List<List<Sentence>> _textPages = const [];
 
-  // [v0.1.28] 底部文本面板独立刷新回调 & 可见性
   int _pdfCurrentPage = 0;
-
-  // [v0.1.28] 底部文本面板独立刷新回调
-  VoidCallback? _sheetRebuild;
-  final ScrollController _sheetScrollController = ScrollController();
 
   // [v0.1.39] 连续朗读激活状态：从当前句子开始连续朗读本页剩余句子，
   // 激活状态下点击其他句子会打断并从新句子继续连读；点击停止则重置为单句模式。
@@ -144,7 +139,6 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
     unawaited(_tts.stop());
     _pdfController = null;
     _imgTransformCtrl.dispose();
-    _sheetScrollController.dispose();
     super.dispose();
   }
 
@@ -249,7 +243,6 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
     if (_useOriginal && _pdfController != null) {
       _pdfController!.setPage(next);
     }
-    _sheetRebuild?.call();
   }
 
   /// 文本模式翻页（+/- 翻页）。
@@ -800,38 +793,24 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
       content = _buildTextView();
     }
 
-    // 全局手势：横向滑动左右翻页 + 原文模式上滑唤出文本弹窗 + 滑动/点击空白隐藏操作栏
-    content = GestureDetector(
-      behavior: HitTestBehavior.translucent,
-      onTap: () {
-        if (_activeSentenceText != null) {
-          setState(() => _activeSentenceText = null);
-        }
-      },
-      onPanDown: (_) {
-        if (_activeSentenceText != null && !_continuousPlaying) {
-          setState(() => _activeSentenceText = null);
-        }
-      },
-      onHorizontalDragEnd: (d) {
-        if (_activeSentenceText != null) {
-          setState(() => _activeSentenceText = null);
-        }
-        if (_isMultiPage) _onTextSwipePage(d);
-      },
-      onVerticalDragEnd:
-          (_useOriginal && _hasOriginal())
-              ? (d) {
-                if (_activeSentenceText != null) {
-                  setState(() => _activeSentenceText = null);
-                }
-                if (d.primaryVelocity != null && d.primaryVelocity! < -350) {
-                  _showTextSheet();
-                }
-              }
-              : null,
-      child: content,
-    );
+    // 仅在纯文本模式下监听左右滑动翻页，避免外层 Drag 手势破坏 PDFView 和 InteractiveViewer 的双指缩放/平移
+    if (!_useOriginal) {
+      content = GestureDetector(
+        behavior: HitTestBehavior.translucent,
+        onTap: () {
+          if (_activeSentenceText != null) {
+            setState(() => _activeSentenceText = null);
+          }
+        },
+        onHorizontalDragEnd: (d) {
+          if (_activeSentenceText != null) {
+            setState(() => _activeSentenceText = null);
+          }
+          if (_isMultiPage) _onTextSwipePage(d);
+        },
+        child: content,
+      );
+    }
 
     // 浮底查词栏或句操作栏（所有模式共享，包含原文模式）
     Widget floatingBar;
@@ -1207,8 +1186,6 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
           }
         }
 
-        _sheetRebuild?.call();
-
         AppLog.d(
           _tag,
           '连读句子 ($i/${sentences.length}): "${currentSentence.text}"',
@@ -1361,128 +1338,7 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
     );
   }
 
-  // ===== [v0.1.28] 原文模式：底部文本面板 =====
-
-  /// 可拖拽高度的底部文本面板（原文模式下显示当前页句子列表）。
-  /// 复用 _buildTextView 的句子渲染逻辑，独立滚动与刷新。
-  Future<void> _showTextSheet() async {
-    _sheetRebuild = null;
-    if (_sheetScrollController.hasClients) _sheetScrollController.jumpTo(0);
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    await showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: isDark ? StudyPalette.darkCard : StudyPalette.parchment,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(18)),
-      ),
-      builder:
-          (ctx) => StatefulBuilder(
-            builder: (ctx, setSheet) {
-              _sheetRebuild = () {
-                if (mounted) setSheet(() {});
-              };
-              final screenH = MediaQuery.of(context).size.height;
-              return SizedBox(
-                height: screenH * 0.55,
-                child: Column(
-                  children: [
-                    // 顶部拖拽手柄
-                    GestureDetector(
-                      onVerticalDragUpdate: (d) {
-                        setSheet(() {
-                          // 高度可调 0.25~0.85
-                        });
-                      },
-                      child: Container(
-                        height: 20,
-                        alignment: Alignment.center,
-                        child: Container(
-                          width: 40,
-                          height: 4,
-                          decoration: BoxDecoration(
-                            color:
-                                isDark
-                                    ? StudyPalette.darkBorder
-                                    : StudyPalette.linen,
-                            borderRadius: BorderRadius.circular(2),
-                          ),
-                        ),
-                      ),
-                    ),
-                    // 标题行
-                    Padding(
-                      padding: const EdgeInsets.fromLTRB(12, 0, 8, 0),
-                      child: Row(
-                        children: [
-                          Icon(
-                            Icons.text_fields,
-                            size: 16,
-                            color: StudyPalette.onSurfaceResolved(context),
-                          ),
-                          const SizedBox(width: 6),
-                          Text(
-                            '第 ${_pdfCurrentPage + 1} 页',
-                            style: titleStyle(fontSize: 14),
-                          ),
-                          const Spacer(),
-                          TextButton.icon(
-                            style: TextButton.styleFrom(
-                              visualDensity: VisualDensity.compact,
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 8,
-                                vertical: 0,
-                              ),
-                              minimumSize: const Size(0, 0),
-                              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                            ),
-                            icon: Icon(
-                              Icons.close,
-                              size: 16,
-                              color:
-                                  isDark
-                                      ? StudyPalette.darkInkSoft
-                                      : StudyPalette.inkSoft,
-                            ),
-                            label: Text(
-                              '关闭',
-                              style: TextStyle(
-                                fontSize: 12,
-                                color:
-                                    isDark
-                                        ? StudyPalette.darkInkSoft
-                                        : StudyPalette.inkSoft,
-                              ),
-                            ),
-                            onPressed: () {
-                              _sheetRebuild = null;
-                              Navigator.of(ctx).pop();
-                            },
-                          ),
-                        ],
-                      ),
-                    ),
-                    // 页导航栏（原文模式显示播放控制，文本模式显示翻页控制）
-                    _buildSheetPageNav(),
-                    const Divider(height: 1),
-                    // 当前页句子列表
-                    Expanded(child: _buildSheetSentences()),
-                    // [v0.1.35] 浮底句操作栏（与文本模式一致）
-                    if (_activeSentenceText != null &&
-                        _activeSentenceText!.isNotEmpty)
-                      Padding(
-                        padding: const EdgeInsets.fromLTRB(8, 4, 8, 8),
-                        child: _buildSentenceActionsBar(),
-                      ),
-                  ],
-                ),
-              );
-            },
-          ),
-    ).then((_) {
-      _sheetRebuild = null;
-    });
-  }
+  // ===== [v0.1.35] 顶部独立页码控制栏 =====
 
   /// [v0.1.35] 顶部独立页码控制栏（多页文件显示，仅包含 上一页 / 页码选择 / 下一页，无朗读与翻译按键）。
   Widget _buildTopPageBar() {
@@ -1545,53 +1401,6 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
             ),
           ],
         ),
-      ),
-    );
-  }
-
-  /// 文本面板内页导航栏（统一：仅包含翻页与页码选择器）。
-  Widget _buildSheetPageNav() {
-    final total = _pageTexts.length;
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(8, 2, 8, 2),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          // 上翻页
-          _compactIcon(
-            Icons.chevron_left,
-            '上一页',
-            _pdfCurrentPage > 0 && total > 1
-                ? () => _syncPage(_pdfCurrentPage - 1)
-                : null,
-          ),
-          // [v0.1.38] 页码文字可点击弹出选择器
-          TextButton(
-            style: TextButton.styleFrom(
-              visualDensity: VisualDensity.compact,
-              minimumSize: const Size(0, 0),
-              padding: const EdgeInsets.symmetric(horizontal: 8),
-              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-            ),
-            onPressed: total > 1 ? _showPageSelector : null,
-            child: Text(
-              '${_pdfCurrentPage + 1} / $total',
-              style: TextStyle(
-                fontSize: 13,
-                fontWeight: FontWeight.w600,
-                color: StudyPalette.onSurfaceResolved(context),
-              ),
-            ),
-          ),
-          // 下翻页
-          _compactIcon(
-            Icons.chevron_right,
-            '下一页',
-            _pdfCurrentPage < total - 1 && total > 1
-                ? () => _syncPage(_pdfCurrentPage + 1)
-                : null,
-          ),
-        ],
       ),
     );
   }
@@ -1711,64 +1520,7 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
     );
   }
 
-  /// 文本面板内当前页句子列表（复用 _buildTextView 的句子渲染）。
-  /// [v0.1.35] 包裹 SelectionArea 支持长按选词。
-  Widget _buildSheetSentences() {
-    final pages = _pageTexts;
-    if (pages.isEmpty) return const SizedBox();
-    final i = _pdfCurrentPage.clamp(0, pages.length - 1);
-    if (i >= _textPages.length) return const SizedBox();
-    final sentences = _textPages[i];
-    return SelectionArea(
-      onSelectionChanged: (selected) {
-        final text = selected?.plainText.trim();
-        setState(
-          () => _selectedText = (text != null && text.isNotEmpty) ? text : null,
-        );
-      },
-      child: ListView.separated(
-        controller: _sheetScrollController,
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-        itemCount: sentences.length,
-        separatorBuilder: (_, _) => const Divider(height: 1, indent: 16),
-        itemBuilder: (context, index) {
-          final s = sentences[index];
-          final highlighted = _textHighlightIndex == index;
-          return ListTile(
-            dense: true,
-            tileColor:
-                highlighted
-                    ? StudyPalette.emberSoft.withValues(alpha: 0.5)
-                    : null,
-            title: Text(
-              s.text,
-              style: TextStyle(
-                fontSize: 15,
-                color:
-                    highlighted
-                        ? StudyPalette.ember
-                        : StudyPalette.onSurfaceResolved(context),
-                fontWeight: highlighted ? FontWeight.w600 : FontWeight.w400,
-              ),
-            ),
-            onTap: () {
-              setState(() {
-                _textHighlightIndex = index;
-                _activeSentenceIndex = index;
-                _activeSentenceText = s.text;
-              });
-              _sheetRebuild?.call();
-              if (_continuousPlaying) {
-                _startContinuousPlayFrom(index);
-              } else {
-                _speak(s.text);
-              }
-            },
-          );
-        },
-      ), // ListView.separated
-    ); // SelectionArea
-  }
+  // ===== [v0.1.35] 紧凑图标按钮 =====
 
   /// 紧凑图标按钮（36px 约束，用于文本面板导航）。
   Widget _compactIcon(IconData icon, String tooltip, VoidCallback? onTap) {

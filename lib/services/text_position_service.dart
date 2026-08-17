@@ -1,6 +1,7 @@
 import 'dart:math' as math;
 import 'dart:ui';
 
+import '../core/utils/pinyin_filter_util.dart';
 import 'line_merge_rules.dart';
 
 // 坐标系与 PdfBridge `extractTextPositions` 一致（页面点，原点在 CropBox 左上角，
@@ -146,15 +147,22 @@ List<SentenceBox> buildSentences(
   void flush() {
     closeRect();
     if (sb.isNotEmpty && rects.isNotEmpty) {
-      result.add(SentenceBox(text: sb.toString(), rects: List.of(rects)));
+      final cleanedText = PinyinFilterUtil.cleanInlinePinyin(sb.toString());
+      if (cleanedText.isNotEmpty) {
+        result.add(SentenceBox(text: cleanedText, rects: List.of(rects)));
+      }
     }
     sb.clear();
     rects.clear();
     lastChar = '';
   }
 
-  // 先按段落间隙把行分块，块内统计版心左右边界供折行判定使用
-  for (final block in _splitLineBlocks(_buildLines(chars), paraGapEm * charH)) {
+  // 先过滤拼音注音行，再按段落间隙把行分块，块内统计版心左右边界供折行判定使用
+  final validLines =
+      _buildLines(
+        chars,
+      ).where((l) => !PinyinFilterUtil.isPinyinLine(l.text)).toList();
+  for (final block in _splitLineBlocks(validLines, paraGapEm * charH)) {
     final blockLeft = block.map((l) => l.xMin).reduce((a, b) => a < b ? a : b);
     final blockRight = block.map((l) => l.xMax).reduce((a, b) => a > b ? a : b);
 

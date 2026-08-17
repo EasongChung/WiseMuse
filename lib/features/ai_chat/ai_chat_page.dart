@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_markdown/flutter_markdown.dart';
 
 import '../../core/debug/app_log.dart';
 import '../../core/models/book.dart';
@@ -366,17 +367,50 @@ class _AiChatPageState extends State<AiChatPage> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(
-                    msg.content,
-                    style: TextStyle(
-                      fontSize: 14,
-                      height: 1.5,
-                      color:
-                          isUser
-                              ? Colors.white
-                              : StudyPalette.onSurfaceResolved(context),
+                  if (isUser)
+                    Text(
+                      msg.content,
+                      style: const TextStyle(
+                        fontSize: 14,
+                        height: 1.5,
+                        color: Colors.white,
+                      ),
+                    )
+                  else
+                    MarkdownBody(
+                      data: msg.content,
+                      selectable: true,
+                      styleSheet: MarkdownStyleSheet(
+                        p: TextStyle(
+                          fontSize: 14,
+                          height: 1.5,
+                          color: StudyPalette.onSurfaceResolved(context),
+                        ),
+                        strong: TextStyle(
+                          fontWeight: FontWeight.bold,
+                          color: StudyPalette.onSurfaceResolved(context),
+                        ),
+                        code: TextStyle(
+                          fontSize: 12,
+                          backgroundColor: StudyPalette.parchmentDeep,
+                          color: StudyPalette.ember,
+                        ),
+                        codeblockDecoration: BoxDecoration(
+                          color: StudyPalette.parchmentDeep,
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        blockquoteDecoration: BoxDecoration(
+                          color: StudyPalette.parchmentDeep,
+                          borderRadius: BorderRadius.circular(6),
+                          border: const Border(
+                            left: BorderSide(
+                              color: StudyPalette.ember,
+                              width: 3,
+                            ),
+                          ),
+                        ),
+                      ),
                     ),
-                  ),
                   if (!isUser) ...[
                     const SizedBox(height: 6),
                     Row(

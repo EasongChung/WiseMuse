@@ -21,7 +21,7 @@ enum KnowledgeSortOrder {
   final String label;
 }
 
-/// [v0.3.0] [v0.1.48] 知识库页：三级钻取 书→单元/页→课/页→知识点，支持后台提取与排序管理。
+/// [v0.3.0] [v0.1.49] 知识库页：直接按页组织（书→页→知识点），支持书籍条目下方进度条与后台提取。
 class KnowledgePage extends StatefulWidget {
   const KnowledgePage({super.key});
 
@@ -35,8 +35,7 @@ class _KnowledgePageState extends State<KnowledgePage> {
   KnowledgeType? _filterType;
   KnowledgeSortOrder _sortOrder = KnowledgeSortOrder.updatedAtDesc;
   List<Book> _books = const [];
-  Map<String, Map<int, Map<int, List<KnowledgePoint>>>> _groupedPoints =
-      const {};
+  Map<String, Map<int, List<KnowledgePoint>>> _groupedPoints = const {};
   bool _loading = true;
 
   KnowledgeTaskProgress? _backgroundProgress;
@@ -70,13 +69,13 @@ class _KnowledgePageState extends State<KnowledgePage> {
       final dao = KnowledgePointDao(db);
       final allPoints = await dao.getAll(type: _filterType);
 
-      // 按 bookId → chapter(单元) → page(课/页) 三级分组
-      final grouped = <String, Map<int, Map<int, List<KnowledgePoint>>>>{};
+      // 直接按 bookId → page(页码) 分组（回落至按物理页组织）
+      final grouped = <String, Map<int, List<KnowledgePoint>>>{};
       for (final p in allPoints) {
         final bookId = p.bookId ?? '';
-        final unitMap = grouped.putIfAbsent(bookId, () => {});
-        final pageMap = unitMap.putIfAbsent(p.chapter ?? 0, () => {});
-        pageMap.putIfAbsent(p.page ?? 0, () => []).add(p);
+        final pageMap = grouped.putIfAbsent(bookId, () => {});
+        final page = (p.page != null && p.page! > 0) ? p.page! : 0;
+        pageMap.putIfAbsent(page, () => []).add(p);
       }
 
       // 排序逻辑
@@ -145,16 +144,12 @@ class _KnowledgePageState extends State<KnowledgePage> {
     return StudyPalette.moss;
   }
 
-  String _unitLabel(int chapter) => chapter <= 0 ? '按页浏览' : '第 $chapter 单元';
+  String _pageLabel(int page) => page <= 0 ? '第 1 页' : '第 $page 页';
 
-  String _pageLabel(int page) => page <= 0 ? '第 1 页' : '第 ${page + 1} 页';
-
-  int _countPoints(Map<int, Map<int, List<KnowledgePoint>>> unitMap) {
+  int _countPoints(Map<int, List<KnowledgePoint>> pageMap) {
     var count = 0;
-    for (final pageMap in unitMap.values) {
-      for (final points in pageMap.values) {
-        count += points.length;
-      }
+    for (final points in pageMap.values) {
+      count += points.length;
     }
     return count;
   }
@@ -198,9 +193,6 @@ class _KnowledgePageState extends State<KnowledgePage> {
               ? const Center(child: CircularProgressIndicator())
               : Column(
                 children: [
-                  if (_backgroundProgress != null &&
-                      _backgroundProgress!.isRunning)
-                    _buildBackgroundProgressBar(),
                   _buildFilterChips(),
                   const Divider(height: 1),
                   Expanded(child: _buildKnowledgeTree()),
@@ -213,43 +205,6 @@ class _KnowledgePageState extends State<KnowledgePage> {
           '添加',
           style: TextStyle(fontFamily: 'ZCOOLKuaiLe', fontSize: 16),
         ),
-      ),
-    );
-  }
-
-  Widget _buildBackgroundProgressBar() {
-    final p = _backgroundProgress!;
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-      color: StudyPalette.parchmentDeep,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              const SizedBox(
-                width: 14,
-                height: 14,
-                child: CircularProgressIndicator(strokeWidth: 2),
-              ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Text(
-                  '正在提取《${p.bookTitle}》知识库 (${p.done}/${p.total}页，发现${p.pointCount}个)',
-                  style: const TextStyle(fontSize: 12, color: StudyPalette.ink),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 6),
-          LinearProgressIndicator(
-            value: p.progress,
-            backgroundColor: StudyPalette.linen,
-            color: StudyPalette.ember,
-          ),
-        ],
       ),
     );
   }
@@ -292,7 +247,8 @@ class _KnowledgePageState extends State<KnowledgePage> {
   }
 
   Widget _buildKnowledgeTree() {
-    if (_groupedPoints.isEmpty) {
+    if (_groupedPoints.isEmpty &&
+        (_backgroundProgress == null || !_backgroundProgress!.isRunning)) {
       return Center(
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -316,7 +272,9 @@ class _KnowledgePageState extends State<KnowledgePage> {
 
     final booksWithPoints = <Book>[];
     for (final b in _books) {
-      if (_groupedPoints.containsKey(b.id)) {
+      if (_groupedPoints.containsKey(b.id) ||
+          (_backgroundProgress?.bookId == b.id &&
+              _backgroundProgress!.isRunning)) {
         booksWithPoints.add(b);
       }
     }
@@ -336,19 +294,25 @@ class _KnowledgePageState extends State<KnowledgePage> {
       itemCount: booksWithPoints.length,
       itemBuilder: (context, index) {
         final book = booksWithPoints[index];
-        final unitMap = _groupedPoints[book.id] ?? const {};
-        return _buildBookSection(book, unitMap);
+        final pageMap = _groupedPoints[book.id] ?? const {};
+        final isExtracting =
+            _backgroundProgress != null &&
+            _backgroundProgress!.bookId == book.id &&
+            _backgroundProgress!.isRunning;
+
+        return _buildBookSection(book, pageMap, isExtracting);
       },
     );
   }
 
   Widget _buildBookSection(
     Book book,
-    Map<int, Map<int, List<KnowledgePoint>>> unitMap,
+    Map<int, List<KnowledgePoint>> pageMap,
+    bool isExtracting,
   ) {
-    final totalPoints = _countPoints(unitMap);
-    final sortedUnits =
-        unitMap.entries.toList()..sort((a, b) => a.key.compareTo(b.key));
+    final totalPoints = _countPoints(pageMap);
+    final sortedPages =
+        pageMap.entries.toList()..sort((a, b) => a.key.compareTo(b.key));
 
     return Card(
       margin: const EdgeInsets.symmetric(vertical: 4),
@@ -357,156 +321,171 @@ class _KnowledgePageState extends State<KnowledgePage> {
         borderRadius: BorderRadius.circular(12),
         side: const BorderSide(color: StudyPalette.linen),
       ),
-      child: ExpansionTile(
-        tilePadding: const EdgeInsets.symmetric(horizontal: 12),
-        leading: Icon(
-          Icons.menu_book,
-          color: StudyPalette.spineFor(book.source),
-        ),
-        title: Text(book.title, style: titleStyle(fontSize: 15)),
-        trailing: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-              decoration: BoxDecoration(
-                color: StudyPalette.parchmentDeep,
-                borderRadius: BorderRadius.circular(10),
-              ),
-              child: Text(
-                '$totalPoints',
-                style: const TextStyle(
-                  fontSize: 12,
-                  color: StudyPalette.inkSoft,
+      child: Column(
+        children: [
+          ExpansionTile(
+            tilePadding: const EdgeInsets.symmetric(horizontal: 12),
+            leading: Icon(
+              Icons.menu_book,
+              color: StudyPalette.spineFor(book.source),
+            ),
+            title: Text(book.title, style: titleStyle(fontSize: 15)),
+            trailing: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 2,
+                  ),
+                  decoration: BoxDecoration(
+                    color: StudyPalette.parchmentDeep,
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Text(
+                    '$totalPoints',
+                    style: const TextStyle(
+                      fontSize: 12,
+                      color: StudyPalette.inkSoft,
+                    ),
+                  ),
                 ),
-              ),
-            ),
-            PopupMenuButton<String>(
-              icon: const Icon(Icons.more_vert, size: 18),
-              onSelected: (action) async {
-                if (action == 'clear') {
-                  final ok = await showDialog<bool>(
-                    context: context,
-                    builder:
-                        (ctx) => AlertDialog(
-                          title: const Text('清空知识点'),
-                          content: Text('确定要清空《${book.title}》的所有知识点吗？'),
-                          actions: [
-                            TextButton(
-                              onPressed: () => Navigator.pop(ctx, false),
-                              child: const Text('取消'),
+                PopupMenuButton<String>(
+                  icon: const Icon(Icons.more_vert, size: 18),
+                  onSelected: (action) async {
+                    if (action == 'clear') {
+                      final ok = await showDialog<bool>(
+                        context: context,
+                        builder:
+                            (ctx) => AlertDialog(
+                              title: const Text('清空知识点'),
+                              content: Text('确定要清空《${book.title}》的所有知识点吗？'),
+                              actions: [
+                                TextButton(
+                                  onPressed: () => Navigator.pop(ctx, false),
+                                  child: const Text('取消'),
+                                ),
+                                TextButton(
+                                  onPressed: () => Navigator.pop(ctx, true),
+                                  child: const Text(
+                                    '清空',
+                                    style: TextStyle(color: Colors.red),
+                                  ),
+                                ),
+                              ],
                             ),
-                            TextButton(
-                              onPressed: () => Navigator.pop(ctx, true),
-                              child: const Text(
-                                '清空',
-                                style: TextStyle(color: Colors.red),
-                              ),
-                            ),
-                          ],
+                      );
+                      if (ok == true) {
+                        final db = await DatabaseProvider.database;
+                        await db.delete(
+                          'knowledge_points',
+                          where: 'book_id = ?',
+                          whereArgs: [book.id],
+                        );
+                        _load();
+                      }
+                    } else if (action == 're_extract') {
+                      KnowledgeExtractionService.instance.extractBook(book);
+                      setState(() {});
+                    }
+                  },
+                  itemBuilder:
+                      (context) => [
+                        const PopupMenuItem(
+                          value: 're_extract',
+                          child: Text('重新提取知识库'),
                         ),
-                  );
-                  if (ok == true) {
-                    final db = await DatabaseProvider.database;
-                    await db.delete(
-                      'knowledge_points',
-                      where: 'book_id = ?',
-                      whereArgs: [book.id],
-                    );
-                    _load();
-                  }
-                } else if (action == 're_extract') {
-                  KnowledgeExtractionService.instance.extractBook(book);
-                }
-              },
-              itemBuilder:
-                  (context) => [
-                    const PopupMenuItem(
-                      value: 're_extract',
-                      child: Text('重新提取知识库'),
-                    ),
-                    const PopupMenuItem(
-                      value: 'clear',
-                      child: Text(
-                        '清空本书知识点',
-                        style: TextStyle(color: Colors.red),
-                      ),
-                    ),
-                  ],
+                        const PopupMenuItem(
+                          value: 'clear',
+                          child: Text(
+                            '清空本书知识点',
+                            style: TextStyle(color: Colors.red),
+                          ),
+                        ),
+                      ],
+                ),
+              ],
             ),
-          ],
-        ),
-        children:
-            sortedUnits
-                .map((e) => _buildUnitSection(book.id, e.key, e.value))
-                .toList(),
+            children:
+                sortedPages.isEmpty && !isExtracting
+                    ? [
+                      const Padding(
+                        padding: EdgeInsets.all(12),
+                        child: Text(
+                          '暂无知识点，可点右侧更多按钮提取',
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: StudyPalette.inkSoft,
+                          ),
+                        ),
+                      ),
+                    ]
+                    : sortedPages
+                        .map((e) => _buildPageSection(book.id, e.key, e.value))
+                        .toList(),
+          ),
+          if (isExtracting) _buildBookItemProgressBar(_backgroundProgress!),
+        ],
       ),
     );
   }
 
-  Widget _buildUnitSection(
-    String bookId,
-    int chapter,
-    Map<int, List<KnowledgePoint>> pageMap,
-  ) {
-    final sortedPages =
-        pageMap.entries.toList()..sort((a, b) => a.key.compareTo(b.key));
-    var pageCount = 0;
-    for (final points in pageMap.values) {
-      pageCount += points.length;
-    }
-
-    return Padding(
-      padding: const EdgeInsets.only(left: 16),
-      child: ExpansionTile(
-        leading: const Icon(
-          Icons.folder_outlined,
-          size: 18,
-          color: StudyPalette.ember,
-        ),
-        title: Text(
-          _unitLabel(chapter),
-          style: const TextStyle(fontSize: 14, color: StudyPalette.ink),
-        ),
-        trailing: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
-              decoration: BoxDecoration(
-                color: StudyPalette.emberSoft.withValues(alpha: 0.5),
-                borderRadius: BorderRadius.circular(8),
+  Widget _buildBookItemProgressBar(KnowledgeTaskProgress p) {
+    return Container(
+      padding: const EdgeInsets.fromLTRB(14, 4, 14, 10),
+      decoration: const BoxDecoration(
+        color: StudyPalette.parchmentDeep,
+        borderRadius: BorderRadius.vertical(bottom: Radius.circular(12)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const SizedBox(
+                width: 12,
+                height: 12,
+                child: CircularProgressIndicator(strokeWidth: 2),
               ),
-              child: Text(
-                '$pageCount',
-                style: const TextStyle(fontSize: 11, color: StudyPalette.ember),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  '正在提取知识库: 第 ${p.done}/${p.total} 页 (发现 ${p.pointCount} 个知识点)',
+                  style: const TextStyle(
+                    fontSize: 12,
+                    color: StudyPalette.ember,
+                    fontWeight: FontWeight.w500,
+                  ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
               ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(4),
+            child: LinearProgressIndicator(
+              value: p.progress,
+              minHeight: 4,
+              backgroundColor: StudyPalette.linen,
+              color: StudyPalette.ember,
             ),
-            const Icon(
-              Icons.expand_more,
-              size: 18,
-              color: StudyPalette.inkSoft,
-            ),
-          ],
-        ),
-        children:
-            sortedPages
-                .map((e) => _buildPageSection(bookId, chapter, e.key, e.value))
-                .toList(),
+          ),
+        ],
       ),
     );
   }
 
   Widget _buildPageSection(
     String bookId,
-    int chapter,
     int page,
     List<KnowledgePoint> points,
   ) {
     return Padding(
-      padding: const EdgeInsets.only(left: 32),
+      padding: const EdgeInsets.only(left: 16),
       child: ExpansionTile(
-        tilePadding: const EdgeInsets.only(left: 8, right: 4),
+        tilePadding: const EdgeInsets.only(left: 8, right: 8),
         leading: const Icon(
           Icons.description_outlined,
           size: 16,
@@ -547,7 +526,7 @@ class _KnowledgePageState extends State<KnowledgePage> {
 
   Widget _buildPointTile(KnowledgePoint kp) {
     return Container(
-      margin: const EdgeInsets.only(left: 48, right: 8, top: 2, bottom: 2),
+      margin: const EdgeInsets.only(left: 32, right: 8, top: 2, bottom: 2),
       decoration: BoxDecoration(
         color: StudyPalette.parchment.withValues(alpha: 0.5),
         borderRadius: BorderRadius.circular(8),

@@ -32,6 +32,7 @@ dependencies:
   xml: 6.6.1
   # Word 原文模式（docx→HTML 后 WebView 渲染）；Android 实现为纯 Java，无 AGP9 KGP 风险
   webview_flutter: 4.14.1
+  flutter_markdown: 0.7.7+1
 
 dev_dependencies:
   flutter_test:

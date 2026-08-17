@@ -380,7 +380,7 @@ class ModelStore {
           movedCount++;
         }
       }
-      AppLog.d(_tag, '成功移动 $movedCount 个 .so 库到 ${destDir}');
+      AppLog.d(_tag, '成功移动 $movedCount 个 .so 库到 $destDir');
     } finally {
       if (await tempExtractDir.exists()) {
         await tempExtractDir.delete(recursive: true);

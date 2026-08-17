@@ -35,9 +35,9 @@ class _HomePageState extends State<HomePage> {
   void initState() {
     super.initState();
     _refresh();
-    // 轮询导入状态
-    _progressTimer = Timer.periodic(const Duration(milliseconds: 1500), (_) {
-      if (_books.any((b) => b.importStatus == 1)) {
+    // 轮询导入状态（加快刷新频率为 800ms，确保第一时间捕获新建的书籍和页数更新）
+    _progressTimer = Timer.periodic(const Duration(milliseconds: 800), (_) {
+      if (_importing || _books.any((b) => b.importStatus == 1)) {
         _refreshQuietly();
       }
     });
@@ -125,12 +125,17 @@ class _HomePageState extends State<HomePage> {
               ).showSnackBar(SnackBar(content: Text('导入失败：$e')));
               _refresh();
             }
+          })
+          .whenComplete(() {
+            if (mounted) setState(() => _importing = false);
           });
 
-      // 立即刷新书架展示初始加入的书籍
+      // 选定文件后立即连续拉取两次，确保新建的初始书籍瞬间在书架呈现
+      await Future.delayed(const Duration(milliseconds: 150));
+      await _refresh();
       await Future.delayed(const Duration(milliseconds: 300));
       await _refresh();
-    } finally {
+    } catch (e) {
       if (mounted) setState(() => _importing = false);
     }
   }
