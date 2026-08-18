@@ -266,7 +266,10 @@ class IndexChunk {
     id: json['id'] as int,
     text: json['text'] as String,
     sentenceIds: (json['sentence_ids'] as List).cast<String>(),
-    embedding: (json['embedding'] as List?)?.cast<double>(),
+    embedding:
+        (json['embedding'] as List?)
+            ?.map((e) => (e as num).toDouble())
+            .toList(),
   );
 }
 

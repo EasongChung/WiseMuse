@@ -8,13 +8,11 @@ import 'package:flutter/material.dart';
 
 import '../../core/debug/app_log.dart';
 import '../../core/models/book.dart';
-import '../../core/models/knowledge_point.dart';
 import '../../core/models/sentence.dart';
 import '../../core/models/word_entry.dart';
 import '../../core/settings/settings_service.dart';
 import '../../core/storage/book_dao.dart';
 import '../../core/storage/database.dart';
-import '../../core/storage/knowledge_point_dao.dart';
 import '../../core/storage/sentence_dao.dart';
 import '../../core/storage/word_entry_dao.dart';
 import '../../core/theme/app_theme.dart';
@@ -27,7 +25,6 @@ import '../../services/text_position_service.dart';
 import '../../services/translation_engine.dart';
 import '../../services/rag/rag_qa_service.dart';
 import '../../vendor/flutter_pdfview/flutter_pdfview.dart';
-import '../knowledge/knowledge_detail_sheet.dart';
 import '../assistant/knowledge_explain_sheet.dart';
 import '../../widgets/follow_sheet.dart';
 import 'package:webview_flutter/webview_flutter.dart';
@@ -86,6 +83,7 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
   List<List<Sentence>> _textPages = const [];
 
   int _pdfCurrentPage = 0;
+  final ScrollController _sheetScrollController = ScrollController();
 
   // [v0.1.39] 连续朗读激活状态：从当前句子开始连续朗读本页剩余句子，
   // 激活状态下点击其他句子会打断并从新句子继续连读；点击停止则重置为单句模式。
@@ -108,11 +106,6 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
   // [v0.1.35] 当前朗读/选中句索引（用于底栏操作条）
   int? _activeSentenceIndex;
   String? _activeSentenceText;
-
-  // [v0.1.35] 知识点按页查询 LRU 缓存（max 20 页），翻页不重复查 DB。
-  static const int _kKnowledgeCacheMax = 20;
-  final LinkedHashMap<String, List<KnowledgePoint>> _knowledgePageCache =
-      LinkedHashMap<String, List<KnowledgePoint>>();
 
   @override
   void initState() {
@@ -139,6 +132,7 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
     unawaited(_tts.stop());
     _pdfController = null;
     _imgTransformCtrl.dispose();
+    _sheetScrollController.dispose();
     super.dispose();
   }
 
@@ -755,7 +749,12 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
       appBar: AppBar(
         title: Text(widget.book.title),
         actions: [
-          if (_hasOriginal())
+          if (_hasOriginal()) ...[
+            IconButton(
+              tooltip: '本页文本列表',
+              icon: const Icon(Icons.format_list_bulleted),
+              onPressed: _showTextSheet,
+            ),
             IconButton(
               tooltip: _useOriginal ? '切换文本模式' : '切换原文模式',
               icon: Icon(
@@ -763,12 +762,7 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
               ),
               onPressed: _switchingMode ? null : _switchViewMode,
             ),
-          if (!_useOriginal)
-            IconButton(
-              tooltip: '本页知识点',
-              icon: const Icon(Icons.lightbulb_outline),
-              onPressed: _showPageKnowledge,
-            ),
+          ],
         ],
       ),
       body: IgnorePointer(ignoring: _switchingMode, child: _buildBody()),
@@ -793,7 +787,7 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
       content = _buildTextView();
     }
 
-    // 仅在纯文本模式下监听左右滑动翻页，避免外层 Drag 手势破坏 PDFView 和 InteractiveViewer 的双指缩放/平移
+    // 纯文本模式下监听左右滑动翻页；原文模式下不监听，避免破坏 PDFView 与双指缩放手势
     if (!_useOriginal) {
       content = GestureDetector(
         behavior: HitTestBehavior.translucent,
@@ -812,34 +806,34 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
       );
     }
 
-    // 浮底查词栏或句操作栏（所有模式共享，包含原文模式）
-    Widget floatingBar;
+    // 句操作栏或查词栏
+    Widget bottomBar;
     if (_selectedText != null && _selectedText!.isNotEmpty) {
-      floatingBar = _buildWordLookupBar();
+      bottomBar = _buildWordLookupBar();
     } else if (_activeSentenceText != null && _activeSentenceText!.isNotEmpty) {
-      floatingBar = _buildSentenceActionsBar();
+      bottomBar = _buildSentenceActionsBar();
     } else {
-      floatingBar = const SizedBox.shrink();
+      bottomBar = const SizedBox.shrink();
     }
 
-    // 顶部独立页码弹窗条（多页文件与操作栏一同唤出/关闭）
-    Widget topPageBar;
-    if (_isMultiPage &&
-        _activeSentenceText != null &&
-        _activeSentenceText!.isNotEmpty) {
-      topPageBar = _buildTopPageBar();
-    } else {
-      topPageBar = const SizedBox.shrink();
-    }
-
-    return Stack(
+    return Column(
       children: [
-        content,
-        if (_isMultiPage &&
-            _activeSentenceText != null &&
-            _activeSentenceText!.isNotEmpty)
-          Positioned(top: 8, left: 16, right: 16, child: topPageBar),
-        Positioned(left: 8, right: 8, bottom: 8, child: floatingBar),
+        // 1. 顶部固定页码控制栏（多页文件常驻，不遮挡阅读页面）
+        if (_isMultiPage)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 6, 16, 6),
+            child: _buildTopPageBar(),
+          ),
+
+        // 2. 主阅读内容视窗（自动撑满剩余区域）
+        Expanded(child: content),
+
+        // 3. 底部固定句操作控制栏（点击句子后在底部固定出现，缩减主视窗而不是悬浮遮挡）
+        if (_activeSentenceText != null && _activeSentenceText!.isNotEmpty)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 6, 12, 8),
+            child: bottomBar,
+          ),
       ],
     );
   }
@@ -1225,116 +1219,165 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
 
   // ===== 文本模式：本页知识点 =====
 
-  /// [v0.1.35] LRU 缓存 key。
-  String _knowledgeCacheKey(String bookId, int page) => '$bookId:$page';
+  // ===== [v0.1.28] 原文模式：底部文本面板 =====
 
-  Future<void> _showPageKnowledge() async {
-    final currentPage = _textPages[_textPageIndex];
-    if (currentPage.isEmpty) return;
-    final page = currentPage.first.page;
-    final key = _knowledgeCacheKey(widget.book.id, page);
-
-    // LRU 命中 → 刷新顺序
-    if (_knowledgePageCache.containsKey(key)) {
-      final cached = _knowledgePageCache.remove(key)!;
-      _knowledgePageCache[key] = cached; // 放到末尾（最近使用）
-      if (!mounted) return;
-      _showKnowledgeSheet(page, cached);
-      return;
-    }
-
-    final db = await DatabaseProvider.database;
-    final dao = KnowledgePointDao(db);
-    final points = await dao.getByPage(widget.book.id, page);
-    if (!mounted) return;
-
-    // 写入 LRU 缓存，超限淘汰最久未用（队首）
-    _knowledgePageCache[key] = points;
-    if (_knowledgePageCache.length > _kKnowledgeCacheMax) {
-      _knowledgePageCache.remove(_knowledgePageCache.keys.first);
-    }
-
-    _showKnowledgeSheet(page, points);
-  }
-
-  /// [v0.1.35] 提取的对话框渲染逻辑，被 _showPageKnowledge 与 LRU 缓存共用。
-  void _showKnowledgeSheet(int page, List<KnowledgePoint> points) {
+  /// 可拖拽高度的底部文本面板（原文模式下显示当前页句子列表）。
+  /// 复用 _buildTextView 的句子渲染逻辑，独立滚动与刷新。
+  Future<void> _showTextSheet() async {
+    if (_sheetScrollController.hasClients) _sheetScrollController.jumpTo(0);
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    showModalBottomSheet(
+    await showModalBottomSheet(
       context: context,
+      isScrollControlled: true,
       backgroundColor: isDark ? StudyPalette.darkCard : StudyPalette.parchment,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(18)),
       ),
       builder:
-          (context) => Padding(
-            padding: const EdgeInsets.all(20),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Center(
-                  child: Container(
-                    width: 32,
-                    height: 4,
-                    margin: const EdgeInsets.only(bottom: 12),
-                    decoration: BoxDecoration(
-                      color:
-                          isDark ? StudyPalette.darkBorder : StudyPalette.linen,
-                      borderRadius: BorderRadius.circular(2),
-                    ),
-                  ),
-                ),
-                Text('第 ${page + 1} 页知识点', style: titleStyle(fontSize: 16)),
-                const SizedBox(height: 12),
-                if (points.isEmpty)
-                  Text(
-                    '本页暂无知识点',
-                    style: TextStyle(
-                      color:
-                          isDark
-                              ? StudyPalette.darkInkSoft
-                              : StudyPalette.inkSoft,
-                    ),
-                  ),
-                ...points.map(
-                  (p) => ListTile(
-                    dense: true,
-                    leading: Icon(
-                      p.type == KnowledgeType.word
-                          ? Icons.text_fields
-                          : p.type == KnowledgeType.idiom
-                          ? Icons.auto_awesome
-                          : p.type == KnowledgeType.english
-                          ? Icons.translate
-                          : Icons.auto_stories,
-                      size: 20,
-                      color: StudyPalette.ember,
-                    ),
-                    title: Text(
-                      p.text,
-                      style: TextStyle(
-                        color: StudyPalette.onSurfaceResolved(context),
+          (ctx) => StatefulBuilder(
+            builder: (ctx, setSheet) {
+              final screenH = MediaQuery.of(context).size.height;
+              return SizedBox(
+                height: screenH * 0.6,
+                child: Column(
+                  children: [
+                    // 顶部拖拽手柄
+                    Container(
+                      height: 20,
+                      alignment: Alignment.center,
+                      child: Container(
+                        width: 40,
+                        height: 4,
+                        decoration: BoxDecoration(
+                          color:
+                              isDark
+                                  ? StudyPalette.darkBorder
+                                  : StudyPalette.linen,
+                          borderRadius: BorderRadius.circular(2),
+                        ),
                       ),
                     ),
-                    subtitle:
-                        p.definition != null
-                            ? Text(
-                              p.definition!,
+                    // 标题行
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(16, 0, 12, 0),
+                      child: Row(
+                        children: [
+                          Icon(
+                            Icons.text_fields,
+                            size: 18,
+                            color: StudyPalette.onSurfaceResolved(context),
+                          ),
+                          const SizedBox(width: 8),
+                          Text(
+                            '第 ${_pdfCurrentPage + 1} 页文本',
+                            style: titleStyle(fontSize: 15),
+                          ),
+                          const Spacer(),
+                          TextButton.icon(
+                            style: TextButton.styleFrom(
+                              visualDensity: VisualDensity.compact,
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 8,
+                                vertical: 0,
+                              ),
+                              minimumSize: const Size(0, 0),
+                              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                            ),
+                            icon: Icon(
+                              Icons.close,
+                              size: 16,
+                              color:
+                                  isDark
+                                      ? StudyPalette.darkInkSoft
+                                      : StudyPalette.inkSoft,
+                            ),
+                            label: Text(
+                              '关闭',
                               style: TextStyle(
+                                fontSize: 12,
                                 color:
                                     isDark
                                         ? StudyPalette.darkInkSoft
                                         : StudyPalette.inkSoft,
                               ),
-                            )
-                            : null,
-                    onTap: () => KnowledgeDetailSheet.show(context, p),
-                  ),
+                            ),
+                            onPressed: () => Navigator.of(ctx).pop(),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const Divider(height: 1),
+                    // 当前页句子列表
+                    Expanded(child: _buildSheetSentences()),
+                    // 浮底句操作栏（与文本模式一致）
+                    if (_activeSentenceText != null &&
+                        _activeSentenceText!.isNotEmpty)
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(8, 4, 8, 8),
+                        child: _buildSentenceActionsBar(),
+                      ),
+                  ],
                 ),
-              ],
-            ),
+              );
+            },
           ),
+    );
+  }
+
+  /// 文本面板内当前页句子列表（复用 _buildTextView 的句子渲染）。
+  Widget _buildSheetSentences() {
+    final pages = _pageTexts;
+    if (pages.isEmpty) return const SizedBox();
+    final i = _pdfCurrentPage.clamp(0, pages.length - 1);
+    if (i >= _textPages.length) return const SizedBox();
+    final sentences = _textPages[i];
+    return SelectionArea(
+      onSelectionChanged: (selected) {
+        final text = selected?.plainText.trim();
+        setState(
+          () => _selectedText = (text != null && text.isNotEmpty) ? text : null,
+        );
+      },
+      child: ListView.separated(
+        controller: _sheetScrollController,
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        itemCount: sentences.length,
+        separatorBuilder: (_, _) => const Divider(height: 1, indent: 16),
+        itemBuilder: (context, index) {
+          final s = sentences[index];
+          final highlighted = _textHighlightIndex == index;
+          return ListTile(
+            dense: true,
+            tileColor:
+                highlighted
+                    ? StudyPalette.emberSoft.withValues(alpha: 0.5)
+                    : null,
+            title: Text(
+              s.text,
+              style: TextStyle(
+                fontSize: 15,
+                color:
+                    highlighted
+                        ? StudyPalette.ember
+                        : StudyPalette.onSurfaceResolved(context),
+                fontWeight: highlighted ? FontWeight.w600 : FontWeight.w400,
+              ),
+            ),
+            onTap: () {
+              setState(() {
+                _textHighlightIndex = index;
+                _activeSentenceIndex = index;
+                _activeSentenceText = s.text;
+              });
+              if (_continuousPlaying) {
+                _startContinuousPlayFrom(index);
+              } else {
+                _speak(s.text);
+              }
+            },
+          );
+        },
+      ),
     );
   }
 

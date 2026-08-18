@@ -70,7 +70,6 @@ class _SettingsPageState extends State<SettingsPage> {
   bool _autoLoadLocal = true;
   String? _defaultLocalModel;
   bool _llmEngineAvailable = false;
-  bool _llmEngineBusy = false;
 
   // Vosk 语音模型状态
   bool _voskBusy = false;
@@ -1678,194 +1677,11 @@ class _SettingsPageState extends State<SettingsPage> {
   ];
 
   Future<void> _refreshLlmEngineStatus() async {
-    final disabled = await _settings.isLlamaEngineDisabled();
-    if (disabled) {
-      if (mounted) setState(() => _llmEngineAvailable = false);
-      return;
-    }
     try {
       final available = await LlmService.instance.isAvailable();
       if (mounted) setState(() => _llmEngineAvailable = available);
     } catch (_) {
       if (mounted) setState(() => _llmEngineAvailable = false);
-    }
-  }
-
-  Future<void> _downloadLlamaEngine() async {
-    double progress = 0.0;
-    int received = 0;
-    int total = 0;
-    String status = '正在连接 GitHub Releases 下载引擎…';
-    StateSetter? dialogSetState;
-
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder:
-          (ctx) => StatefulBuilder(
-            builder: (ctx, setDialogState) {
-              dialogSetState = setDialogState;
-              return AlertDialog(
-                title: const Text('下载 llama 原生推理引擎'),
-                content: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    LinearProgressIndicator(
-                      value: progress > 0 ? progress : null,
-                    ),
-                    const SizedBox(height: 12),
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        Text(
-                          total > 0
-                              ? '${_formatSize(received)} / ${_formatSize(total)}'
-                              : _formatSize(received),
-                          style: const TextStyle(
-                            fontSize: 12,
-                            color: StudyPalette.inkSoft,
-                          ),
-                        ),
-                        Text(
-                          progress > 0
-                              ? '${(progress * 100).toStringAsFixed(1)}%'
-                              : '',
-                          style: const TextStyle(
-                            fontSize: 12,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 6),
-                    Text(
-                      status,
-                      style: const TextStyle(
-                        fontSize: 11,
-                        color: StudyPalette.inkSoft,
-                      ),
-                    ),
-                  ],
-                ),
-              );
-            },
-          ),
-    );
-
-    setState(() => _llmEngineBusy = true);
-    try {
-      await ModelStore.ensureLlamaEngine(
-        onProgress: (p, r, t) {
-          progress = p;
-          received = r;
-          total = t;
-          dialogSetState?.call(() {
-            status = '正在下载引擎库 (~18MB)…';
-          });
-        },
-      );
-      await _settings.setLlamaEngineDisabled(false);
-      await LlmService.instance.reset();
-      await _refreshLlmEngineStatus();
-
-      if (!mounted) return;
-      Navigator.of(context, rootNavigator: true).pop();
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('✅ llama 原生推理引擎下载并装配完成！')));
-    } catch (e) {
-      if (mounted) {
-        Navigator.of(context, rootNavigator: true).pop();
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('❌ 引擎下载失败: $e')));
-      }
-    } finally {
-      if (mounted) setState(() => _llmEngineBusy = false);
-    }
-  }
-
-  Future<void> _importLlamaEngineArchive() async {
-    final result = await FilePicker.pickFiles(
-      type: FileType.custom,
-      allowedExtensions: const ['gz', 'tar', 'zip', 'tgz'],
-      dialogTitle: '选择 llama-engine-*.tar.gz 或 zip 压缩包',
-    );
-    if (result == null || result.files.isEmpty || !mounted) return;
-    final path = result.files.single.path;
-    if (path == null) return;
-
-    setState(() => _llmEngineBusy = true);
-    try {
-      await ModelStore.importLlamaEngineArchive(path);
-      await _settings.setLlamaEngineDisabled(false);
-      await LlmService.instance.reset();
-      await _refreshLlmEngineStatus();
-
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('✅ llama 原生推理引擎压缩包导入并装配成功！')),
-      );
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('❌ 引擎导入失败: $e')));
-      }
-    } finally {
-      if (mounted) setState(() => _llmEngineBusy = false);
-    }
-  }
-
-  Future<void> _confirmDeleteLlamaEngine() async {
-    final confirm = await showDialog<bool>(
-      context: context,
-      builder:
-          (ctx) => AlertDialog(
-            title: const Text('删除/卸载 llama 推理引擎'),
-            content: const Text(
-              '确定要删除/卸载本地 llama 离线推理引擎吗？\n\n'
-              '• 删除后可释放存储空间；\n'
-              '• 本地 GGUF 模型将暂停使用，日常对话可使用云端大模型；\n'
-              '• 后续可随时在此处点击「在线下载」重新装配使用。',
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(ctx, false),
-                child: const Text('取消'),
-              ),
-              FilledButton(
-                style: FilledButton.styleFrom(
-                  backgroundColor: StudyPalette.ember,
-                ),
-                onPressed: () => Navigator.pop(ctx, true),
-                child: const Text('确认删除'),
-              ),
-            ],
-          ),
-    );
-    if (confirm != true || !mounted) return;
-
-    setState(() => _llmEngineBusy = true);
-    try {
-      await LlmService.instance.destroy();
-      await ModelStore.deleteLlamaEngine();
-      await _settings.setLlamaEngineDisabled(true);
-      await _refreshLlmEngineStatus();
-
-      if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('llama 原生推理引擎已成功删除/卸载')));
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('删除引擎失败: $e')));
-      }
-    } finally {
-      if (mounted) setState(() => _llmEngineBusy = false);
     }
   }
 
@@ -1884,276 +1700,265 @@ class _SettingsPageState extends State<SettingsPage> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // ===== 1. llama 原生推理引擎装配与状态管理卡片 =====
-            Container(
-              margin: const EdgeInsets.only(bottom: 12),
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color:
-                    _llmEngineAvailable
-                        ? StudyPalette.moss.withValues(alpha: 0.1)
-                        : StudyPalette.ember.withValues(alpha: 0.1),
-                borderRadius: BorderRadius.circular(10),
-                border: Border.all(
+            // 引擎状态指示
+            Row(
+              children: [
+                Icon(
+                  _llmEngineAvailable
+                      ? Icons.check_circle
+                      : Icons.extension_outlined,
+                  size: 20,
                   color:
                       _llmEngineAvailable
-                          ? StudyPalette.moss.withValues(alpha: 0.3)
-                          : StudyPalette.ember.withValues(alpha: 0.3),
+                          ? StudyPalette.moss
+                          : StudyPalette.ember,
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    _llmEngineAvailable
+                        ? '本地推理引擎已就绪'
+                        : '本地引擎未加载（需 Android 10+ 且支持 arm64）',
+                    style: TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                      color:
+                          _llmEngineAvailable
+                              ? StudyPalette.moss
+                              : StudyPalette.ember,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const Divider(height: 16),
+
+            // [v0.1.44] 合入优先离线开关
+            SwitchListTile(
+              dense: true,
+              contentPadding: EdgeInsets.zero,
+              title: const Text(
+                '优先使用离线 AI',
+                style: TextStyle(fontSize: 14, fontWeight: FontWeight.w500),
+              ),
+              subtitle: const Text(
+                '开启后知识提取/翻译优先走本地模型，云端作兜底',
+                style: TextStyle(fontSize: 12, color: StudyPalette.inkSoft),
+              ),
+              value: _preferOffline,
+              activeThumbColor: StudyPalette.ember,
+              onChanged: (v) {
+                setState(() => _preferOffline = v);
+                _settings.setPreferOffline(v);
+              },
+            ),
+            const Divider(height: 8),
+
+            // 自动加载开关
+            SwitchListTile(
+              dense: true,
+              contentPadding: EdgeInsets.zero,
+              title: const Text(
+                'AI 对话时自动加载本地模型',
+                style: TextStyle(fontSize: 14, fontWeight: FontWeight.w500),
+              ),
+              subtitle: const Text(
+                '空闲 10 分钟或退出时自动卸载',
+                style: TextStyle(fontSize: 12, color: StudyPalette.inkSoft),
+              ),
+              value: _autoLoadLocal,
+              activeThumbColor: StudyPalette.ember,
+              onChanged: (v) {
+                setState(() => _autoLoadLocal = v);
+                _settings.setAutoLoadLocalModel(v);
+              },
+            ),
+            const Divider(height: 8),
+
+            // 当前配置的模型卡片（点击弹出选择列表弹窗）
+            ListTile(
+              dense: true,
+              contentPadding: EdgeInsets.zero,
+              leading: Icon(
+                hasDefault ? Icons.check_circle : Icons.model_training,
+                color: hasDefault ? StudyPalette.moss : StudyPalette.inkSoft,
+                size: 24,
+              ),
+              title: Text(
+                '当前生效模型：$currentDefaultName',
+                style: TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w600,
+                  color:
+                      hasDefault
+                          ? StudyPalette.onSurfaceResolved(context)
+                          : StudyPalette.inkSoft,
                 ),
               ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      Icon(
-                        _llmEngineAvailable
-                            ? Icons.check_circle
-                            : Icons.extension_outlined,
-                        size: 20,
-                        color:
-                            _llmEngineAvailable
-                                ? StudyPalette.moss
-                                : StudyPalette.ember,
-                      ),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: Text(
-                          _llmEngineAvailable
-                              ? 'llama 原生推理引擎已就绪'
-                              : '未装配 llama 离线推理引擎',
-                          style: TextStyle(
-                            fontSize: 14,
-                            fontWeight: FontWeight.w600,
-                            color:
-                                _llmEngineAvailable
-                                    ? StudyPalette.moss
-                                    : StudyPalette.ember,
-                          ),
-                        ),
-                      ),
-                      if (_llmEngineBusy)
-                        const SizedBox(
-                          width: 18,
-                          height: 18,
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        )
-                      else if (_llmEngineAvailable)
-                        IconButton(
-                          icon: const Icon(
-                            Icons.delete_outline,
-                            size: 20,
-                            color: StudyPalette.ember,
-                          ),
-                          tooltip: '删除/卸载引擎库',
-                          onPressed: _confirmDeleteLlamaEngine,
-                        ),
-                    ],
-                  ),
-                  const SizedBox(height: 6),
-                  Text(
-                    _llmEngineAvailable
-                        ? '支持 OpenCL GPU (Adreno) 与多线程 CPU 硬件加速，可完全离线加载并推理 GGUF 大模型。如需释放空间可点击右上角删除。'
-                        : '当前未装配离线大模型引擎。日常使用推荐使用云端 AI 供应商；如需完全离线使用本地大模型，可点击下方按钮在线下载或从文件导入。',
-                    style: const TextStyle(
-                      fontSize: 12,
-                      color: StudyPalette.inkSoft,
-                      height: 1.35,
-                    ),
-                  ),
-                  const SizedBox(height: 10),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: OutlinedButton.icon(
-                          icon: const Icon(Icons.download, size: 16),
-                          label: Text(
-                            _llmEngineAvailable ? '重新下载引擎' : '在线下载 (~18MB)',
-                            style: const TextStyle(fontSize: 12),
-                          ),
-                          onPressed:
-                              _llmEngineBusy ? null : _downloadLlamaEngine,
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: OutlinedButton.icon(
-                          icon: const Icon(Icons.file_open, size: 16),
-                          label: const Text(
-                            '从压缩包导入',
-                            style: TextStyle(fontSize: 12),
-                          ),
-                          onPressed:
-                              _llmEngineBusy ? null : _importLlamaEngineArchive,
-                        ),
-                      ),
-                    ],
-                  ),
-                ],
+              subtitle: Text(
+                '已导入 ${_localModels.length} 个模型 · 点击切换或管理模型',
+                style: const TextStyle(
+                  fontSize: 12,
+                  color: StudyPalette.inkSoft,
+                ),
               ),
+              trailing: const Icon(
+                Icons.chevron_right,
+                size: 20,
+                color: StudyPalette.inkSoft,
+              ),
+              onTap: _showLocalModelSelectorDialog,
             ),
+            const Divider(height: 8),
 
-            // ===== 2. 本地大模型详细配置（未装配引擎时置灰禁用） =====
-            Opacity(
-              opacity: _llmEngineAvailable ? 1.0 : 0.45,
-              child: IgnorePointer(
-                ignoring: !_llmEngineAvailable,
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    // [v0.1.44] 合入优先离线开关
-                    SwitchListTile(
-                      dense: true,
-                      contentPadding: EdgeInsets.zero,
-                      title: const Text(
-                        '优先使用离线 AI',
-                        style: TextStyle(
-                          fontSize: 14,
-                          fontWeight: FontWeight.w500,
-                        ),
-                      ),
-                      subtitle: const Text(
-                        '开启后知识提取/翻译优先走本地模型，云端作兜底',
-                        style: TextStyle(
-                          fontSize: 12,
-                          color: StudyPalette.inkSoft,
-                        ),
-                      ),
-                      value: _preferOffline,
-                      activeThumbColor: StudyPalette.ember,
-                      onChanged: (v) {
-                        setState(() => _preferOffline = v);
-                        _settings.setPreferOffline(v);
-                      },
+            // 模型操作按钮栏：加载/卸载模型 + 测试本地推理
+            Row(
+              children: [
+                Expanded(
+                  child: OutlinedButton.icon(
+                    icon: Icon(
+                      LlmService.instance.isLoaded
+                          ? Icons.eject_outlined
+                          : Icons.play_arrow_outlined,
+                      size: 16,
+                      color:
+                          LlmService.instance.isLoaded
+                              ? StudyPalette.ember
+                              : StudyPalette.moss,
                     ),
-                    const Divider(height: 8),
-
-                    // 自动加载开关
-                    SwitchListTile(
-                      dense: true,
-                      contentPadding: EdgeInsets.zero,
-                      title: const Text(
-                        'AI 对话时自动加载本地模型',
-                        style: TextStyle(
-                          fontSize: 14,
-                          fontWeight: FontWeight.w500,
-                        ),
-                      ),
-                      subtitle: const Text(
-                        '空闲 10 分钟或退出时自动卸载',
-                        style: TextStyle(
-                          fontSize: 12,
-                          color: StudyPalette.inkSoft,
-                        ),
-                      ),
-                      value: _autoLoadLocal,
-                      activeThumbColor: StudyPalette.ember,
-                      onChanged: (v) {
-                        setState(() => _autoLoadLocal = v);
-                        _settings.setAutoLoadLocalModel(v);
-                      },
+                    label: Text(
+                      LlmService.instance.isLoaded ? '卸载模型' : '加载模型',
+                      style: const TextStyle(fontSize: 12),
                     ),
-                    const Divider(height: 8),
-
-                    // 当前配置的模型卡片（点击弹出选择列表弹窗）
-                    ListTile(
-                      dense: true,
-                      contentPadding: EdgeInsets.zero,
-                      leading: Icon(
-                        hasDefault ? Icons.check_circle : Icons.model_training,
-                        color:
-                            hasDefault
-                                ? StudyPalette.moss
-                                : StudyPalette.inkSoft,
-                        size: 24,
-                      ),
-                      title: Text(
-                        '当前生效模型：$currentDefaultName',
-                        style: TextStyle(
-                          fontSize: 14,
-                          fontWeight: FontWeight.w600,
-                          color:
-                              hasDefault
-                                  ? StudyPalette.onSurfaceResolved(context)
-                                  : StudyPalette.inkSoft,
-                        ),
-                      ),
-                      subtitle: Text(
-                        '已导入 ${_localModels.length} 个模型 · 点击切换或管理模型',
-                        style: const TextStyle(
-                          fontSize: 12,
-                          color: StudyPalette.inkSoft,
-                        ),
-                      ),
-                      trailing: const Icon(
-                        Icons.chevron_right,
-                        size: 20,
-                        color: StudyPalette.inkSoft,
-                      ),
-                      onTap: _showLocalModelSelectorDialog,
-                    ),
-                    const Divider(height: 12),
-
-                    // 预设模型下载
-                    const Text(
-                      '在线下载预设模型（魔塔社区）',
-                      style: TextStyle(
-                        fontSize: 12,
-                        color: StudyPalette.inkSoft,
-                      ),
-                    ),
-                    const SizedBox(height: 4),
-                    for (final (name, filename, url) in _presetModels) ...[
-                      Padding(
-                        padding: const EdgeInsets.symmetric(vertical: 2),
-                        child: Row(
-                          children: [
-                            Expanded(
-                              child: Text(
-                                name,
-                                style: TextStyle(
-                                  fontSize: 13,
-                                  color: StudyPalette.onSurfaceResolved(
-                                    context,
+                    onPressed:
+                        !hasDefault
+                            ? null
+                            : () async {
+                              if (LlmService.instance.isLoaded) {
+                                await LlmService.instance.unload();
+                                if (!mounted) return;
+                                setState(() {});
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  const SnackBar(content: Text('已卸载当前本地大模型')),
+                                );
+                              } else {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  const SnackBar(
+                                    content: Text('正在加载本地模型，请稍候…'),
                                   ),
-                                ),
-                              ),
-                            ),
-                            SizedBox(
-                              height: 28,
-                              child: OutlinedButton(
-                                style: OutlinedButton.styleFrom(
-                                  padding: const EdgeInsets.symmetric(
-                                    horizontal: 10,
-                                  ),
-                                  textStyle: const TextStyle(fontSize: 11),
-                                ),
-                                onPressed:
-                                    () => _downloadPresetModel(
-                                      filename,
-                                      name,
-                                      url,
+                                );
+                                final ok = await LlmService.instance.init(
+                                  _defaultLocalModel!,
+                                );
+                                if (!mounted) return;
+                                setState(() {});
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(
+                                    content: Text(
+                                      ok ? '✅ 本地模型加载成功！' : '❌ 本地模型加载失败，请检查文件',
                                     ),
-                                child: const Text('下载'),
-                              ),
-                            ),
-                          ],
+                                  ),
+                                );
+                              }
+                            },
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: OutlinedButton.icon(
+                    icon: const Icon(Icons.bolt, size: 16),
+                    label: const Text('测试推理', style: TextStyle(fontSize: 12)),
+                    onPressed:
+                        !hasDefault
+                            ? null
+                            : () async {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(content: Text('正在测试本地大模型推理…')),
+                              );
+                              if (!LlmService.instance.isLoaded) {
+                                final ok = await LlmService.instance.init(
+                                  _defaultLocalModel!,
+                                );
+                                if (!ok) {
+                                  if (!mounted) return;
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    const SnackBar(content: Text('❌ 模型加载失败')),
+                                  );
+                                  return;
+                                }
+                              }
+                              try {
+                                final ans = await LlmService.instance.chat(
+                                  '请简短回复一句：本地大模型运行正常。',
+                                );
+                                if (!mounted) return;
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(
+                                    content: Text(
+                                      ans.isNotEmpty
+                                          ? '✅ 本地推理成功: $ans'
+                                          : '⚠️ 推理完成但未产出有效文本',
+                                    ),
+                                  ),
+                                );
+                              } catch (e) {
+                                if (!mounted) return;
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(content: Text('❌ 测试出错: $e')),
+                                );
+                              }
+                            },
+                  ),
+                ),
+              ],
+            ),
+            const Divider(height: 12),
+
+            // 预设模型下载
+            const Text(
+              '在线下载预设模型（魔塔社区）',
+              style: TextStyle(fontSize: 12, color: StudyPalette.inkSoft),
+            ),
+            const SizedBox(height: 4),
+            for (final (name, filename, url) in _presetModels) ...[
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 2),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        name,
+                        style: TextStyle(
+                          fontSize: 13,
+                          color: StudyPalette.onSurfaceResolved(context),
                         ),
                       ),
-                    ],
-                    const Divider(height: 8),
-
-                    // 从外部导入 GGUF
+                    ),
                     SizedBox(
-                      width: double.infinity,
-                      child: OutlinedButton.icon(
-                        icon: const Icon(Icons.file_open, size: 16),
-                        label: const Text('从文件导入 GGUF 模型'),
-                        onPressed: () => _importGgufFromFile(),
+                      height: 28,
+                      child: OutlinedButton(
+                        style: OutlinedButton.styleFrom(
+                          padding: const EdgeInsets.symmetric(horizontal: 10),
+                          textStyle: const TextStyle(fontSize: 11),
+                        ),
+                        onPressed:
+                            () => _downloadPresetModel(filename, name, url),
+                        child: const Text('下载'),
                       ),
                     ),
                   ],
                 ),
+              ),
+            ],
+            const Divider(height: 8),
+
+            // 从外部导入 GGUF
+            SizedBox(
+              width: double.infinity,
+              child: OutlinedButton.icon(
+                icon: const Icon(Icons.file_open, size: 16),
+                label: const Text('从文件导入 GGUF 模型'),
+                onPressed: () => _importGgufFromFile(),
               ),
             ),
           ],

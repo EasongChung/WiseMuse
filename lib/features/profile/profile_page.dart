@@ -4,6 +4,7 @@ import '../../core/models/profile.dart';
 import '../../core/theme/app_theme.dart';
 import '../../services/profile_service.dart';
 import '../debug/log_page.dart';
+import '../rag/rag_management_page.dart';
 import '../settings/settings_page.dart';
 import '../wordbook/wordbook_page.dart';
 
@@ -244,6 +245,19 @@ class _ProfilePageState extends State<ProfilePage> {
                           () => Navigator.of(context).push(
                             MaterialPageRoute(
                               builder: (_) => const WordBookPage(),
+                            ),
+                          ),
+                    ),
+                    const Divider(height: 1, indent: 56),
+                    _buildEntry(
+                      context,
+                      icon: Icons.psychology_outlined,
+                      title: 'RAG 知识库',
+                      subtitle: '管理书籍向量索引与原文切片',
+                      onTap:
+                          () => Navigator.of(context).push(
+                            MaterialPageRoute(
+                              builder: (_) => const RagManagementPage(),
                             ),
                           ),
                     ),

@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_markdown/flutter_markdown.dart';
@@ -5,21 +7,29 @@ import 'package:flutter_markdown/flutter_markdown.dart';
 import '../../core/debug/app_log.dart';
 import '../../core/models/book.dart';
 import '../../core/models/chat_message.dart';
+import '../../core/settings/settings_service.dart';
 import '../../core/storage/book_dao.dart';
 import '../../core/storage/chat_dao.dart';
 import '../../core/storage/database.dart';
 import '../../core/theme/app_theme.dart';
 import '../../services/ai_service.dart';
+import '../../services/asr_service.dart';
 import '../../services/native_tts_service.dart';
+import '../../services/ocr_service.dart';
+import '../../services/picker_service.dart';
 import '../../services/rag/rag_qa_service.dart';
+import '../../services/vosk_asr_service.dart';
+import '../../widgets/import_sheet.dart';
 
-/// [v0.1.48] 「问AI」智能伴读会话页面。
+/// [v0.1.48] [v0.1.50] 「问AI」智能伴读会话页面。
 ///
 /// 功能：
 /// 1. 多轮自由问答 / 课文伴读。
 /// 2. 支持选择已导入书籍进行 RAG 知识库问答。
-/// 3. 本地与云端大模型自动回退。
-/// 4. 消息持久化、一键清空、一键 TTS 朗读与复制。
+/// 3. 语音识别输入（Vosk 离线 ASR）与图片 OCR 提问输入。
+/// 4. 欢迎页面呈现 WiseMuse 介绍，会话中禁止 AI 重复自我介绍。
+/// 5. 顶部支持新建会话与会话历史查看管理。
+/// 6. 消息 Markdown 富文本渲染、TTS 朗读与复制。
 class AiChatPage extends StatefulWidget {
   const AiChatPage({super.key});
 
@@ -33,12 +43,14 @@ class _AiChatPageState extends State<AiChatPage> {
   final TextEditingController _textController = TextEditingController();
   final ScrollController _scrollController = ScrollController();
   final NativeTtsService _tts = NativeTtsService();
+  final AsrService _asr = VoskAsrService();
 
   List<ChatMessage> _messages = [];
   List<Book> _books = [];
   String? _selectedBookId; // null = 通用助教，非空 = 指定书籍知识库
   bool _loading = true;
   bool _generating = false;
+  bool _isListening = false;
 
   @override
   void initState() {
@@ -50,6 +62,9 @@ class _AiChatPageState extends State<AiChatPage> {
   void dispose() {
     _textController.dispose();
     _scrollController.dispose();
+    if (_isListening) {
+      unawaited(_asr.stop());
+    }
     super.dispose();
   }
 
@@ -97,6 +112,10 @@ class _AiChatPageState extends State<AiChatPage> {
     final query = (presetText ?? _textController.text).trim();
     if (query.isEmpty || _generating) return;
 
+    if (_isListening) {
+      await _toggleVoiceInput();
+    }
+
     _textController.clear();
     final db = await DatabaseProvider.database;
     final chatDao = ChatDao(db);
@@ -132,12 +151,12 @@ class _AiChatPageState extends State<AiChatPage> {
         );
         answer = ragAnswer ?? '在知识库中未找到相关内容，建议换个问题提问。';
       } else {
-        // 通用对话 Prompt
+        // 通用对话 Prompt：明确要求禁止开头无意义自我介绍
         final prompt = '''你是一个亲切耐心的少儿智能学习助手（WiseMuse 智启陪读）。
 回答要求：
-1. 语言亲切生动，适合中小学生阅读理解。
-2. 解释概念要举通俗易懂的例子。
-3. 排版清晰，层次分明。
+1. 请直接针对问题给出回答，严禁在回答开头做自我介绍（如“我是WiseMuse...”或“你好小朋友...”等无意义开场白）。
+2. 语言亲切生动、通俗易懂，适合中小学生阅读理解，必要时举具体生动的例子。
+3. 排版清晰，层次分明，使用 Markdown 格式展现重点。
 
 小朋友的问题：$query''';
         final aiResult = await AiService().complete(prompt);
@@ -166,33 +185,305 @@ class _AiChatPageState extends State<AiChatPage> {
     _scrollToBottom();
   }
 
-  Future<void> _clearHistory() async {
+  Future<void> _toggleVoiceInput() async {
+    try {
+      if (_isListening) {
+        setState(() => _isListening = false);
+        final text = await _asr.stop();
+        if (text.isNotEmpty) {
+          final current = _textController.text.trim();
+          _textController.text = current.isEmpty ? text : '$current $text';
+          _textController.selection = TextSelection.fromPosition(
+            TextPosition(offset: _textController.text.length),
+          );
+        }
+      } else {
+        final settings = SettingsService.instance;
+        final modelPath = await settings.getVoskModelPath();
+        if (modelPath == null || modelPath.isEmpty) {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text('⚠️ 请先在「设置」中下载或配置 Vosk 语音识别模型')),
+            );
+          }
+          return;
+        }
+        if (!_asr.isLoaded) {
+          final ok = await _asr.init(modelPath);
+          if (!ok) {
+            if (mounted) {
+              ScaffoldMessenger.of(
+                context,
+              ).showSnackBar(const SnackBar(content: Text('❌ Vosk 语音模型初始化失败')));
+            }
+            return;
+          }
+        }
+        final started = await _asr.start();
+        if (mounted) setState(() => _isListening = started);
+      }
+    } catch (e, s) {
+      AppLog.e(_tag, '语音录入异常: $e\n$s');
+      if (mounted) setState(() => _isListening = false);
+    }
+  }
+
+  Future<void> _pickImageAndOcr() async {
+    final action = await showModalBottomSheet<ImportAction>(
+      context: context,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(18)),
+      ),
+      builder:
+          (ctx) => SafeArea(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                ListTile(
+                  leading: const Icon(Icons.camera_alt_outlined),
+                  title: const Text('拍照识别文字'),
+                  onTap: () => Navigator.pop(ctx, ImportAction.camera),
+                ),
+                ListTile(
+                  leading: const Icon(Icons.photo_library_outlined),
+                  title: const Text('从相册选取识别'),
+                  onTap: () => Navigator.pop(ctx, ImportAction.gallery),
+                ),
+              ],
+            ),
+          ),
+    );
+    if (action == null || !mounted) return;
+
+    String? path;
+    if (action == ImportAction.camera) {
+      path = await PickerService().pickFromCamera();
+    } else {
+      path = await PickerService().pickFromGallery();
+    }
+    if (path == null || !mounted) return;
+
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(const SnackBar(content: Text('正在识别图片中的文字…')));
+    final ocrResult = await OcrService().recognizeFile(path);
+    final text = ocrResult?.text.trim() ?? '';
+    if (text.isEmpty) {
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('未能在图片中识别出有效文字')));
+      }
+      return;
+    }
+
+    final current = _textController.text.trim();
+    _textController.text = current.isEmpty ? text : '$current\n$text';
+    _textController.selection = TextSelection.fromPosition(
+      TextPosition(offset: _textController.text.length),
+    );
+  }
+
+  Future<void> _startNewChat() async {
+    if (_messages.isEmpty) return;
     final ok = await showDialog<bool>(
       context: context,
       builder:
           (ctx) => AlertDialog(
-            title: const Text('清空会话记录'),
-            content: const Text('确定要清空当前的聊天记录吗？'),
+            title: const Text('开启新会话'),
+            content: const Text('开启新会话将清空当前对话屏幕，过往记录可在「历史记录」中随时查看。'),
             actions: [
               TextButton(
                 onPressed: () => Navigator.pop(ctx, false),
                 child: const Text('取消'),
               ),
-              TextButton(
+              FilledButton(
                 onPressed: () => Navigator.pop(ctx, true),
-                child: const Text(
-                  '清空',
-                  style: TextStyle(color: StudyPalette.ember),
-                ),
+                child: const Text('开启新会话'),
               ),
             ],
           ),
     );
-    if (ok == true) {
-      final db = await DatabaseProvider.database;
-      await ChatDao(db).clearMessages(bookId: _selectedBookId);
-      await _loadMessages();
+    if (ok == true && mounted) {
+      setState(() => _messages = []);
+      _textController.clear();
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('已开启全新对话')));
     }
+  }
+
+  Future<void> _showHistorySheet() async {
+    final db = await DatabaseProvider.database;
+    final chatDao = ChatDao(db);
+    final allMsgs = await chatDao.getMessages(bookId: _selectedBookId);
+
+    if (!mounted) return;
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor:
+          Theme.of(context).brightness == Brightness.dark
+              ? StudyPalette.darkCard
+              : StudyPalette.parchment,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(18)),
+      ),
+      builder:
+          (ctx) => StatefulBuilder(
+            builder: (ctx, setSheetState) {
+              return SizedBox(
+                height: MediaQuery.of(context).size.height * 0.7,
+                child: Column(
+                  children: [
+                    Center(
+                      child: Container(
+                        width: 36,
+                        height: 4,
+                        margin: const EdgeInsets.only(top: 12, bottom: 8),
+                        decoration: BoxDecoration(
+                          color: StudyPalette.linen,
+                          borderRadius: BorderRadius.circular(2),
+                        ),
+                      ),
+                    ),
+                    Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 16,
+                        vertical: 8,
+                      ),
+                      child: Row(
+                        children: [
+                          const Icon(
+                            Icons.history,
+                            color: StudyPalette.ember,
+                            size: 20,
+                          ),
+                          const SizedBox(width: 8),
+                          Text('会话历史记录', style: titleStyle(fontSize: 16)),
+                          const Spacer(),
+                          if (allMsgs.isNotEmpty)
+                            TextButton.icon(
+                              icon: const Icon(
+                                Icons.delete_sweep,
+                                size: 18,
+                                color: StudyPalette.ember,
+                              ),
+                              label: const Text(
+                                '清空全部',
+                                style: TextStyle(
+                                  color: StudyPalette.ember,
+                                  fontSize: 12,
+                                ),
+                              ),
+                              onPressed: () async {
+                                final confirm = await showDialog<bool>(
+                                  context: context,
+                                  builder:
+                                      (c) => AlertDialog(
+                                        title: const Text('清空全部历史记录'),
+                                        content: const Text(
+                                          '确定要彻底清空该模式下的所有会话记录吗？',
+                                        ),
+                                        actions: [
+                                          TextButton(
+                                            onPressed:
+                                                () => Navigator.pop(c, false),
+                                            child: const Text('取消'),
+                                          ),
+                                          FilledButton(
+                                            style: FilledButton.styleFrom(
+                                              backgroundColor:
+                                                  StudyPalette.ember,
+                                            ),
+                                            onPressed:
+                                                () => Navigator.pop(c, true),
+                                            child: const Text('清空'),
+                                          ),
+                                        ],
+                                      ),
+                                );
+                                if (confirm == true) {
+                                  await chatDao.clearMessages(
+                                    bookId: _selectedBookId,
+                                  );
+                                  await _loadMessages();
+                                  if (ctx.mounted) Navigator.pop(ctx);
+                                }
+                              },
+                            ),
+                        ],
+                      ),
+                    ),
+                    const Divider(height: 1),
+                    Expanded(
+                      child:
+                          allMsgs.isEmpty
+                              ? const Center(
+                                child: Text(
+                                  '暂无历史对话记录',
+                                  style: TextStyle(color: StudyPalette.inkSoft),
+                                ),
+                              )
+                              : ListView.separated(
+                                padding: const EdgeInsets.all(12),
+                                itemCount: allMsgs.length,
+                                separatorBuilder:
+                                    (_, _) => const Divider(height: 1),
+                                itemBuilder: (c, i) {
+                                  final m = allMsgs[i];
+                                  final isUser = m.role == 'user';
+                                  return ListTile(
+                                    dense: true,
+                                    leading: CircleAvatar(
+                                      radius: 14,
+                                      backgroundColor:
+                                          isUser
+                                              ? StudyPalette.ember
+                                              : StudyPalette.moss,
+                                      child: Icon(
+                                        isUser
+                                            ? Icons.person
+                                            : Icons.auto_awesome,
+                                        size: 14,
+                                        color: Colors.white,
+                                      ),
+                                    ),
+                                    title: Text(
+                                      m.content,
+                                      maxLines: 2,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: const TextStyle(fontSize: 13),
+                                    ),
+                                    subtitle: Text(
+                                      isUser ? '提问' : '回答',
+                                      style: const TextStyle(
+                                        fontSize: 11,
+                                        color: StudyPalette.inkSoft,
+                                      ),
+                                    ),
+                                    onTap: () {
+                                      Clipboard.setData(
+                                        ClipboardData(text: m.content),
+                                      );
+                                      ScaffoldMessenger.of(
+                                        context,
+                                      ).showSnackBar(
+                                        const SnackBar(
+                                          content: Text('已复制内容到剪贴板'),
+                                        ),
+                                      );
+                                    },
+                                  );
+                                },
+                              ),
+                    ),
+                  ],
+                ),
+              );
+            },
+          ),
+    );
   }
 
   @override
@@ -204,9 +495,14 @@ class _AiChatPageState extends State<AiChatPage> {
         title: const Text('问AI 智能伴读'),
         actions: [
           IconButton(
-            icon: const Icon(Icons.delete_outline),
-            tooltip: '清空会话',
-            onPressed: _messages.isEmpty ? null : _clearHistory,
+            icon: const Icon(Icons.add_comment_outlined),
+            tooltip: '开启新会话',
+            onPressed: _startNewChat,
+          ),
+          IconButton(
+            icon: const Icon(Icons.history),
+            tooltip: '会话历史',
+            onPressed: _showHistorySheet,
           ),
         ],
       ),
@@ -288,31 +584,49 @@ class _AiChatPageState extends State<AiChatPage> {
 
     return Center(
       child: SingleChildScrollView(
-        padding: const EdgeInsets.all(24),
+        padding: const EdgeInsets.all(20),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
             Container(
-              width: 72,
-              height: 72,
-              decoration: const BoxDecoration(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
                 color: StudyPalette.parchmentDeep,
-                shape: BoxShape.circle,
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(color: StudyPalette.linen),
               ),
-              child: const Icon(
-                Icons.auto_awesome,
-                size: 36,
-                color: StudyPalette.ember,
+              child: Column(
+                children: [
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      const Icon(
+                        Icons.auto_awesome,
+                        color: StudyPalette.ember,
+                        size: 24,
+                      ),
+                      const SizedBox(width: 8),
+                      Text('WiseMuse 智启陪读', style: titleStyle(fontSize: 18)),
+                    ],
+                  ),
+                  const SizedBox(height: 10),
+                  const Text(
+                    '📚 专为中小学生打造的 AI 智能伴读小助手\n'
+                    '✨ 自由问答 · 课文答疑 · 知识点生动解析 · 写作指导\n'
+                    '💡 支持选择已导入课本开启精准 RAG 知识库问答',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: StudyPalette.inkSoft,
+                      height: 1.5,
+                    ),
+                  ),
+                ],
               ),
-            ),
-            const SizedBox(height: 16),
-            Text('想问点什么呢？', style: titleStyle(fontSize: 18)),
-            const SizedBox(height: 6),
-            const Text(
-              '你可以随时向 AI 小助教提问或讨论课文',
-              style: TextStyle(fontSize: 13, color: StudyPalette.inkSoft),
             ),
             const SizedBox(height: 20),
+            Text('想问点什么呢？', style: titleStyle(fontSize: 16)),
+            const SizedBox(height: 12),
             Wrap(
               spacing: 8,
               runSpacing: 8,
@@ -390,7 +704,7 @@ class _AiChatPageState extends State<AiChatPage> {
                           fontWeight: FontWeight.bold,
                           color: StudyPalette.onSurfaceResolved(context),
                         ),
-                        code: TextStyle(
+                        code: const TextStyle(
                           fontSize: 12,
                           backgroundColor: StudyPalette.parchmentDeep,
                           color: StudyPalette.ember,
@@ -480,7 +794,7 @@ class _AiChatPageState extends State<AiChatPage> {
 
   Widget _buildInputBar(bool isDark) {
     return Container(
-      padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+      padding: const EdgeInsets.fromLTRB(10, 8, 12, 16),
       decoration: BoxDecoration(
         color: isDark ? StudyPalette.darkCard : StudyPalette.parchment,
         border: Border(
@@ -489,42 +803,93 @@ class _AiChatPageState extends State<AiChatPage> {
           ),
         ),
       ),
-      child: Row(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
         children: [
-          Expanded(
-            child: TextField(
-              controller: _textController,
-              decoration: InputDecoration(
-                hintText: _selectedBookId != null ? '提问关于这本书的内容…' : '输入你想问的问题…',
-                hintStyle: const TextStyle(
-                  fontSize: 14,
+          if (_isListening)
+            Container(
+              padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 12),
+              margin: const EdgeInsets.only(bottom: 6),
+              decoration: BoxDecoration(
+                color: StudyPalette.emberSoft.withValues(alpha: 0.5),
+                borderRadius: BorderRadius.circular(20),
+              ),
+              child: const Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(Icons.mic, size: 16, color: StudyPalette.ember),
+                  SizedBox(width: 6),
+                  Text(
+                    '正在聆听，请说话…（再次点击麦克风停止）',
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: StudyPalette.ember,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          Row(
+            children: [
+              // 图片拍摄/相册识别输入
+              IconButton(
+                icon: const Icon(
+                  Icons.image_outlined,
+                  size: 22,
                   color: StudyPalette.inkSoft,
                 ),
-                isDense: true,
-                filled: true,
-                fillColor: isDark ? StudyPalette.darkBorder : Colors.white,
-                contentPadding: const EdgeInsets.symmetric(
-                  horizontal: 14,
-                  vertical: 10,
+                tooltip: '拍照/相册文字识别',
+                onPressed: _generating ? null : _pickImageAndOcr,
+              ),
+              // 语音识别输入
+              IconButton(
+                icon: Icon(
+                  _isListening ? Icons.mic : Icons.mic_none_outlined,
+                  size: 22,
+                  color:
+                      _isListening ? StudyPalette.ember : StudyPalette.inkSoft,
                 ),
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(20),
-                  borderSide: BorderSide.none,
+                tooltip: _isListening ? '停止语音录入' : '语音输入',
+                onPressed: _generating ? null : _toggleVoiceInput,
+              ),
+              Expanded(
+                child: TextField(
+                  controller: _textController,
+                  decoration: InputDecoration(
+                    hintText:
+                        _selectedBookId != null ? '提问关于这本书的内容…' : '输入你想问的问题…',
+                    hintStyle: const TextStyle(
+                      fontSize: 14,
+                      color: StudyPalette.inkSoft,
+                    ),
+                    isDense: true,
+                    filled: true,
+                    fillColor: isDark ? StudyPalette.darkBorder : Colors.white,
+                    contentPadding: const EdgeInsets.symmetric(
+                      horizontal: 14,
+                      vertical: 10,
+                    ),
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(20),
+                      borderSide: BorderSide.none,
+                    ),
+                  ),
+                  minLines: 1,
+                  maxLines: 4,
+                  onSubmitted: (_) => _sendMessage(),
                 ),
               ),
-              minLines: 1,
-              maxLines: 4,
-              onSubmitted: (_) => _sendMessage(),
-            ),
-          ),
-          const SizedBox(width: 8),
-          IconButton.filled(
-            onPressed: _generating ? null : () => _sendMessage(),
-            icon: const Icon(Icons.send, size: 18),
-            style: IconButton.styleFrom(
-              backgroundColor: StudyPalette.ember,
-              foregroundColor: Colors.white,
-            ),
+              const SizedBox(width: 6),
+              IconButton.filled(
+                onPressed: _generating ? null : () => _sendMessage(),
+                icon: const Icon(Icons.send, size: 18),
+                style: IconButton.styleFrom(
+                  backgroundColor: StudyPalette.ember,
+                  foregroundColor: Colors.white,
+                ),
+              ),
+            ],
           ),
         ],
       ),

@@ -4,6 +4,7 @@ import 'model_ids.dart';
 class ChatMessage {
   ChatMessage({
     required this.id,
+    this.sessionId,
     this.profileId = 'default',
     required this.role,
     required this.content,
@@ -14,6 +15,7 @@ class ChatMessage {
   });
 
   factory ChatMessage.create({
+    String? sessionId,
     String profileId = 'default',
     required String role,
     required String content,
@@ -23,6 +25,7 @@ class ChatMessage {
   }) {
     return ChatMessage(
       id: newModelId('chat'),
+      sessionId: sessionId,
       profileId: profileId,
       role: role,
       content: content,
@@ -34,6 +37,7 @@ class ChatMessage {
   }
 
   final String id;
+  String? sessionId;
   final String profileId;
 
   /// 'user' | 'assistant' | 'system'
@@ -52,6 +56,7 @@ class ChatMessage {
 
   Map<String, dynamic> toMap() => {
     'id': id,
+    'session_id': sessionId,
     'profile_id': profileId,
     'role': role,
     'content': content,
@@ -63,6 +68,7 @@ class ChatMessage {
 
   factory ChatMessage.fromMap(Map<String, dynamic> map) => ChatMessage(
     id: map['id'] as String,
+    sessionId: map['session_id'] as String?,
     profileId: (map['profile_id'] as String?) ?? 'default',
     role: (map['role'] as String?) ?? 'user',
     content: (map['content'] as String?) ?? '',

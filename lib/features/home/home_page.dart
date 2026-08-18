@@ -110,12 +110,11 @@ class _HomePageState extends State<HomePage> {
 
     setState(() => _importing = true);
     try {
-      // 启动异步导入
+      // 启动异步导入（不强制绑定自动构建 RAG 向量索引，改由「我的」独立管理）
       _runImport(action)
           .then((book) {
             if (book != null) {
               _refresh();
-              unawaited(_buildRagIndex(book));
             }
           })
           .catchError((e) {
@@ -131,9 +130,9 @@ class _HomePageState extends State<HomePage> {
           });
 
       // 选定文件后立即连续拉取两次，确保新建的初始书籍瞬间在书架呈现
-      await Future.delayed(const Duration(milliseconds: 150));
+      await Future.delayed(const Duration(milliseconds: 100));
       await _refresh();
-      await Future.delayed(const Duration(milliseconds: 300));
+      await Future.delayed(const Duration(milliseconds: 250));
       await _refresh();
     } catch (e) {
       if (mounted) setState(() => _importing = false);
@@ -397,8 +396,6 @@ class _BookCard extends StatelessWidget {
                         color: StudyPalette.inkSoft,
                       ),
                     ),
-                  const SizedBox(height: 6),
-                  if (!isImporting && !isFailed) _buildRagStatus(),
                 ],
               ),
             ),
@@ -406,23 +403,6 @@ class _BookCard extends StatelessWidget {
         ),
       ),
     );
-  }
-
-  Widget _buildRagStatus() {
-    if (isIndexed) {
-      return const Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(Icons.check_circle, size: 12, color: StudyPalette.moss),
-          SizedBox(width: 4),
-          Text(
-            '知识库就绪',
-            style: TextStyle(fontSize: 10, color: StudyPalette.moss),
-          ),
-        ],
-      );
-    }
-    return const SizedBox.shrink();
   }
 
   void _confirmDelete(BuildContext context) {

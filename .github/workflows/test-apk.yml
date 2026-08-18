@@ -85,30 +85,8 @@ jobs:
           fi
 
       # ===== [双包策略阶段 1] 构建 Standard 标准测试版 (~75MB，轻量化首选) =====
-      - name: 清理 jniLibs 并构建 Standard 标准版 APK
-        run: |
-          rm -rf android/app/src/main/jniLibs/arm64-v8a/*
-          flutter build apk --release --target-platform android-arm64 --build-name "$VERSION_NAME" --build-number "$VERSION_CODE"
-        env:
-          KEYSTORE_PATH: ${{ env.KEYSTORE_PATH }}
-          KEYSTORE_PASSWORD: ${{ env.KEYSTORE_PASSWORD }}
-          KEY_ALIAS: ${{ env.KEY_ALIAS }}
-          KEY_PASSWORD: ${{ env.KEY_PASSWORD }}
-
-      - name: 校验并重命名 Standard 标准版 APK
-        shell: bash
-        run: |
-          set -euo pipefail
-          SOURCE="build/app/outputs/flutter-apk/app-release.apk"
-          test -s "$SOURCE"
-          test -n "$VERSION_NAME"
-          DEST="build/app/outputs/flutter-apk/wisemuse-${VERSION_NAME}-${GITHUB_SHA::7}-standard-arm64-v8a.apk"
-          mv "$SOURCE" "$DEST"
-          sha256sum "$DEST"
-          ls -lh "$DEST"
-
-      # ===== [双包策略阶段 2] 装配 llama 本地引擎并构建 Full 增强测试版 (~181MB，完全离线) =====
-      - name: 装配 llama 引擎 .so 并构建 Full 增强版 APK
+      # ===== 装配 llama 本地引擎 =====
+      - name: 装配 llama 引擎 .so
         shell: bash
         run: |
           set -euo pipefail
@@ -118,39 +96,46 @@ jobs:
           else
             TAG=""
           fi
-          if [ -z "$TAG" ] || [[ "$TAG" != llama-engine-* ]]; then
-            echo "::warning::未配置有效的引擎 tag（android/llama_engine.txt），跳过 Full 版构建"
-            exit 0
+          if [ -n "$TAG" ] && [[ "$TAG" == llama-engine-* ]]; then
+            echo "==> 下载引擎 Release: $TAG"
+            gh release download "$TAG" \
+              --repo "$GITHUB_REPOSITORY" \
+              --pattern 'llama-engine-*.tar.gz' \
+              --dir /tmp/llama-engine || {
+                echo "::warning::引擎 Release $TAG 下载失败"
+              }
+            if [ -d /tmp/llama-engine ]; then
+              mkdir -p android/app/src/main/jniLibs/arm64-v8a
+              tar -xzf /tmp/llama-engine/llama-engine-*.tar.gz -C /tmp/llama-engine || true
+              if [ -d /tmp/llama-engine/engine ]; then
+                cp /tmp/llama-engine/engine/*.so android/app/src/main/jniLibs/arm64-v8a/ || true
+              fi
+            fi
           fi
-          echo "==> 下载引擎 Release: $TAG"
-          gh release download "$TAG" \
-            --repo "$GITHUB_REPOSITORY" \
-            --pattern 'llama-engine-*.tar.gz' \
-            --dir /tmp/llama-engine || {
-              echo "::error::引擎 Release $TAG 下载失败"
-              exit 1
-            }
-          mkdir -p android/app/src/main/jniLibs/arm64-v8a
-          tar -xzf /tmp/llama-engine/llama-engine-*.tar.gz -C /tmp/llama-engine
-          cp /tmp/llama-engine/engine/*.so android/app/src/main/jniLibs/arm64-v8a/
-          echo "==> 引擎 .so 装配完成："
-          ls -lh android/app/src/main/jniLibs/arm64-v8a/
-
-          echo "==> 开始构建 Full 增强版 APK"
-          flutter build apk --release --target-platform android-arm64 --build-name "$VERSION_NAME" --build-number "$VERSION_CODE"
-
-          SOURCE="build/app/outputs/flutter-apk/app-release.apk"
-          test -s "$SOURCE"
-          DEST="build/app/outputs/flutter-apk/wisemuse-${VERSION_NAME}-${GITHUB_SHA::7}-full-arm64-v8a.apk"
-          mv "$SOURCE" "$DEST"
-          sha256sum "$DEST"
-          ls -lh "$DEST"
+          echo "==> 引擎 .so 状态："
+          ls -lh android/app/src/main/jniLibs/arm64-v8a/ || true
         env:
           GH_TOKEN: ${{ github.token }}
+
+      - name: 构建测试版 APK
+        run: flutter build apk --release --target-platform android-arm64 --build-name "$VERSION_NAME" --build-number "$VERSION_CODE"
+        env:
           KEYSTORE_PATH: ${{ env.KEYSTORE_PATH }}
           KEYSTORE_PASSWORD: ${{ env.KEYSTORE_PASSWORD }}
           KEY_ALIAS: ${{ env.KEY_ALIAS }}
           KEY_PASSWORD: ${{ env.KEY_PASSWORD }}
+
+      - name: 校验并重命名测试版 APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          SOURCE="build/app/outputs/flutter-apk/app-release.apk"
+          test -s "$SOURCE"
+          test -n "$VERSION_NAME"
+          DEST="build/app/outputs/flutter-apk/wisemuse-${VERSION_NAME}-${GITHUB_SHA::7}-arm64-v8a.apk"
+          mv "$SOURCE" "$DEST"
+          sha256sum "$DEST"
+          ls -lh "$DEST"
 
       - name: 上传 APK
         uses: actions/upload-artifact@v4
@@ -166,11 +151,10 @@ jobs:
         run: |
           set -euo pipefail
           test -n "$BUILD_N"
-          TS="$(date -u '+%Y%m%d-%H%M%S') prime"
           TS="$(date -u '+%Y%m%d-%H%M%S')"
           TAG="test-${BUILD_N}-${TS}"
           echo "TAG=${TAG}" >> "$GITHUB_ENV"
-          echo "date=$(date -u '+%Y-%m-%dT%H:%M:%SZ')" >> "$GITHUB_OUTPUT"
+          echo "date=$(date -u '+%Y-%m-%dT%H:%M:%SZ')">> "$GITHUB_OUTPUT"
           git config user.email "actions@github.com"
           git config user.name "GitHub Actions"
           git tag -f "${TAG}"
@@ -183,19 +167,13 @@ jobs:
           tag_name: ${{ env.TAG }}
           name: "[测试版] WiseMuse ${{ env.VERSION_NAME }}"
           body: |
-            ## WiseMuse 测试版（双包架构：Standard 标准版 + Full 增强版）
+            ## WiseMuse 测试版
 
             - 版本: `${{ env.VERSION_NAME }}` (versionCode `${{ env.VERSION_CODE }}`)
             - 架构: arm64-v8a
             - 分支: `${{ github.ref_name }}` @ `${{ github.sha }}`
             - 构建日期: ${{ steps.tag.outputs.date }}
             - 工作流: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
-
-            ---
-
-            ### 📦 测试包文件
-            - **标准版 (Standard, ~75MB)**: `wisemuse-${{ env.VERSION_NAME }}-${{ github.sha }}-standard-arm64-v8a.apk`（日常推荐，轻量化）
-            - **增强版 (Full, ~181MB)**: `wisemuse-${{ env.VERSION_NAME }}-${{ github.sha }}-full-arm64-v8a.apk`（内置完整 llama.android 离线推理库）
 
             ### 使用须知
             本包 versionCode 高于正式版，**装过本包后要装回正式版须先卸载**。

@@ -152,7 +152,8 @@ class OpenAiClient {
         // 按 index 排序确保顺序一致
         data.sort((a, b) => (a['index'] as int).compareTo(b['index'] as int));
         for (final item in data) {
-          final emb = (item['embedding'] as List).cast<double>();
+          final rawEmb = item['embedding'] as List;
+          final emb = rawEmb.map((e) => (e as num).toDouble()).toList();
           allEmbeddings.add(emb);
         }
       } catch (e) {
