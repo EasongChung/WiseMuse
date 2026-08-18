@@ -85,6 +85,11 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
   int _pdfCurrentPage = 0;
   final ScrollController _sheetScrollController = ScrollController();
 
+  // [v0.1.51] 手势滑动跟踪（基于 Listener, 绕过 SelectionArea / PDFView 手势拦截）
+  double? _dragStartDX;
+  double? _dragStartDY;
+  bool _dragIsHorizontal = false;
+
   // [v0.1.39] 连续朗读激活状态：从当前句子开始连续朗读本页剩余句子，
   // 激活状态下点击其他句子会打断并从新句子继续连读；点击停止则重置为单句模式。
   bool _continuousPlaying = false;
@@ -223,6 +228,9 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
       _pdfCurrentPage = next;
       _textPageIndex = next;
       _textHighlightIndex = null;
+      _activeSentenceIndex = null;
+      _activeSentenceText = null;
+      _selectedText = null;
       _imgHighlight = null;
       _pdfSentenceCache.clear();
       _pageGeomCache.clear();
@@ -246,16 +254,54 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
     _syncPage(_pdfCurrentPage + delta);
   }
 
-  /// 文本模式左右滑翻页：依据横向位移方向切换当前页（多页文件）。
-  void _onTextSwipePage(DragEndDetails details) {
-    if (!_isMultiPage) return;
-    final velocity = details.primaryVelocity;
-    if (velocity == null) return;
-    if (velocity < -350) {
-      _changePage(1);
-    } else if (velocity > 350) {
-      _changePage(-1);
+  // [v0.1.51] 基于 Listener 的水平滑动翻页 —— 绕过 SelectionArea / PDFView 的手势拦截
+  // Listener 在手势竞技场之外直接接收原始指针事件, 所以即使 SelectionArea
+  // 的 SelectableRegion 拦截了水平拖动, 这里仍能收到 onPointerMove。
+
+  /// 记录拖动起点
+  void _onDragStart(PointerDownEvent e) {
+    _dragStartDX = e.localPosition.dx;
+    _dragStartDY = e.localPosition.dy;
+    _dragIsHorizontal = false;
+  }
+
+  /// 判定拖动方向（仅水平优先才进入翻页流程）
+  void _onDragMove(PointerMoveEvent e) {
+    if (_dragIsHorizontal || _dragStartDX == null || _dragStartDY == null) {
+      return;
     }
+    final dx = (e.localPosition.dx - _dragStartDX!).abs();
+    final dy = (e.localPosition.dy - _dragStartDY!).abs();
+    // 水平位移需超过竖向 1.5 倍且 > 24px 才认定为水平滑
+    if (dx > dy * 1.5 && dx > 24) {
+      _dragIsHorizontal = true;
+    }
+  }
+
+  /// 拖动结束 → 判定是否翻页
+  void _onDragEnd(PointerUpEvent e) {
+    _trySwipePage(e.localPosition.dx);
+    _resetDragState();
+  }
+
+  void _onDragCancel(PointerCancelEvent e) {
+    _resetDragState();
+  }
+
+  void _resetDragState() {
+    _dragStartDX = null;
+    _dragStartDY = null;
+    _dragIsHorizontal = false;
+  }
+
+  /// 位移阈值 |dx| > 80px 才翻页（过滤轻微动作）
+  void _trySwipePage(double endX) {
+    if (!_isMultiPage || _dragStartDX == null || !_dragIsHorizontal) return;
+    final delta = endX - _dragStartDX!;
+    if (delta.abs() < 80) return;
+    // delta < 0 → 左滑（手指向左）→ 下一页
+    // delta > 0 → 右滑（手指向右）→ 上一页
+    _changePage(delta < 0 ? 1 : -1);
   }
 
   // ===== PDF =====
@@ -787,7 +833,10 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
       content = _buildTextView();
     }
 
-    // 纯文本模式下监听左右滑动翻页；原文模式下不监听，避免破坏 PDFView 与双指缩放手势
+    // [v0.1.51] 纯文本模式下仅保留点击清空高亮；左右滑翻页由
+    // _buildSwipeableSentenceList 内部的 Listener 接管（绕过 SelectionArea 手势拦截）。
+    // 原文模式下不监听，避免破坏 PDFView 与双指缩放手势；左右滑翻页由 _buildPdfView
+    // 内部的 Listener + PDFView 原生 enableSwipe 双重保障。
     if (!_useOriginal) {
       content = GestureDetector(
         behavior: HitTestBehavior.translucent,
@@ -795,12 +844,6 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
           if (_activeSentenceText != null) {
             setState(() => _activeSentenceText = null);
           }
-        },
-        onHorizontalDragEnd: (d) {
-          if (_activeSentenceText != null) {
-            setState(() => _activeSentenceText = null);
-          }
-          if (_isMultiPage) _onTextSwipePage(d);
         },
         child: content,
       );
@@ -842,40 +885,49 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
     final path = widget.book.originalFilePath;
     if (path == null) return const Text('缺少 PDF 文件');
     final viewGeneration = _pdfViewGeneration;
-    return PDFView(
-      filePath: path,
-      enableSwipe: true,
-      swipeHorizontal: true,
-      pageSnap: true,
-      pageFling: true,
-      defaultPage: _isMultiPage ? _pdfCurrentPage : 0,
-      onViewCreated: (controller) async {
-        if (!mounted || viewGeneration != _pdfViewGeneration) return;
-        _pdfController = controller;
-        await _syncPageSize(controller, _pdfCurrentPage, viewGeneration);
-      },
-      onPageChanged: (page, total) async {
-        if (!mounted ||
-            viewGeneration != _pdfViewGeneration ||
-            !_useOriginal ||
-            _switchingMode) {
-          return;
-        }
-        if (page == null) return;
-        // 同步共享页码（文本模式/底部面板联动）
-        _syncPage(page);
-        final c = _pdfController;
-        if (c != null) {
-          await _syncPageSize(c, page, viewGeneration);
-        }
-      },
-      onTap: (details) {
-        final c = _pdfController;
-        if (c != null) {
-          _onPdfTap(c, details, viewGeneration);
-        }
-      },
-      onError: (e) => AppLog.e(_tag, 'PDFView 错误: $e'),
+    return Listener(
+      // [v0.1.51] Flutter 侧左右滑翻页 —— 作为 PDFView 原生 enableSwipe 的补充。
+      // Listener 在手势竞技场之外, 不影响 PDFView 的点击 / 双指缩放 / 双击缩放。
+      behavior: HitTestBehavior.translucent,
+      onPointerDown: _onDragStart,
+      onPointerMove: _onDragMove,
+      onPointerUp: _onDragEnd,
+      onPointerCancel: _onDragCancel,
+      child: PDFView(
+        filePath: path,
+        enableSwipe: true,
+        swipeHorizontal: true,
+        pageSnap: true,
+        pageFling: true,
+        defaultPage: _isMultiPage ? _pdfCurrentPage : 0,
+        onViewCreated: (controller) async {
+          if (!mounted || viewGeneration != _pdfViewGeneration) return;
+          _pdfController = controller;
+          await _syncPageSize(controller, _pdfCurrentPage, viewGeneration);
+        },
+        onPageChanged: (page, total) async {
+          if (!mounted ||
+              viewGeneration != _pdfViewGeneration ||
+              !_useOriginal ||
+              _switchingMode) {
+            return;
+          }
+          if (page == null) return;
+          // 同步共享页码（文本模式/底部面板联动）
+          _syncPage(page);
+          final c = _pdfController;
+          if (c != null) {
+            await _syncPageSize(c, page, viewGeneration);
+          }
+        },
+        onTap: (details) {
+          final c = _pdfController;
+          if (c != null) {
+            _onPdfTap(c, details, viewGeneration);
+          }
+        },
+        onError: (e) => AppLog.e(_tag, 'PDFView 错误: $e'),
+      ),
     );
   }
 
@@ -1020,8 +1072,10 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
     return _buildSwipeableSentenceList(pageSentences);
   }
 
-  /// [v0.1.28] 可左右滑翻页的句子列表（多页文件包裹 GestureDetector）。
+  /// [v0.1.28] 可左右滑翻页的句子列表。
   /// [v0.1.35] 包裹 SelectionArea 支持长按选词。
+  /// [v0.1.51] 包裹 Listener 检测水平滑动翻页 —— 绕过 SelectionArea 的
+  /// SelectableRegion 手势拦截, Listener 在手势竞技场之外直接收原始指针事件。
   Widget _buildSwipeableSentenceList(List<Sentence> sentences) {
     final content = SelectionArea(
       onSelectionChanged: (selected) {
@@ -1105,6 +1159,17 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
         },
       ),
     );
+    // [v0.1.51] 多页文件时包裹 Listener 检测水平滑动翻页
+    if (_isMultiPage) {
+      return Listener(
+        behavior: HitTestBehavior.translucent,
+        onPointerDown: _onDragStart,
+        onPointerMove: _onDragMove,
+        onPointerUp: _onDragEnd,
+        onPointerCancel: _onDragCancel,
+        child: content,
+      );
+    }
     return content;
   }
 

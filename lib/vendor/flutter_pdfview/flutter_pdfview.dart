@@ -229,7 +229,7 @@ class _PDFViewState extends State<PDFView> {
           return PlatformViewsService.initSurfaceAndroidView(
               id: params.id,
               viewType: _kViewType,
-              layoutDirection: TextDirection.rtl,
+              layoutDirection: TextDirection.ltr,
               creationParams: _CreationParams.fromWidget(widget).toMap(),
               creationParamsCodec: const StandardMessageCodec(),
             )
