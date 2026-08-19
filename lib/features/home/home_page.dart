@@ -13,7 +13,9 @@ import '../../services/rag/rag_retrieval_service.dart';
 import '../../widgets/import_sheet.dart';
 import '../reader/reader_page.dart';
 
-/// [v0.3.0] [v0.1.48] 书架 Tab：支持后台流式导入、卡片页数位置进度显示、即时加入书架。
+/// [v0.3.0] [v0.1.48] [v0.1.52] 书架 Tab：支持后台流式导入、卡片页数位置进度显示、即时加入书架。
+///
+/// [v0.1.52] 监听应用生命周期（AppLifecycleState.resumed）自动恢复中断的 OCR 导入。
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
 
@@ -21,7 +23,7 @@ class HomePage extends StatefulWidget {
   State<HomePage> createState() => _HomePageState();
 }
 
-class _HomePageState extends State<HomePage> {
+class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   static const _tag = 'home';
 
   List<Book> _books = const [];
@@ -34,6 +36,7 @@ class _HomePageState extends State<HomePage> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _refresh();
     // 轮询导入状态（加快刷新频率为 800ms，确保第一时间捕获新建的书籍和页数更新）
     _progressTimer = Timer.periodic(const Duration(milliseconds: 800), (_) {
@@ -45,8 +48,68 @@ class _HomePageState extends State<HomePage> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _progressTimer?.cancel();
     super.dispose();
+  }
+
+  /// [v0.1.52] 应用从后台返回前台时，自动恢复中断的导入。
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      _resumeInterruptedImports();
+    }
+  }
+
+  /// [v0.1.52] 扫描所有 importStatus=1 且超过 30 秒未更新心跳的书籍，自动恢复导入。
+  Future<void> _resumeInterruptedImports() async {
+    try {
+      final db = await DatabaseProvider.database;
+      final all = await BookDao(db).getAll();
+      final now = DateTime.now().microsecondsSinceEpoch;
+      for (final book in all) {
+        if (book.importStatus == 1 && book.originalFilePath != null) {
+          // 检查心跳：如果 updated_at 超过 30 秒前，说明被中断了
+          if (now - book.updatedAt > 30_000_000) {
+            AppLog.d(_tag, '自动恢复中断导入: ${book.title}');
+            _runImportForBook(book);
+          }
+        }
+      }
+    } catch (e, s) {
+      AppLog.e(_tag, '恢复中断导入失败: $e\n$s');
+    }
+  }
+
+  /// [v0.1.52] 对指定书籍恢复导入（仅文档型，图片/拍照不长时间运行）。
+  Future<void> _runImportForBook(Book book) async {
+    setState(() => _importing = true);
+    try {
+      final path = book.originalFilePath;
+      if (path == null) return;
+      final importService = BookImportService();
+      final source = BookSource.fromName(book.source.name);
+      if (source == BookSource.pdf ||
+          source == BookSource.word ||
+          source == BookSource.txt) {
+        // 恢复导入（OCR 断点逐页写入，自动跳过已有页）
+        await importService.resumeImport(
+          book.id,
+          path,
+          onProgress: (msg, p) {
+            AppLog.d(_tag, '恢复导入进度: $msg');
+          },
+        );
+        AppLog.d(_tag, '恢复导入完成: ${book.title}');
+      }
+    } catch (e) {
+      AppLog.e(_tag, '恢复中断导入失败: $e');
+    } finally {
+      if (mounted) {
+        setState(() => _importing = false);
+        _refresh();
+      }
+    }
   }
 
   Future<void> _refreshQuietly() async {

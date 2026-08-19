@@ -100,6 +100,27 @@ class AiService {
     return null;
   }
 
+  /// [v0.1.52] 多模态（视觉）对话：仅云端，本地引擎不支持。
+  ///
+  /// [imagePaths] 本地图片路径列表；[prompt] 可选文本。
+  /// 模型不支持多模态时返回固定字符串 `__MODEL_NOT_VISION__`。
+  Future<String?> completeVision(
+    List<String> imagePaths, {
+    String prompt = '',
+    int predictLength = 1024,
+  }) async {
+    if (imagePaths.isEmpty) {
+      final result = await complete(prompt, predictLength: predictLength);
+      return result?.text;
+    }
+    final result = await _client.chatVision(
+      user: prompt.isNotEmpty ? prompt : null,
+      imagePaths: imagePaths,
+      maxTokens: predictLength,
+    );
+    return result; // null 或 __MODEL_NOT_VISION__ 或 回答文本
+  }
+
   /// 云端是否已配置可用。
   Future<bool> isCloudReady() => SettingsService.instance.isApiConfigured();
 

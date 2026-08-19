@@ -15,6 +15,8 @@ import 'pdf_service.dart';
 import 'sentence_splitter.dart';
 
 /// [v0.2.0] [v0.1.48] 书籍导入编排：支持流式后台进度更新与拼音智能过滤。
+///
+/// [v0.1.52] 新增 [resumeImport] 恢复中断的扫描 PDF OCR 导入。
 class BookImportService {
   static const _tag = 'import';
 
@@ -98,7 +100,7 @@ class BookImportService {
     } on PdfHasNoTextLayerException {
       AppLog.d(_tag, '扫描件 PDF，走逐页 OCR');
       try {
-        final sentences = await _ocrPdfPages(
+        await _ocrPdfPages(
           path,
           bookId: initialBook.id,
           onProgress: (done, total) async {
@@ -112,7 +114,7 @@ class BookImportService {
           },
         );
         final pageCount = await _pdf.getPageCount(path) ?? 1;
-        await SentenceDao(db).insertAll(sentences);
+        // _ocrPdfPages 已逐页增量落库，此处不再重复 insertAll
         await bookDao.updateImportStatus(
           initialBook.id,
           status: 0,
@@ -228,7 +230,47 @@ class BookImportService {
     }
   }
 
-  // ===== 扫描件 PDF 逐页 OCR =====
+  /// [v0.1.52] 恢复中断的扫描 PDF OCR 导入。
+  ///
+  /// 不重新创建 Book 实体，直接继续 OCR 未完成的页。
+  Future<void> resumeImport(
+    String bookId,
+    String path, {
+    void Function(String message, double progress)? onProgress,
+  }) async {
+    AppLog.d(_tag, '恢复导入: bookId=$bookId');
+    final db = await DatabaseProvider.database;
+    final bookDao = BookDao(db);
+
+    try {
+      await bookDao.updateImportStatus(bookId, status: 1, progress: '恢复导入中...');
+
+      // _ocrPdfPages 内部会跳过已 OCR 的页，增量落库
+      await _ocrPdfPages(
+        path,
+        bookId: bookId,
+        onProgress: (done, total) async {
+          final msg = '识别中 $done/$total 页';
+          onProgress?.call(msg, done / total);
+          await bookDao.updateImportStatus(bookId, status: 1, progress: msg);
+        },
+      );
+
+      final pageCount = await _pdf.getPageCount(path) ?? 1;
+      await bookDao.updateImportStatus(
+        bookId,
+        status: 0,
+        progress: null,
+        pageCount: pageCount,
+      );
+      AppLog.d(_tag, '恢复导入完成: bookId=$bookId');
+    } catch (e, s) {
+      AppLog.e(_tag, '恢复导入失败: $e\n$s');
+      await bookDao.updateImportStatus(bookId, status: 2, progress: '恢复导入失败');
+    }
+  }
+
+  // ===== 扫描件 PDF 逐页 OCR（增量落库，支持断点续传）=====
 
   Future<List<Sentence>> _ocrPdfPages(
     String path, {
@@ -237,8 +279,20 @@ class BookImportService {
   }) async {
     final count = await _pdf.getPageCount(path);
     final pages = count ?? 0;
+    final db = await DatabaseProvider.database;
+    final sentenceDao = SentenceDao(db);
+
+    // 检查已存在的句子（被中断的导入），跳过已完成的页
+    final existing = await sentenceDao.getByBook(bookId);
+    final existingPages = existing.map((s) => s.page).toSet();
     final sentences = <Sentence>[];
+
     for (var i = 0; i < pages; i++) {
+      if (existingPages.contains(i)) {
+        AppLog.d(_tag, '跳过已 OCR 的第 $i 页');
+        onProgress?.call(i + 1, pages);
+        continue;
+      }
       AppLog.d(_tag, '扫描 PDF 第 $i 页 OCR');
       final png = await _pdf.renderPage(path, i, scale: 1.5);
       if (png == null) continue;
@@ -254,9 +308,18 @@ class BookImportService {
           await File(tmp).delete();
         } catch (_) {}
       }
+      // 每页 OCR 后立即落库（增量写入，支持断点续传）
+      if (sentences.isNotEmpty) {
+        await sentenceDao.insertAll(List<Sentence>.from(sentences));
+        sentences.clear();
+      }
       onProgress?.call(i + 1, pages);
     }
-    return sentences;
+    // 兜底：剩余未落库的句子
+    if (sentences.isNotEmpty) {
+      await sentenceDao.insertAll(sentences);
+    }
+    return existing; // 返回全部（含历史 + 新插入）
   }
 
   Future<String> _writeTempPng(List<int> bytes) async {

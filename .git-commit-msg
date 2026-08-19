@@ -1,0 +1,9 @@
+feat(ai_chat,import): 多模态图片支持 + OCR 断点续传 + 语音按钮位置调整
+
+- 多模态：图片按钮不再 OCR，直接发多模态消息给云端大模型；不支持时
+  提示"当前配置模型不支持多模态"
+- 语音按钮移至输入框右侧（输入框与发送按钮之间）
+- 本地模型自动加载：发送时若回落本地引擎且未加载，自动 init 加载
+- 数据库：chat_messages 新增 image_paths TEXT (dbVersion 7, v6→v7)
+- 导入 OCR：逐页增量落库，支持进程中断后恢复
+- 书架：监听 AppLifecycleState.resumed，自动恢复中断的 OCR 导入

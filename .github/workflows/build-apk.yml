@@ -168,13 +168,15 @@ jobs:
           KEY_ALIAS: ${{ env.KEY_ALIAS }}
           KEY_PASSWORD: ${{ env.KEY_PASSWORD }}
 
-      - name: 上传 APK
-        uses: actions/upload-artifact@v4
-        with:
-          name: wisemuse-apk-${{ github.sha }}
-          path: build/app/outputs/flutter-apk/wisemuse-*-arm64-v8a.apk
-          if-no-files-found: error
-          retention-days: 30
+      # 跳过 upload-artifact：Release 发布已包含 APK，且 Artifact 存储配额
+      # 有限（GitHub 免费账户 1GB，release 存储是独立额度池）。
+      #- name: 上传 APK
+      #  uses: actions/upload-artifact@v4
+      #  with:
+      #    name: wisemuse-apk-${{ github.sha }}
+      #    path: build/app/outputs/flutter-apk/wisemuse-*-arm64-v8a.apk
+      #    if-no-files-found: error
+      #    retention-days: 30
 
       # 首次构建（本次生成了新 keystore）时导出 keystore + 密码，供配置 Secrets 使用
       - name: 导出 keystore（仅首次生成时）

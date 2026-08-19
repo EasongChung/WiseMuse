@@ -10,7 +10,7 @@ class DatabaseProvider {
   DatabaseProvider._();
 
   static const String dbName = 'wisemuse.db';
-  static const int dbVersion = 6;
+  static const int dbVersion = 7;
 
   static Database? _db;
 
@@ -51,9 +51,9 @@ class DatabaseProvider {
   static const String _createQuizAttemptIndexesSql = '''
       CREATE INDEX idx_quiz_book ON quiz_attempts(book_id);\n      CREATE INDEX idx_quiz_book_chapter ON quiz_attempts(book_id, chapter);\n    ''';
 
-  // ===== chat_messages 表 SQL（v5 新增，v6 补 session_id）=====
+  // ===== chat_messages 表 SQL（v5 新增，v6 补 session_id, v7 补 image_paths）=====
   static const String _createChatMessagesSql = '''
-      CREATE TABLE chat_messages (\n        id TEXT PRIMARY KEY,\n        session_id TEXT,\n        profile_id TEXT NOT NULL DEFAULT 'default',\n        role TEXT NOT NULL,\n        content TEXT NOT NULL,\n        book_id TEXT,\n        book_title TEXT,\n        sources TEXT,\n        created_at INTEGER NOT NULL\n      )\n    ''';
+      CREATE TABLE chat_messages (\n        id TEXT PRIMARY KEY,\n        session_id TEXT,\n        image_paths TEXT,\n        profile_id TEXT NOT NULL DEFAULT 'default',\n        role TEXT NOT NULL,\n        content TEXT NOT NULL,\n        book_id TEXT,\n        book_title TEXT,\n        sources TEXT,\n        created_at INTEGER NOT NULL\n      )\n    ''';
 
   /// 建表（版本 1~6）。
   static Future<void> _onCreate(Database db, int version) async {
@@ -159,6 +159,14 @@ class DatabaseProvider {
       try {
         await db.execute(
           'ALTER TABLE chat_messages ADD COLUMN session_id TEXT',
+        );
+      } catch (_) {}
+    }
+    if (oldVersion < 7) {
+      // v6→v7: chat_messages 补 image_paths 列（多模态图片支持）
+      try {
+        await db.execute(
+          'ALTER TABLE chat_messages ADD COLUMN image_paths TEXT',
         );
       } catch (_) {}
     }

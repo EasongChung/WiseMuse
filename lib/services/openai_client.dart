@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:http/http.dart' as http;
 
@@ -93,6 +94,117 @@ class OpenAiClient {
       }
     } catch (e) {
       AppLog.e(_tag, '云端调用异常: $e');
+    }
+    return null;
+  }
+
+  /// [v0.1.52] 多模态（视觉）对话：发送文本 + 图片到云端，返回回答。
+  ///
+  /// [user] 用户提问文本（可选，空串时只有图片）；[imagePaths] 本地图片路径列表。
+  /// 返回回答文本，或 null（失败/未配置/超时）。
+  /// 若模型不支持多模态（HTTP 4xx 且错误含 image/multimodal/vision），
+  /// 返回固定字符串 `__MODEL_NOT_VISION__` 供调用方展示友好提示。
+  Future<String?> chatVision({
+    String? user,
+    required List<String> imagePaths,
+    double temperature = 0.3,
+    int maxTokens = 1024,
+    String? baseUrl,
+    String? apiKey,
+    String? model,
+  }) async {
+    if (imagePaths.isEmpty) {
+      return chat(user: user ?? '');
+    }
+
+    final settings = SettingsService.instance;
+    final url = baseUrl ?? (await settings.getApiBaseUrl())?.trim() ?? '';
+    final key = apiKey ?? (await settings.getApiKey())?.trim() ?? '';
+    final mdl = model ?? (await settings.getApiModel())?.trim() ?? '';
+
+    if (url.isEmpty || key.isEmpty || mdl.isEmpty) {
+      AppLog.d(_tag, '多模态: 云端未配置（url/key/model 不全），跳过');
+      return null;
+    }
+
+    final fullUrl = '${url.endsWith('/') ? url : '$url/'}chat/completions';
+
+    // 构建多模态 content 数组
+    final contentParts = <Map<String, dynamic>>[];
+    if (user != null && user.isNotEmpty) {
+      contentParts.add({'type': 'text', 'text': user});
+    }
+    for (final path in imagePaths) {
+      final file = File(path);
+      if (!file.existsSync()) {
+        AppLog.w(_tag, '多模态: 图片不存在: $path');
+        continue;
+      }
+      final bytes = await file.readAsBytes();
+      final b64 = base64Encode(bytes);
+      final ext = path.toLowerCase().endsWith('.png') ? 'png' : 'jpeg';
+      contentParts.add({
+        'type': 'image_url',
+        'image_url': {'url': 'data:image/$ext;base64,$b64'},
+      });
+    }
+
+    if (contentParts.isEmpty) {
+      AppLog.w(_tag, '多模态: 无有效图片或文本');
+      return null;
+    }
+
+    final messages = [
+      {'role': 'user', 'content': contentParts},
+    ];
+
+    final body = <String, dynamic>{
+      'model': mdl,
+      'messages': messages,
+      'temperature': temperature,
+      'max_tokens': maxTokens,
+    };
+
+    try {
+      final resp = await _httpClient
+          .post(
+            Uri.parse(fullUrl),
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': 'Bearer $key',
+            },
+            body: jsonEncode(body),
+          )
+          .timeout(const Duration(seconds: 60));
+
+      if (resp.statusCode == 200) {
+        final json = jsonDecode(resp.body) as Map<String, dynamic>;
+        final choices = json['choices'] as List?;
+        if (choices != null && choices.isNotEmpty) {
+          final msg = choices[0] as Map<String, dynamic>;
+          final content = msg['message']?['content'] as String?;
+          if (content != null && content.trim().isNotEmpty) {
+            return content.trim();
+          }
+        }
+        AppLog.w(_tag, '多模态: 云端返回空 content');
+        return null;
+      }
+
+      // 检查是否模型不支持多模态
+      final errBody = resp.body.toLowerCase();
+      if (resp.statusCode >= 400 &&
+          (errBody.contains('image') ||
+              errBody.contains('multimodal') ||
+              errBody.contains('vision') ||
+              errBody.contains('modality') ||
+              errBody.contains('content type'))) {
+        AppLog.w(_tag, '多模态: 模型不支持（${resp.statusCode}）: ${resp.body}');
+        return '__MODEL_NOT_VISION__';
+      }
+      AppLog.e(_tag, '多模态 HTTP ${resp.statusCode}: ${resp.body}');
+    } catch (e) {
+      AppLog.e(_tag, '多模态调用异常: $e');
     }
     return null;
   }

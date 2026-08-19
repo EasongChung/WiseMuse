@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -14,22 +15,22 @@ import '../../core/storage/database.dart';
 import '../../core/theme/app_theme.dart';
 import '../../services/ai_service.dart';
 import '../../services/asr_service.dart';
+import '../../services/llm_service.dart';
 import '../../services/native_tts_service.dart';
-import '../../services/ocr_service.dart';
 import '../../services/picker_service.dart';
 import '../../services/rag/rag_qa_service.dart';
 import '../../services/vosk_asr_service.dart';
 import '../../widgets/import_sheet.dart';
 
-/// [v0.1.48] [v0.1.50] 「问AI」智能伴读会话页面。
+/// [v0.1.48] [v0.1.50] [v0.1.52] 「问AI」智能伴读会话页面。
 ///
 /// 功能：
 /// 1. 多轮自由问答 / 课文伴读。
 /// 2. 支持选择已导入书籍进行 RAG 知识库问答。
-/// 3. 语音识别输入（Vosk 离线 ASR）与图片 OCR 提问输入。
+/// 3. 语音识别输入（Vosk 离线 ASR）与多模态图片提问。
 /// 4. 欢迎页面呈现 WiseMuse 介绍，会话中禁止 AI 重复自我介绍。
 /// 5. 顶部支持新建会话与会话历史查看管理。
-/// 6. 消息 Markdown 富文本渲染、TTS 朗读与复制。
+/// 6. 消息 Markdown 富文本渲染、图片缩略图、TTS 朗读与复制。
 class AiChatPage extends StatefulWidget {
   const AiChatPage({super.key});
 
@@ -51,6 +52,9 @@ class _AiChatPageState extends State<AiChatPage> {
   bool _loading = true;
   bool _generating = false;
   bool _isListening = false;
+
+  /// [v0.1.52] 暂存待发送的图片路径。
+  List<String> _pendingImagePaths = [];
 
   @override
   void initState() {
@@ -108,12 +112,44 @@ class _AiChatPageState extends State<AiChatPage> {
     });
   }
 
+  /// [v0.1.52] 确保本地模型已加载（当需要时）。
+  Future<bool> _ensureLocalModel() async {
+    final settings = SettingsService.instance;
+    final preferOffline = await settings.getPreferOffline();
+    if (!preferOffline && await settings.isApiConfigured()) return true;
+
+    final modelPath = await settings.getLocalModelPath();
+    if (modelPath == null || modelPath.isEmpty) return false;
+
+    final llm = LlmService.instance;
+    if (!llm.isLoaded) {
+      try {
+        AppLog.d(_tag, '自动加载本地模型: $modelPath');
+        return await llm.init(modelPath);
+      } catch (e) {
+        AppLog.e(_tag, '自动加载本地模型失败: $e');
+        return false;
+      }
+    }
+    return true;
+  }
+
   Future<void> _sendMessage([String? presetText]) async {
     final query = (presetText ?? _textController.text).trim();
-    if (query.isEmpty || _generating) return;
+    final hasImages = _pendingImagePaths.isNotEmpty;
+    if (query.isEmpty && !hasImages) return;
+    if (_generating) return;
 
     if (_isListening) {
       await _toggleVoiceInput();
+    }
+
+    if (hasImages) {
+      _textController.clear();
+      final imagePaths = List<String>.from(_pendingImagePaths);
+      setState(() => _pendingImagePaths = []);
+      await _sendImageMessage(query, imagePaths);
+      return;
     }
 
     _textController.clear();
@@ -140,27 +176,29 @@ class _AiChatPageState extends State<AiChatPage> {
     _scrollToBottom();
 
     String answer = '';
-    String? sources;
 
     try {
       if (_selectedBookId != null) {
-        // RAG 知识库问答
         final ragAnswer = await RagQaService.instance.ask(
           _selectedBookId!,
           query,
         );
         answer = ragAnswer ?? '在知识库中未找到相关内容，建议换个问题提问。';
       } else {
-        // 通用对话 Prompt：明确要求禁止开头无意义自我介绍
-        final prompt = '''你是一个亲切耐心的少儿智能学习助手（WiseMuse 智启陪读）。
-回答要求：
-1. 请直接针对问题给出回答，严禁在回答开头做自我介绍（如“我是WiseMuse...”或“你好小朋友...”等无意义开场白）。
-2. 语言亲切生动、通俗易懂，适合中小学生阅读理解，必要时举具体生动的例子。
-3. 排版清晰，层次分明，使用 Markdown 格式展现重点。
-
-小朋友的问题：$query''';
+        final prompt = _buildChatPrompt(query);
         final aiResult = await AiService().complete(prompt);
-        answer = aiResult?.text ?? '抱歉，我现在无法回答这个问题，请检查大模型或网络设置。';
+
+        if (aiResult == null) {
+          final localReady = await _ensureLocalModel();
+          if (localReady) {
+            final retryResult = await AiService().complete(prompt);
+            answer = retryResult?.text ?? '抱歉，我现在无法回答这个问题，请检查大模型或网络设置。';
+          } else {
+            answer = '抱歉，我现在无法回答这个问题。请检查「设置」中的大模型配置（API 或本地模型路径）。';
+          }
+        } else {
+          answer = aiResult.text;
+        }
       }
     } catch (e) {
       AppLog.e(_tag, '生成回答失败: $e');
@@ -172,7 +210,6 @@ class _AiChatPageState extends State<AiChatPage> {
       content: answer,
       bookId: _selectedBookId,
       bookTitle: currentBook?.title,
-      sources: sources,
     );
 
     await chatDao.insert(assistantMsg);
@@ -183,6 +220,85 @@ class _AiChatPageState extends State<AiChatPage> {
       _generating = false;
     });
     _scrollToBottom();
+  }
+
+  /// [v0.1.52] 发送图片消息（多模态云端，本地引擎不支持图片）。
+  Future<void> _sendImageMessage(String query, List<String> imagePaths) async {
+    final db = await DatabaseProvider.database;
+    final chatDao = ChatDao(db);
+
+    Book? currentBook;
+    if (_selectedBookId != null) {
+      currentBook = _books.where((b) => b.id == _selectedBookId).firstOrNull;
+    }
+
+    final userMsg = ChatMessage.create(
+      role: 'user',
+      content: query.isEmpty ? '请描述这张图片' : query,
+      imagePaths: imagePaths,
+      bookId: _selectedBookId,
+      bookTitle: currentBook?.title,
+    );
+
+    await chatDao.insert(userMsg);
+    setState(() {
+      _messages.add(userMsg);
+      _generating = true;
+    });
+    _scrollToBottom();
+
+    String answer = '';
+    try {
+      final aiService = AiService();
+      final visionResult = await aiService.completeVision(
+        imagePaths,
+        prompt: query.isNotEmpty ? query : '请详细描述这张图片里的内容',
+        predictLength: 1024,
+      );
+
+      if (visionResult == '__MODEL_NOT_VISION__') {
+        answer = '⚠️ 当前配置模型不支持多模态，请在「设置」中更换支持图片理解的模型。';
+      } else if (visionResult != null && visionResult.isNotEmpty) {
+        answer = visionResult;
+      } else {
+        if (query.isNotEmpty) {
+          final prompt = _buildChatPrompt(query);
+          final textResult = await AiService().complete(prompt);
+          answer = textResult?.text ?? '抱歉，图片分析失败，请检查模型或网络设置。';
+        } else {
+          answer = '抱歉，图片分析失败，请检查模型或网络设置。';
+        }
+      }
+    } catch (e) {
+      AppLog.e(_tag, '图片分析失败: $e');
+      answer = '图片分析失败：$e';
+    }
+
+    final assistantMsg = ChatMessage.create(
+      role: 'assistant',
+      content: answer,
+      bookId: _selectedBookId,
+      bookTitle: currentBook?.title,
+    );
+
+    await chatDao.insert(assistantMsg);
+    if (!mounted) return;
+
+    setState(() {
+      _messages.add(assistantMsg);
+      _generating = false;
+    });
+    _scrollToBottom();
+  }
+
+  String _buildChatPrompt(String query) {
+    return '''你是一个亲切耐心的少儿智能学习助手（WiseMuse 智启陪读）。
+回答要求：
+1. 请直接针对问题给出回答，严禁在回答开头做自我介绍（如"我是WiseMuse..."或"你好小朋友..."等无意义开场白）。
+2. 语言亲切生动、通俗易懂，适合中小学生阅读理解，必要时举具体生动的例子。
+3. 排版清晰，层次分明，使用 Markdown 格式展现重点。
+
+小朋友的问题：$query''';
   }
 
   Future<void> _toggleVoiceInput() async {
@@ -228,7 +344,8 @@ class _AiChatPageState extends State<AiChatPage> {
     }
   }
 
-  Future<void> _pickImageAndOcr() async {
+  /// [v0.1.52] 拍照/相册选图 -> 暂存路径，等待用户输入后发送。
+  Future<void> _pickImage() async {
     final action = await showModalBottomSheet<ImportAction>(
       context: context,
       shape: const RoundedRectangleBorder(
@@ -241,12 +358,12 @@ class _AiChatPageState extends State<AiChatPage> {
               children: [
                 ListTile(
                   leading: const Icon(Icons.camera_alt_outlined),
-                  title: const Text('拍照识别文字'),
+                  title: const Text('拍摄图片'),
                   onTap: () => Navigator.pop(ctx, ImportAction.camera),
                 ),
                 ListTile(
                   leading: const Icon(Icons.photo_library_outlined),
-                  title: const Text('从相册选取识别'),
+                  title: const Text('从相册选取'),
                   onTap: () => Navigator.pop(ctx, ImportAction.gallery),
                 ),
               ],
@@ -255,32 +372,21 @@ class _AiChatPageState extends State<AiChatPage> {
     );
     if (action == null || !mounted) return;
 
-    String? path;
-    if (action == ImportAction.camera) {
-      path = await PickerService().pickFromCamera();
-    } else {
-      path = await PickerService().pickFromGallery();
-    }
-    if (path == null || !mounted) return;
+    final pickedPath =
+        action == ImportAction.camera
+            ? await PickerService().pickFromCamera()
+            : await PickerService().pickFromGallery();
+    if (pickedPath == null || !mounted) return;
 
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(const SnackBar(content: Text('正在识别图片中的文字…')));
-    final ocrResult = await OcrService().recognizeFile(path);
-    final text = ocrResult?.text.trim() ?? '';
-    if (text.isEmpty) {
-      if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(const SnackBar(content: Text('未能在图片中识别出有效文字')));
-      }
-      return;
-    }
+    setState(() {
+      _pendingImagePaths.add(pickedPath);
+    });
 
-    final current = _textController.text.trim();
-    _textController.text = current.isEmpty ? text : '$current\n$text';
-    _textController.selection = TextSelection.fromPosition(
-      TextPosition(offset: _textController.text.length),
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('📷 图片已选择，输入问题后发送即可'),
+        duration: Duration(seconds: 2),
+      ),
     );
   }
 
@@ -305,7 +411,10 @@ class _AiChatPageState extends State<AiChatPage> {
           ),
     );
     if (ok == true && mounted) {
-      setState(() => _messages = []);
+      setState(() {
+        _messages = [];
+        _pendingImagePaths = [];
+      });
       _textController.clear();
       ScaffoldMessenger.of(
         context,
@@ -653,6 +762,7 @@ class _AiChatPageState extends State<AiChatPage> {
       itemBuilder: (context, index) {
         final msg = _messages[index];
         final isUser = msg.role == 'user';
+        final hasImages = msg.imagePaths != null && msg.imagePaths!.isNotEmpty;
         return Container(
           margin: const EdgeInsets.symmetric(vertical: 6),
           alignment: isUser ? Alignment.centerRight : Alignment.centerLeft,
@@ -681,6 +791,32 @@ class _AiChatPageState extends State<AiChatPage> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
+                  // [v0.1.52] 用户消息中的图片缩略图
+                  if (isUser && hasImages)
+                    ...msg.imagePaths!.map((path) {
+                      return Padding(
+                        padding: const EdgeInsets.only(bottom: 6),
+                        child: ClipRRect(
+                          borderRadius: BorderRadius.circular(8),
+                          child: Image.file(
+                            File(path),
+                            width: 200,
+                            height: 150,
+                            fit: BoxFit.cover,
+                            errorBuilder:
+                                (_, __, ___) => Container(
+                                  width: 200,
+                                  height: 150,
+                                  color: Colors.white24,
+                                  child: const Icon(
+                                    Icons.broken_image_outlined,
+                                    color: Colors.white54,
+                                  ),
+                                ),
+                          ),
+                        ),
+                      );
+                    }),
                   if (isUser)
                     Text(
                       msg.content,
@@ -830,35 +966,78 @@ class _AiChatPageState extends State<AiChatPage> {
                 ],
               ),
             ),
+          // [v0.1.52] 待发送图片缩略图预览
+          if (_pendingImagePaths.isNotEmpty)
+            SizedBox(
+              height: 56,
+              child: ListView.builder(
+                scrollDirection: Axis.horizontal,
+                itemCount: _pendingImagePaths.length,
+                itemBuilder: (ctx, i) {
+                  return Stack(
+                    children: [
+                      Padding(
+                        padding: const EdgeInsets.only(right: 6, bottom: 4),
+                        child: ClipRRect(
+                          borderRadius: BorderRadius.circular(8),
+                          child: Image.file(
+                            File(_pendingImagePaths[i]),
+                            width: 48,
+                            height: 48,
+                            fit: BoxFit.cover,
+                          ),
+                        ),
+                      ),
+                      Positioned(
+                        top: -4,
+                        right: 2,
+                        child: GestureDetector(
+                          onTap: () {
+                            setState(() {
+                              _pendingImagePaths.removeAt(i);
+                            });
+                          },
+                          child: Container(
+                            decoration: const BoxDecoration(
+                              color: Colors.black54,
+                              shape: BoxShape.circle,
+                            ),
+                            padding: const EdgeInsets.all(2),
+                            child: const Icon(
+                              Icons.close,
+                              size: 12,
+                              color: Colors.white,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  );
+                },
+              ),
+            ),
           Row(
             children: [
-              // 图片拍摄/相册识别输入
+              // 图片拍摄/相册输入（不再 OCR，直接发多模态）
               IconButton(
                 icon: const Icon(
                   Icons.image_outlined,
                   size: 22,
                   color: StudyPalette.inkSoft,
                 ),
-                tooltip: '拍照/相册文字识别',
-                onPressed: _generating ? null : _pickImageAndOcr,
-              ),
-              // 语音识别输入
-              IconButton(
-                icon: Icon(
-                  _isListening ? Icons.mic : Icons.mic_none_outlined,
-                  size: 22,
-                  color:
-                      _isListening ? StudyPalette.ember : StudyPalette.inkSoft,
-                ),
-                tooltip: _isListening ? '停止语音录入' : '语音输入',
-                onPressed: _generating ? null : _toggleVoiceInput,
+                tooltip: '拍照/相册图片',
+                onPressed: _generating ? null : _pickImage,
               ),
               Expanded(
                 child: TextField(
                   controller: _textController,
                   decoration: InputDecoration(
                     hintText:
-                        _selectedBookId != null ? '提问关于这本书的内容…' : '输入你想问的问题…',
+                        _selectedBookId != null
+                            ? '提问关于这本书的内容…'
+                            : (_pendingImagePaths.isNotEmpty
+                                ? '输入关于图片的问题（可选）…'
+                                : '输入你想问的问题…'),
                     hintStyle: const TextStyle(
                       fontSize: 14,
                       color: StudyPalette.inkSoft,
@@ -881,6 +1060,17 @@ class _AiChatPageState extends State<AiChatPage> {
                 ),
               ),
               const SizedBox(width: 6),
+              // [v0.1.52] 语音输入移至右侧（输入框与发送按钮之间）
+              IconButton(
+                icon: Icon(
+                  _isListening ? Icons.mic : Icons.mic_none_outlined,
+                  size: 22,
+                  color:
+                      _isListening ? StudyPalette.ember : StudyPalette.inkSoft,
+                ),
+                tooltip: _isListening ? '停止语音录入' : '语音输入',
+                onPressed: _generating ? null : _toggleVoiceInput,
+              ),
               IconButton.filled(
                 onPressed: _generating ? null : () => _sendMessage(),
                 icon: const Icon(Icons.send, size: 18),
