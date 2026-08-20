@@ -11,6 +11,7 @@ import '../../core/theme/app_theme.dart';
 import '../../services/knowledge_extraction_service.dart';
 import 'knowledge_detail_sheet.dart';
 import 'knowledge_edit_sheet.dart';
+import '../../widgets/top_toast.dart';
 
 enum KnowledgeSortOrder {
   updatedAtDesc('最近更新'),
@@ -625,9 +626,7 @@ class _KnowledgePageState extends State<KnowledgePage> {
     if (!mounted) return;
 
     if (booksWithSentences.isEmpty) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('没有可提取的书籍（书籍中无句子内容）')));
+      TopToast.show(context, '没有可提取的书籍（书籍中无句子内容）');
       return;
     }
 
@@ -654,9 +653,7 @@ class _KnowledgePageState extends State<KnowledgePage> {
     if (book == null || !mounted) return;
 
     KnowledgeExtractionService.instance.extractBook(book);
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(SnackBar(content: Text('已启动《${book.title}》后台提取知识点')));
+    TopToast.show(context, '已启动《${book.title}》后台提取知识点');
   }
 
   Future<void> _showManualAdd() async {

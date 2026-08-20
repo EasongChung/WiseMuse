@@ -24,6 +24,7 @@ import '../../services/vosk_asr_service.dart';
 import '../settings/settings_page.dart';
 import '../../widgets/knowledge_scope_picker.dart';
 import 'scoring.dart';
+import '../../widgets/top_toast.dart';
 
 /// [v0.1.0] [v0.1.35] 跟读练习页（核心链路：放音 → 录音 → 识别 → 评分 → 生词落库）。
 ///
@@ -359,9 +360,7 @@ class _FollowPageState extends State<FollowPage>
         await _persistWord(target);
         await _persistRecord(target, recognized, score);
         if (!mounted) return;
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(const SnackBar(content: Text('已加入生词本，稍后可复习')));
+        TopToast.show(context, '已加入生词本，稍后可复习');
       } catch (e, s) {
         AppLog.e(_tag, '落库失败: $e\n$s');
       }

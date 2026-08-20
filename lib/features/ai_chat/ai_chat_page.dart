@@ -21,6 +21,7 @@ import '../../services/picker_service.dart';
 import '../../services/rag/rag_qa_service.dart';
 import '../../services/vosk_asr_service.dart';
 import '../../widgets/import_sheet.dart';
+import '../../widgets/top_toast.dart';
 
 /// [v0.1.48] [v0.1.50] [v0.1.52] 「问AI」智能伴读会话页面。
 ///
@@ -112,26 +113,23 @@ class _AiChatPageState extends State<AiChatPage> {
     });
   }
 
-  /// [v0.1.52] 确保本地模型已加载（当需要时）。
+  /// [v0.1.53] 确保本地模型已加载。
+  ///
+  /// 与 [AiService] 不同，本方法**不**判断 `preferOffline`/`isApiConfigured`，
+  /// 而是直接去加载本地模型。调用时机：云端 + 本地首次双失败后的回落重试。
   Future<bool> _ensureLocalModel() async {
-    final settings = SettingsService.instance;
-    final preferOffline = await settings.getPreferOffline();
-    if (!preferOffline && await settings.isApiConfigured()) return true;
-
-    final modelPath = await settings.getLocalModelPath();
+    final modelPath = await SettingsService.instance.getLocalModelPath();
     if (modelPath == null || modelPath.isEmpty) return false;
 
     final llm = LlmService.instance;
-    if (!llm.isLoaded) {
-      try {
-        AppLog.d(_tag, '自动加载本地模型: $modelPath');
-        return await llm.init(modelPath);
-      } catch (e) {
-        AppLog.e(_tag, '自动加载本地模型失败: $e');
-        return false;
-      }
+    if (llm.isLoaded) return true;
+    try {
+      AppLog.d(_tag, '自动加载本地模型: $modelPath');
+      return await llm.init(modelPath);
+    } catch (e) {
+      AppLog.e(_tag, '自动加载本地模型失败: $e');
+      return false;
     }
-    return true;
   }
 
   Future<void> _sendMessage([String? presetText]) async {
@@ -189,12 +187,21 @@ class _AiChatPageState extends State<AiChatPage> {
         final aiResult = await AiService().complete(prompt);
 
         if (aiResult == null) {
+          // [v0.1.53] 云端+本地首次双失败 → 真正加载本地模型，直接用本地引擎重试
           final localReady = await _ensureLocalModel();
           if (localReady) {
-            final retryResult = await AiService().complete(prompt);
-            answer = retryResult?.text ?? '抱歉，我现在无法回答这个问题，请检查大模型或网络设置。';
+            try {
+              final localText = await LlmService.instance.chat(prompt);
+              answer =
+                  localText.isNotEmpty
+                      ? localText
+                      : '抱歉，本地模型这次没有产出回答，请换个问题再试试。';
+            } catch (e) {
+              AppLog.e(_tag, '本地模型对话失败: $e');
+              answer = '抱歉，本地模型对话失败：$e';
+            }
           } else {
-            answer = '抱歉，我现在无法回答这个问题。请检查「设置」中的大模型配置（API 或本地模型路径）。';
+            answer = '抱歉，我现在无法回答这个问题。云端模型不可用，且未配置或未能加载本地模型。请检查「设置」中的大模型配置。';
           }
         } else {
           answer = aiResult.text;
@@ -318,9 +325,7 @@ class _AiChatPageState extends State<AiChatPage> {
         final modelPath = await settings.getVoskModelPath();
         if (modelPath == null || modelPath.isEmpty) {
           if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(content: Text('⚠️ 请先在「设置」中下载或配置 Vosk 语音识别模型')),
-            );
+            TopToast.show(context, '⚠️ 请先在「设置」中下载或配置 Vosk 语音识别模型');
           }
           return;
         }
@@ -328,9 +333,7 @@ class _AiChatPageState extends State<AiChatPage> {
           final ok = await _asr.init(modelPath);
           if (!ok) {
             if (mounted) {
-              ScaffoldMessenger.of(
-                context,
-              ).showSnackBar(const SnackBar(content: Text('❌ Vosk 语音模型初始化失败')));
+              TopToast.show(context, '❌ Vosk 语音模型初始化失败');
             }
             return;
           }
@@ -382,12 +385,7 @@ class _AiChatPageState extends State<AiChatPage> {
       _pendingImagePaths.add(pickedPath);
     });
 
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('📷 图片已选择，输入问题后发送即可'),
-        duration: Duration(seconds: 2),
-      ),
-    );
+    TopToast.show(context, '📷 图片已选择，输入问题后发送即可');
   }
 
   Future<void> _startNewChat() async {
@@ -416,9 +414,7 @@ class _AiChatPageState extends State<AiChatPage> {
         _pendingImagePaths = [];
       });
       _textController.clear();
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('已开启全新对话')));
+      TopToast.show(context, '已开启全新对话');
     }
   }
 
@@ -575,13 +571,7 @@ class _AiChatPageState extends State<AiChatPage> {
                                       Clipboard.setData(
                                         ClipboardData(text: m.content),
                                       );
-                                      ScaffoldMessenger.of(
-                                        context,
-                                      ).showSnackBar(
-                                        const SnackBar(
-                                          content: Text('已复制内容到剪贴板'),
-                                        ),
-                                      );
+                                      TopToast.show(context, '已复制内容到剪贴板');
                                     },
                                   );
                                 },
@@ -881,9 +871,7 @@ class _AiChatPageState extends State<AiChatPage> {
                         InkWell(
                           onTap: () {
                             Clipboard.setData(ClipboardData(text: msg.content));
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(content: Text('已复制到剪贴板')),
-                            );
+                            TopToast.show(context, '已复制到剪贴板');
                           },
                           child: const Padding(
                             padding: EdgeInsets.all(4),

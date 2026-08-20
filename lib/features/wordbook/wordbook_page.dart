@@ -11,6 +11,7 @@ import '../../widgets/review_card.dart';
 import '../../widgets/knowledge_scope_picker.dart';
 import '../stats/stats_page.dart';
 import '../../services/spaced_repetition_service.dart';
+import '../../widgets/top_toast.dart';
 
 /// [v0.1.0] 生词本页面：查看、复习、管理已标记的词语。
 ///
@@ -121,9 +122,7 @@ class _WordBookPageState extends State<WordBookPage> {
       final unmastered = filtered.where((p) => p.mastery < 3).toList();
       if (unmastered.isEmpty) {
         if (mounted) {
-          ScaffoldMessenger.of(
-            context,
-          ).showSnackBar(const SnackBar(content: Text('该范围无不掌握知识点')));
+          TopToast.show(context, '该范围无不掌握知识点');
         }
         return;
       }

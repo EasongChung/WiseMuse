@@ -9,6 +9,7 @@ import '../../widgets/knowledge_scope_picker.dart';
 import '../assistant/tutor_panel.dart';
 import '../dictation/dictation_page.dart';
 import '../quiz/quiz_hub_page.dart';
+import '../../widgets/top_toast.dart';
 
 /// [v0.3.0] 练习页：跟读/听写/章节测验三入口卡片。
 ///
@@ -125,9 +126,7 @@ class PracticePage extends StatelessWidget {
 
     if (targetSentence == null || targetSentence.trim().isEmpty) {
       if (context.mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(const SnackBar(content: Text('所选范围内暂无可用句子')));
+        TopToast.show(context, '所选范围内暂无可用句子');
       }
       return;
     }

@@ -8,6 +8,7 @@ import '../../core/storage/knowledge_point_dao.dart';
 import '../../core/storage/word_entry_dao.dart';
 import '../../core/theme/app_theme.dart';
 import 'knowledge_edit_sheet.dart';
+import '../../widgets/top_toast.dart';
 
 /// [v0.3.0] 知识点详情弹窗（查看/加生词/编辑/删除）。
 class KnowledgeDetailSheet extends StatefulWidget {
@@ -285,9 +286,7 @@ class _KnowledgeDetailSheetState extends State<KnowledgeDetailSheet> {
       await WordEntryDao(db).upsert(entry);
       AppLog.d('kp_detail', '加入生词本: ${_kp.text}');
       if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text('已加入生词本：${_kp.text}')));
+      TopToast.show(context, '已加入生词本：${_kp.text}');
     } catch (e, s) {
       AppLog.e('kp_detail', '加入生词本失败: $e\n$s');
     }

@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../../core/debug/app_log.dart';
+import '../../widgets/top_toast.dart';
 
 /// [v0.1.0] 测试期日志查看页。
 ///
@@ -39,12 +40,9 @@ class _LogPageState extends State<LogPage> {
       ClipboardData(text: truncated ? text.substring(0, 8000) : text),
     );
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(
-          truncated ? '已截断复制前 8000 字（日志过长，请用导出）' : '已复制 ${text.length} 字符到剪贴板',
-        ),
-      ),
+    TopToast.show(
+      context,
+      truncated ? '已截断复制前 8000 字（日志过长，请用导出）' : '已复制 ${text.length} 字符到剪贴板',
     );
   }
 
@@ -58,15 +56,11 @@ class _LogPageState extends State<LogPage> {
         bytes: utf8.encode(text.isEmpty ? '（无日志）' : text),
       );
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(saved == null ? '导出已取消' : '已导出: $saved')),
-      );
+      TopToast.show(context, saved == null ? '导出已取消' : '已导出: $saved');
     } catch (e, s) {
       AppLog.e('log_page', '导出失败: $e\n$s');
       if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text('导出失败: $e')));
+      TopToast.show(context, '导出失败: $e');
     }
   }
 
@@ -178,6 +172,14 @@ class _LogPageState extends State<LogPage> {
                       fontWeight: FontWeight.bold,
                     ),
                   ),
+                  if (e.caller.isNotEmpty)
+                    TextSpan(
+                      text: '${e.caller} ',
+                      style: TextStyle(
+                        color: _levelColor(e.level).withValues(alpha: 0.6),
+                        fontSize: 10,
+                      ),
+                    ),
                   TextSpan(text: e.message),
                 ],
               ),

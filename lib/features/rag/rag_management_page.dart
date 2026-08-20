@@ -10,6 +10,7 @@ import '../../core/theme/app_theme.dart';
 import '../../services/rag/embedding_service.dart';
 import '../../services/rag/rag_retrieval_service.dart';
 import '../../services/rag/vector_index.dart';
+import '../../widgets/top_toast.dart';
 
 /// [v0.1.50] RAG 知识库独立管理页面（位于「我的」中心）：
 /// 支持查看每本书籍的向量化索引状态、一键构建/重新构建 RAG 索引、清理索引。
@@ -74,20 +75,14 @@ class _RagManagementPageState extends State<RagManagementPage> {
       final count = await RagRetrievalService.instance.buildIndex(book);
       if (!mounted) return;
       if (count > 0) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('✅ 《${book.title}》RAG 索引构建成功（$count 个片段）')),
-        );
+        TopToast.show(context, '✅ 《${book.title}》RAG 索引构建成功（$count 个片段）');
       } else {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('⚠️ 《${book.title}》无可索引内容或构建未产生片段')),
-        );
+        TopToast.show(context, '⚠️ 《${book.title}》无可索引内容或构建未产生片段');
       }
       await _load();
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('❌ 构建索引失败: $e')));
+        TopToast.show(context, '❌ 构建索引失败: $e');
       }
     } finally {
       if (mounted) setState(() => _busyBookIds.remove(book.id));
@@ -124,9 +119,7 @@ class _RagManagementPageState extends State<RagManagementPage> {
     try {
       await RagRetrievalService.instance.deleteIndex(book.id);
       if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text('已清除《${book.title}》的向量索引')));
+      TopToast.show(context, '已清除《${book.title}》的向量索引');
       await _load();
     } finally {
       if (mounted) setState(() => _busyBookIds.remove(book.id));

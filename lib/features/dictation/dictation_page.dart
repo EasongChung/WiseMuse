@@ -17,6 +17,7 @@ import '../../services/native_tts_service.dart';
 import '../../services/tts_service.dart';
 import '../follow/follow_page.dart';
 import 'sentence_dictation_page.dart';
+import '../../widgets/top_toast.dart';
 
 /// [v0.1.0] 听写页面：中文听音选字 / 英文拼写 / 语音跟读 三种模式。
 ///
@@ -129,9 +130,7 @@ class _DictationPageState extends State<DictationPage> {
           filtered.map((p) => p.text).where((t) => t.isNotEmpty).toList();
       if (words.isEmpty) {
         if (mounted) {
-          ScaffoldMessenger.of(
-            context,
-          ).showSnackBar(const SnackBar(content: Text('该范围无可用知识点')));
+          TopToast.show(context, '该范围无可用知识点');
         }
         return;
       }
@@ -220,9 +219,7 @@ class _DictationPageState extends State<DictationPage> {
     );
 
     if (questions.isEmpty && mounted) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('没有适合该模式的题目，试试其他模式')));
+      TopToast.show(context, '没有适合该模式的题目，试试其他模式');
       Navigator.of(context).pop();
       return;
     }

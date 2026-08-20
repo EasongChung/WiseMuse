@@ -7,6 +7,9 @@ import 'package:path_provider/path_provider.dart';
 
 /// [v0.1.0] 测试期内置日志工具。
 ///
+/// [v0.1.53] 增强日志：新增 [caller] 字段（文件名:行号:函数名），
+/// 便于从日志中定位代码位置。`d`/`w`/`e` 自动提取调用方信息。
+///
 /// 设计要点（进程可能被系统 OOM 直接 kill，内存缓冲会全部丢失）：
 /// - 日志**同步追加**写入 `{documents}/logs/app.log`，重启后仍可读回崩溃前最后一步；
 /// - 内存环形缓冲（最近 [kBufferLines] 行）供日志页实时展示；
@@ -66,13 +69,44 @@ class AppLog {
     }
   }
 
+  /// [v0.1.53] 记录 debug 日志，自动提取调用方位置。
   static void d(String tag, String message) =>
-      _writeSync('debug', tag, message);
+      _writeSync('debug', tag, message, _callerInfo());
 
-  static void w(String tag, String message) => _writeSync('warn', tag, message);
+  /// [v0.1.53] 记录 warn 日志，自动提取调用方位置。
+  static void w(String tag, String message) =>
+      _writeSync('warn', tag, message, _callerInfo());
 
+  /// [v0.1.53] 记录 error 日志，自动提取调用方位置。
   static void e(String tag, String message) =>
-      _writeSync('error', tag, message);
+      _writeSync('error', tag, message, _callerInfo());
+
+  /// [v0.1.53] 从堆栈提取调用方信息（文件:行号:函数）。
+  static String _callerInfo() {
+    try {
+      final stack = StackTrace.current;
+      final frames = stack.toString().split('\n');
+      // frames[0] = _callerInfo 自身, frames[1] = d/w/e, frames[2] = 调用方
+      for (var i = 0; i < frames.length && i < 6; i++) {
+        final line = frames[i].trim();
+        // 跳过框架自身、app_log 内部和 dart:core
+        if (line.contains('app_log.dart') || line.contains('dart:')) continue;
+        if (line.startsWith('#')) {
+          // 格式: #2      _someMethod (package:wisemuse/...)
+          final m = RegExp(r'\(([^)]+)\)').firstMatch(line);
+          if (m != null) {
+            final loc = m.group(1)!;
+            // 提取文件名和行号: package:wisemuse/features/reader/reader_page.dart:123
+            final locM = RegExp(r'([^/]+\.dart):(\d+)').firstMatch(loc);
+            if (locM != null) {
+              return '${locM.group(1)}:${locM.group(2)}';
+            }
+          }
+        }
+      }
+    } catch (_) {}
+    return '';
+  }
 
   /// 清空日志文件与内存缓冲。
   static Future<void> clear() async {
@@ -88,21 +122,36 @@ class AppLog {
     d('app_log', '===== 日志已清空 =====');
   }
 
-  static void _writeSync(String level, String tag, String message) {
+  static void _writeSync(
+    String level,
+    String tag,
+    String message, [
+    String caller = '',
+  ]) {
     for (final line in message.split('\n')) {
       final t = _stamp();
-      final entry = LogEntry(t: t, level: level, tag: tag, message: line);
+      final entry = LogEntry(
+        t: t,
+        level: level,
+        tag: tag,
+        message: line,
+        caller: caller,
+      );
       final buf =
           entries.value.length >= kBufferLines
               ? entries.value.sublist(entries.value.length - kBufferLines + 1)
               : entries.value;
       entries.value = [...buf, entry];
 
-      if (!kReleaseMode) debugPrint('[$tag] $line');
+      if (!kReleaseMode) {
+        final callerStr = caller.isNotEmpty ? ' $caller' : '';
+        debugPrint('[$tag]$callerStr $line');
+      }
       if (!enabled) continue;
       try {
+        final callerStr = caller.isNotEmpty ? ' $caller' : '';
         _file?.writeAsStringSync(
-          '$t [$level] [$tag] $line\n',
+          '$t [$level] [$tag]$callerStr $line\n',
           mode: FileMode.append,
           flush: true, // 关键：flush 后才能在进程被 kill 时保住这一行
         );
@@ -123,7 +172,8 @@ class AppLog {
   static String toText() {
     final sb = StringBuffer();
     for (final e in entries.value) {
-      sb.writeln('${e.t} [${e.level}] [${e.tag}] ${e.message}');
+      final callerStr = e.caller.isNotEmpty ? ' ${e.caller}' : '';
+      sb.writeln('${e.t} [${e.level}] [${e.tag}]$callerStr ${e.message}');
     }
     return sb.toString();
   }
@@ -147,10 +197,14 @@ class LogEntry {
     required this.level,
     required this.tag,
     required this.message,
+    this.caller = '', // [v0.1.53] 调用方位置（文件:行号）
   });
 
   final String t;
   final String level;
   final String tag;
   final String message;
+
+  /// [v0.1.53] 调用方位置（文件名:行号），空串表示无。
+  final String caller;
 }

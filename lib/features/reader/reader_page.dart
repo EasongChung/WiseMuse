@@ -28,6 +28,7 @@ import '../../vendor/flutter_pdfview/flutter_pdfview.dart';
 import '../assistant/knowledge_explain_sheet.dart';
 import '../../widgets/follow_sheet.dart';
 import 'package:webview_flutter/webview_flutter.dart';
+import '../../widgets/top_toast.dart';
 
 /// [v0.2.0] 阅读页：按来源类型切换四种模式。
 ///
@@ -629,9 +630,7 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
     if (!mounted) return;
     if (!stopped) {
       setState(() => _switchingMode = false);
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('无法停止朗读，请稍后重试')));
+      TopToast.show(context, '无法停止朗读，请稍后重试');
       return;
     }
 
@@ -682,12 +681,7 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
       );
       await WordEntryDao(db).upsert(entry);
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('已加入生词本：${text.trim()}'),
-          duration: const Duration(seconds: 2),
-        ),
-      );
+      TopToast.show(context, '已加入生词本：${text.trim()}');
     } catch (e) {
       AppLog.e(_tag, '标记生词失败: $e');
     }
@@ -763,9 +757,7 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
             ),
       );
     } else {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('翻译失败，请检查引擎配置')));
+      TopToast.show(context, '翻译失败，请检查引擎配置');
     }
   }
 
@@ -849,15 +841,8 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
       );
     }
 
-    // 句操作栏或查词栏
-    Widget bottomBar;
-    if (_selectedText != null && _selectedText!.isNotEmpty) {
-      bottomBar = _buildWordLookupBar();
-    } else if (_activeSentenceText != null && _activeSentenceText!.isNotEmpty) {
-      bottomBar = _buildSentenceActionsBar();
-    } else {
-      bottomBar = const SizedBox.shrink();
-    }
+    // [v0.1.53] 句操作栏固定底部：不再点击句子弹出，始终显示在底部，不会遮挡阅读窗口。
+    final bool hasLookup = _selectedText != null && _selectedText!.isNotEmpty;
 
     return Column(
       children: [
@@ -871,12 +856,11 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
         // 2. 主阅读内容视窗（自动撑满剩余区域）
         Expanded(child: content),
 
-        // 3. 底部固定句操作控制栏（点击句子后在底部固定出现，缩减主视窗而不是悬浮遮挡）
-        if (_activeSentenceText != null && _activeSentenceText!.isNotEmpty)
-          Padding(
-            padding: const EdgeInsets.fromLTRB(12, 6, 12, 8),
-            child: bottomBar,
-          ),
+        // 3. 底部固定句操作控制栏（始终显示，缩减主视窗而不是悬浮遮挡）
+        Padding(
+          padding: const EdgeInsets.fromLTRB(12, 6, 12, 8),
+          child: hasLookup ? _buildWordLookupBar() : _buildSentenceActionsBar(),
+        ),
       ],
     );
   }
@@ -1374,13 +1358,6 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
                     const Divider(height: 1),
                     // 当前页句子列表
                     Expanded(child: _buildSheetSentences()),
-                    // 浮底句操作栏（与文本模式一致）
-                    if (_activeSentenceText != null &&
-                        _activeSentenceText!.isNotEmpty)
-                      Padding(
-                        padding: const EdgeInsets.fromLTRB(8, 4, 8, 8),
-                        child: _buildSentenceActionsBar(),
-                      ),
                   ],
                 ),
               );
@@ -1745,8 +1722,11 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
   }
 
   /// [v0.1.35] 浮底句操作栏：6 按钮均匀栅格（连读/停止、跟读、翻译、生词、讲解、问AI）。
+  /// [v0.1.53] 底部固定句操作栏：始终显示，无需点击句子弹出。
+  /// 无选中句子时显示提示文字，按钮保持可用（智启陪读色调）。
   Widget _buildSentenceActionsBar() {
     final text = _activeSentenceText ?? '';
+    final hasSentence = text.isNotEmpty;
     final isPlaying = _continuousPlaying || _ttsSpeaking;
     final isDark = Theme.of(context).brightness == Brightness.dark;
     return Material(
@@ -1764,8 +1744,14 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
                       ? Icons.stop_circle_outlined
                       : Icons.play_circle_outline,
               label: isPlaying ? '停止' : '连读',
-              color: isPlaying ? StudyPalette.inkSoft : StudyPalette.ember,
+              color:
+                  isPlaying
+                      ? StudyPalette.inkSoft
+                      : (hasSentence
+                          ? StudyPalette.ember
+                          : StudyPalette.inkSoft),
               onTap: () {
+                if (!hasSentence) return;
                 if (isPlaying) {
                   _stopAutoPlay();
                 } else {
@@ -1778,8 +1764,9 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
             _sentenceActionButton(
               icon: Icons.record_voice_over_outlined,
               label: '跟读',
-              color: StudyPalette.ember,
+              color: hasSentence ? StudyPalette.ember : StudyPalette.inkSoft,
               onTap: () {
+                if (!hasSentence) return;
                 setState(() => _activeSentenceText = null);
                 _openFollow(text);
               },
@@ -1788,8 +1775,14 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
             _sentenceActionButton(
               icon: Icons.translate,
               label: '翻译',
-              color: isDark ? StudyPalette.darkInkSoft : StudyPalette.inkSoft,
+              color:
+                  hasSentence
+                      ? (isDark
+                          ? StudyPalette.darkInkSoft
+                          : StudyPalette.inkSoft)
+                      : StudyPalette.inkSoft.withValues(alpha: 0.4),
               onTap: () {
+                if (!hasSentence) return;
                 setState(() => _activeSentenceText = null);
                 _translate(text);
               },
@@ -1798,8 +1791,14 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
             _sentenceActionButton(
               icon: Icons.bookmark_add_outlined,
               label: '生词',
-              color: isDark ? StudyPalette.darkInkSoft : StudyPalette.inkSoft,
+              color:
+                  hasSentence
+                      ? (isDark
+                          ? StudyPalette.darkInkSoft
+                          : StudyPalette.inkSoft)
+                      : StudyPalette.inkSoft.withValues(alpha: 0.4),
               onTap: () {
+                if (!hasSentence) return;
                 _markWord(text);
                 setState(() => _activeSentenceText = null);
               },
@@ -1808,8 +1807,9 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
             _sentenceActionButton(
               icon: Icons.auto_awesome,
               label: '讲解',
-              color: StudyPalette.moss,
+              color: hasSentence ? StudyPalette.moss : StudyPalette.inkSoft,
               onTap: () {
+                if (!hasSentence) return;
                 setState(() => _activeSentenceText = null);
                 KnowledgeExplainSheet.show(context, text);
               },
@@ -1818,8 +1818,9 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
             _sentenceActionButton(
               icon: Icons.psychology,
               label: '问AI',
-              color: StudyPalette.spinePdf,
+              color: hasSentence ? StudyPalette.spinePdf : StudyPalette.inkSoft,
               onTap: () {
+                if (!hasSentence) return;
                 setState(() => _activeSentenceText = null);
                 _askRag(widget.book.id, text);
               },
@@ -1839,9 +1840,7 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
     if (!mounted) return;
 
     if (!ready) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('该书籍尚未构建知识库，请先在书架中构建')));
+      TopToast.show(context, '该书籍尚未构建知识库，请先在书架中构建');
       return;
     }
 
@@ -1981,12 +1980,7 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
                       _markWord(trimmed);
                       Navigator.of(ctx).pop();
                       if (mounted) {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(
-                            content: Text('已加入生词本：$trimmed'),
-                            duration: const Duration(seconds: 2),
-                          ),
-                        );
+                        TopToast.show(context, '已加入生词本：$trimmed');
                       }
                     },
                   ),

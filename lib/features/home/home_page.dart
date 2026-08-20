@@ -12,6 +12,7 @@ import '../../services/picker_service.dart';
 import '../../services/rag/rag_retrieval_service.dart';
 import '../../widgets/import_sheet.dart';
 import '../reader/reader_page.dart';
+import '../../widgets/top_toast.dart';
 
 /// [v0.3.0] [v0.1.48] [v0.1.52] 书架 Tab：支持后台流式导入、卡片页数位置进度显示、即时加入书架。
 ///
@@ -137,13 +138,9 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     final count = await RagRetrievalService.instance.buildIndex(book);
     if (mounted) {
       if (count > 0) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('「${book.title}」知识库已构建完成（$count 个片段）')),
-        );
+        TopToast.show(context, '「${book.title}」知识库已构建完成（$count 个片段）');
       } else {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('「${book.title}」无可索引内容，跳过')));
+        TopToast.show(context, '「${book.title}」无可索引内容，跳过');
       }
       unawaited(_refreshRagStatus());
     }
@@ -182,9 +179,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
           })
           .catchError((e) {
             if (mounted) {
-              ScaffoldMessenger.of(
-                context,
-              ).showSnackBar(SnackBar(content: Text('导入失败：$e')));
+              TopToast.show(context, '导入失败：$e');
               _refresh();
             }
           })
@@ -277,9 +272,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
           isIndexed: isIndexed,
           onTap: () async {
             if (book.importStatus == 1) {
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('书籍正在后台解析/OCR中，请稍候…')),
-              );
+              TopToast.show(context, '书籍正在后台解析/OCR中，请稍候…');
               return;
             }
             await Navigator.of(context).push(

@@ -21,6 +21,7 @@ import '../../services/rag/embedding_service.dart';
 import '../../services/rag/rag_retrieval_service.dart';
 import '../../services/vosk_asr_service.dart';
 import '../../services/llm_service.dart';
+import '../../widgets/top_toast.dart';
 
 /// [v0.3.0] [v0.1.44] 设置页：翻译引擎配置 + 供应商管理 + 模型管理 + 朗读参数。
 ///
@@ -225,9 +226,7 @@ class _SettingsPageState extends State<SettingsPage> {
       final ok = await _mlkit.downloadModel(code);
       _modelStatus[code] = ok;
       if (ok && mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('${_langName(code)} 模型下载完成')));
+        TopToast.show(context, '${_langName(code)} 模型下载完成');
       }
     } finally {
       if (mounted) setState(() => _modelBusy.remove(code));
@@ -878,14 +877,10 @@ class _SettingsPageState extends State<SettingsPage> {
       await _settings.setVoskModelPath('');
       await _refreshVoskStatus();
       if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('Vosk 语音模型已删除')));
+      TopToast.show(context, 'Vosk 语音模型已删除');
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('删除失败: $e')));
+        TopToast.show(context, '删除失败: $e');
       }
     } finally {
       if (mounted) setState(() => _voskBusy = false);
@@ -899,14 +894,10 @@ class _SettingsPageState extends State<SettingsPage> {
       await SettingsService.instance.setVoskModelPath(modelPath);
       await _refreshVoskStatus();
       if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('Vosk 中文模型下载完成 ✓')));
+      TopToast.show(context, 'Vosk 中文模型下载完成 ✓');
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('Vosk 下载失败: $e')));
+        TopToast.show(context, 'Vosk 下载失败: $e');
       }
     } finally {
       if (mounted) setState(() => _voskBusy = false);
@@ -928,14 +919,10 @@ class _SettingsPageState extends State<SettingsPage> {
       await SettingsService.instance.setVoskModelPath(modelPath);
       await _refreshVoskStatus();
       if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('Vosk 模型导入成功 ✓')));
+      TopToast.show(context, 'Vosk 模型导入成功 ✓');
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('Vosk 导入失败: $e')));
+        TopToast.show(context, 'Vosk 导入失败: $e');
       }
     } finally {
       if (mounted) setState(() => _voskBusy = false);
@@ -1156,9 +1143,7 @@ class _SettingsPageState extends State<SettingsPage> {
   Future<void> _fetchModelsFromApi() async {
     final cur = _activeProvider;
     if (cur.baseUrl.isEmpty) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('请先填写 API 地址')));
+      TopToast.show(context, '请先填写 API 地址');
       return;
     }
     setState(() => _fetchingModels = true);
@@ -1187,23 +1172,17 @@ class _SettingsPageState extends State<SettingsPage> {
             await _settings.setApiModel(fetched.first);
           }
           if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(content: Text('成功获取到 ${fetched.length} 个模型')),
-            );
+            TopToast.show(context, '成功获取到 ${fetched.length} 个模型');
           }
         }
       } else {
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('获取模型失败: HTTP ${resp.statusCode}')),
-          );
+          TopToast.show(context, '获取模型失败: HTTP ${resp.statusCode}');
         }
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('获取模型失败: $e')));
+        TopToast.show(context, '获取模型失败: $e');
       }
     } finally {
       if (mounted) setState(() => _fetchingModels = false);
@@ -1319,16 +1298,12 @@ class _SettingsPageState extends State<SettingsPage> {
     final configured = await _settings.isApiConfigured();
     if (!configured) {
       if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(const SnackBar(content: Text('⚠️ 请先配置云端 API 地址、密钥与模型')));
+        TopToast.show(context, '⚠️ 请先配置云端 API 地址、密钥与模型');
       }
       return;
     }
     if (mounted) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('正在测试 LLM 对话连接…')));
+      TopToast.show(context, '正在测试 LLM 对话连接…');
     }
     try {
       final client = OpenAiClient();
@@ -1343,19 +1318,13 @@ class _SettingsPageState extends State<SettingsPage> {
       );
       if (!mounted) return;
       if (answer != null && answer.isNotEmpty) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('✅ LLM 连接正常：$answer')));
+        TopToast.show(context, '✅ LLM 连接正常：$answer');
       } else {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('❌ LLM 测试失败，返回内容为空，请检查模型名称或配置')),
-        );
+        TopToast.show(context, '❌ LLM 测试失败，返回内容为空，请检查模型名称或配置');
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('❌ LLM 连接失败: $e')));
+        TopToast.show(context, '❌ LLM 连接失败: $e');
       }
     }
   }
@@ -1537,19 +1506,14 @@ class _SettingsPageState extends State<SettingsPage> {
                   if (ok) {
                     final result = await EmbeddingService.instance.embed('测试');
                     if (!mounted) return;
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(
-                        content: Text(
-                          result != null
-                              ? '✅ Embedding 连接正常（返回 ${result.length} 维向量）'
-                              : '❌ Embedding 调用失败，请检查 API 配置',
-                        ),
-                      ),
+                    TopToast.show(
+                      context,
+                      result != null
+                          ? '✅ Embedding 连接正常（返回 ${result.length} 维向量）'
+                          : '❌ Embedding 调用失败，请检查 API 配置',
                     );
                   } else {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(content: Text('⚠️ 请先配置云端 API 地址与密钥')),
-                    );
+                    TopToast.show(context, '⚠️ 请先配置云端 API 地址与密钥');
                   }
                 },
               ),
@@ -1642,9 +1606,7 @@ class _SettingsPageState extends State<SettingsPage> {
                         if (!ctx.mounted) return;
                         Navigator.pop(ctx);
                         if (!context.mounted) return;
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(content: Text('已清除《$title》的向量索引')),
-                        );
+                        TopToast.show(context, '已清除《$title》的向量索引');
                       },
                     ),
                   );
@@ -1838,26 +1800,17 @@ class _SettingsPageState extends State<SettingsPage> {
                                 await LlmService.instance.unload();
                                 if (!mounted) return;
                                 setState(() {});
-                                ScaffoldMessenger.of(context).showSnackBar(
-                                  const SnackBar(content: Text('已卸载当前本地大模型')),
-                                );
+                                TopToast.show(context, '已卸载当前本地大模型');
                               } else {
-                                ScaffoldMessenger.of(context).showSnackBar(
-                                  const SnackBar(
-                                    content: Text('正在加载本地模型，请稍候…'),
-                                  ),
-                                );
+                                TopToast.show(context, '正在加载本地模型，请稍候…');
                                 final ok = await LlmService.instance.init(
                                   _defaultLocalModel!,
                                 );
                                 if (!mounted) return;
                                 setState(() {});
-                                ScaffoldMessenger.of(context).showSnackBar(
-                                  SnackBar(
-                                    content: Text(
-                                      ok ? '✅ 本地模型加载成功！' : '❌ 本地模型加载失败，请检查文件',
-                                    ),
-                                  ),
+                                TopToast.show(
+                                  context,
+                                  ok ? '✅ 本地模型加载成功！' : '❌ 本地模型加载失败，请检查文件',
                                 );
                               }
                             },
@@ -1872,18 +1825,14 @@ class _SettingsPageState extends State<SettingsPage> {
                         !hasDefault
                             ? null
                             : () async {
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(content: Text('正在测试本地大模型推理…')),
-                              );
+                              TopToast.show(context, '正在测试本地大模型推理…');
                               if (!LlmService.instance.isLoaded) {
                                 final ok = await LlmService.instance.init(
                                   _defaultLocalModel!,
                                 );
                                 if (!ok) {
                                   if (!mounted) return;
-                                  ScaffoldMessenger.of(context).showSnackBar(
-                                    const SnackBar(content: Text('❌ 模型加载失败')),
-                                  );
+                                  TopToast.show(context, '❌ 模型加载失败');
                                   return;
                                 }
                               }
@@ -1892,20 +1841,15 @@ class _SettingsPageState extends State<SettingsPage> {
                                   '请简短回复一句：本地大模型运行正常。',
                                 );
                                 if (!mounted) return;
-                                ScaffoldMessenger.of(context).showSnackBar(
-                                  SnackBar(
-                                    content: Text(
-                                      ans.isNotEmpty
-                                          ? '✅ 本地推理成功: $ans'
-                                          : '⚠️ 推理完成但未产出有效文本',
-                                    ),
-                                  ),
+                                TopToast.show(
+                                  context,
+                                  ans.isNotEmpty
+                                      ? '✅ 本地推理成功: $ans'
+                                      : '⚠️ 推理完成但未产出有效文本',
                                 );
                               } catch (e) {
                                 if (!mounted) return;
-                                ScaffoldMessenger.of(context).showSnackBar(
-                                  SnackBar(content: Text('❌ 测试出错: $e')),
-                                );
+                                TopToast.show(context, '❌ 测试出错: $e');
                               }
                             },
                   ),
@@ -2094,11 +2038,7 @@ class _SettingsPageState extends State<SettingsPage> {
                                 setSheetState(() {});
                                 if (ctx.mounted) {
                                   Navigator.pop(ctx);
-                                  ScaffoldMessenger.of(ctx).showSnackBar(
-                                    SnackBar(
-                                      content: Text('已将 ${m.name} 设为当前生效模型'),
-                                    ),
-                                  );
+                                  TopToast.show(ctx, '已将 ${m.name} 设为当前生效模型');
                                 }
                               },
                             );
@@ -2155,16 +2095,12 @@ class _SettingsPageState extends State<SettingsPage> {
       }
       if (mounted) {
         setState(() {});
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('模型 ${info.name} 已删除')));
+        TopToast.show(context, '模型 ${info.name} 已删除');
       }
       return true;
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('删除失败: $e')));
+        TopToast.show(context, '删除失败: $e');
       }
       return false;
     }
@@ -2272,17 +2208,13 @@ class _SettingsPageState extends State<SettingsPage> {
         await _settings.setDefaultLocalModel(savePath);
         await _settings.setLocalModelPath(savePath);
         if (mounted) {
-          ScaffoldMessenger.of(
-            context,
-          ).showSnackBar(SnackBar(content: Text('$label 下载完成并已自动配置为生效模型 ✓')));
+          TopToast.show(context, '$label 下载完成并已自动配置为生效模型 ✓');
         }
       }
     } catch (e) {
       if (mounted) {
         Navigator.of(context, rootNavigator: true).pop();
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('下载失败: $e')));
+        TopToast.show(context, '下载失败: $e');
       }
     }
   }
@@ -2367,16 +2299,12 @@ class _SettingsPageState extends State<SettingsPage> {
       await _settings.setDefaultLocalModel(savedPath);
       await _settings.setLocalModelPath(savedPath);
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('GGUF 模型导入成功并已自动配置为生效模型 ✓')),
-        );
+        TopToast.show(context, 'GGUF 模型导入成功并已自动配置为生效模型 ✓');
       }
     } catch (e) {
       if (mounted) {
         Navigator.of(context, rootNavigator: true).pop();
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('导入失败: $e')));
+        TopToast.show(context, '导入失败: $e');
       }
     }
   }
