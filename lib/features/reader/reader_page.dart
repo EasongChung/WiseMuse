@@ -869,49 +869,42 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
     final path = widget.book.originalFilePath;
     if (path == null) return const Text('缺少 PDF 文件');
     final viewGeneration = _pdfViewGeneration;
-    return Listener(
-      // [v0.1.51] Flutter 侧左右滑翻页 —— 作为 PDFView 原生 enableSwipe 的补充。
-      // Listener 在手势竞技场之外, 不影响 PDFView 的点击 / 双指缩放 / 双击缩放。
-      behavior: HitTestBehavior.translucent,
-      onPointerDown: _onDragStart,
-      onPointerMove: _onDragMove,
-      onPointerUp: _onDragEnd,
-      onPointerCancel: _onDragCancel,
-      child: PDFView(
-        filePath: path,
-        enableSwipe: true,
-        swipeHorizontal: true,
-        pageSnap: true,
-        pageFling: true,
-        defaultPage: _isMultiPage ? _pdfCurrentPage : 0,
-        onViewCreated: (controller) async {
-          if (!mounted || viewGeneration != _pdfViewGeneration) return;
-          _pdfController = controller;
-          await _syncPageSize(controller, _pdfCurrentPage, viewGeneration);
-        },
-        onPageChanged: (page, total) async {
-          if (!mounted ||
-              viewGeneration != _pdfViewGeneration ||
-              !_useOriginal ||
-              _switchingMode) {
-            return;
-          }
-          if (page == null) return;
-          // 同步共享页码（文本模式/底部面板联动）
-          _syncPage(page);
-          final c = _pdfController;
-          if (c != null) {
-            await _syncPageSize(c, page, viewGeneration);
-          }
-        },
-        onTap: (details) {
-          final c = _pdfController;
-          if (c != null) {
-            _onPdfTap(c, details, viewGeneration);
-          }
-        },
-        onError: (e) => AppLog.e(_tag, 'PDFView 错误: $e'),
-      ),
+    // 原生 PDFView 自带顺畅的惯性抛掷、吸附与手势翻页动画 (enableSwipe/pageSnap/pageFling)，
+    // 翻页由 Android 原生控件接管并通过 onPageChanged 回调同步页码与尺寸，避免外层手势竞争造成卡顿。
+    return PDFView(
+      filePath: path,
+      enableSwipe: true,
+      swipeHorizontal: true,
+      pageSnap: true,
+      pageFling: true,
+      defaultPage: _isMultiPage ? _pdfCurrentPage : 0,
+      onViewCreated: (controller) async {
+        if (!mounted || viewGeneration != _pdfViewGeneration) return;
+        _pdfController = controller;
+        await _syncPageSize(controller, _pdfCurrentPage, viewGeneration);
+      },
+      onPageChanged: (page, total) async {
+        if (!mounted ||
+            viewGeneration != _pdfViewGeneration ||
+            !_useOriginal ||
+            _switchingMode) {
+          return;
+        }
+        if (page == null) return;
+        // 同步共享页码（文本模式/底部面板联动）
+        _syncPage(page);
+        final c = _pdfController;
+        if (c != null) {
+          await _syncPageSize(c, page, viewGeneration);
+        }
+      },
+      onTap: (details) {
+        final c = _pdfController;
+        if (c != null) {
+          _onPdfTap(c, details, viewGeneration);
+        }
+      },
+      onError: (e) => AppLog.e(_tag, 'PDFView 错误: $e'),
     );
   }
 

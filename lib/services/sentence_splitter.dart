@@ -27,15 +27,21 @@ const int maxSpeakLength = 120;
 ///
 /// 结果按原顺序返回，无空串。
 List<String> splitTextToSentences(String text) {
-  final cleanedText = PinyinFilterUtil.clean(text);
+  // [v0.1.55] 在拼音清洗前，将 2+ 连续空白替换为标记字符，避免被后续拼音清洗吞噬
+  final marked = text.replaceAllMapped(
+    RegExp(r'(?<=\S)(?: {2,}|　)(?=\S)'),
+    (_) => '\x00',
+  );
+  final cleanedText = PinyinFilterUtil.clean(marked);
   final normalized = cleanedText.replaceAll('\r\n', '\n');
   final result = <String>[];
 
-  // 空行 = 段落边界，段内连续文本直接按标点切
+  // 空行 = 段落边界，段内按标点与连续2空格/全角空格切分
   for (final para in normalized.split(RegExp(r'\n\s*\n'))) {
     final trimmed = para.trim();
     if (trimmed.isEmpty) continue;
-    for (final part in trimmed.split(RegExp(r'(?<=[。！？!?；;])'))) {
+    // 按终止标点或标记字符（原 2+ 连续空白）切分
+    for (final part in trimmed.split(RegExp('(?<=[。！？!?；;])|\x00'))) {
       final sentence = PinyinFilterUtil.cleanInlinePinyin(part.trim());
       if (sentence.isEmpty) continue;
       result.addAll(_splitLong(sentence));

@@ -38,5 +38,20 @@ void main() {
       expect(splitTextToSentences(''), isEmpty);
       expect(splitTextToSentences('   \n\n '), isEmpty);
     });
+
+    test('同行连续2个空格切分句子 (古诗场景)', () {
+      final out = splitTextToSentences('床前明月光  疑是地上霜');
+      expect(out, ['床前明月光', '疑是地上霜']);
+    });
+
+    test('同行全角空格切分句子', () {
+      final out = splitTextToSentences('举头望明月　低头思故乡');
+      expect(out, ['举头望明月', '低头思故乡']);
+    });
+
+    test('单空格不切分句子 (中文正常词间距)', () {
+      final out = splitTextToSentences('今天天气真好！我们一起去公园吧。');
+      expect(out, ['今天天气真好！', '我们一起去公园吧。']);
+    });
   });
 }

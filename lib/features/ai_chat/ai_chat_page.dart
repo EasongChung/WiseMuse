@@ -183,7 +183,8 @@ class _AiChatPageState extends State<AiChatPage> {
         );
         answer = ragAnswer ?? '在知识库中未找到相关内容，建议换个问题提问。';
       } else {
-        final prompt = _buildChatPrompt(query);
+        final preferOffline = await SettingsService.instance.getPreferOffline();
+        final prompt = _buildChatPrompt(query, isLocal: preferOffline);
         final aiResult = await AiService().complete(prompt);
 
         if (aiResult == null) {
@@ -191,7 +192,8 @@ class _AiChatPageState extends State<AiChatPage> {
           final localReady = await _ensureLocalModel();
           if (localReady) {
             try {
-              final localText = await LlmService.instance.chat(prompt);
+              final localPrompt = _buildChatPrompt(query, isLocal: true);
+              final localText = await LlmService.instance.chat(localPrompt);
               answer =
                   localText.isNotEmpty
                       ? localText
@@ -211,6 +213,8 @@ class _AiChatPageState extends State<AiChatPage> {
       AppLog.e(_tag, '生成回答失败: $e');
       answer = '回答出错了：$e';
     }
+
+    answer = _cleanSpecialTokens(answer);
 
     final assistantMsg = ChatMessage.create(
       role: 'assistant',
@@ -281,6 +285,8 @@ class _AiChatPageState extends State<AiChatPage> {
       answer = '图片分析失败：$e';
     }
 
+    answer = _cleanSpecialTokens(answer);
+
     final assistantMsg = ChatMessage.create(
       role: 'assistant',
       content: answer,
@@ -298,7 +304,13 @@ class _AiChatPageState extends State<AiChatPage> {
     _scrollToBottom();
   }
 
-  String _buildChatPrompt(String query) {
+  /// 构建问答 Prompt。本地模型下使用更简洁直接的结构，避免触发 MiniCPM 等模型的模板混乱。
+  String _buildChatPrompt(String query, {bool isLocal = false}) {
+    if (isLocal) {
+      return '''你是一个亲切耐心的少儿学习助手。请直接回答问题，不要做自我介绍。
+
+问题：$query''';
+    }
     return '''你是一个亲切耐心的少儿智能学习助手（WiseMuse 智启陪读）。
 回答要求：
 1. 请直接针对问题给出回答，严禁在回答开头做自我介绍（如"我是WiseMuse..."或"你好小朋友..."等无意义开场白）。
@@ -306,6 +318,19 @@ class _AiChatPageState extends State<AiChatPage> {
 3. 排版清晰，层次分明，使用 Markdown 格式展现重点。
 
 小朋友的问题：$query''';
+  }
+
+  /// 清理 MiniCPM / Llama / 通用模型的特殊 token（如 `<用户>`、`<AI>`、`<s>`、`</s>`、`<reserved_*>` 等）。
+  static String _cleanSpecialTokens(String text) {
+    if (text.isEmpty) return text;
+    return text
+        .replaceAll(
+          RegExp(
+            r'<用户>|<AI>|<s>|<\/s>|<reserved_\d+>|<\|user\|>|<\|assistant\|>|<\|system\|>|<\|endoftext\|>|<\|im_end\|>|<\|im_start\|>',
+          ),
+          '',
+        )
+        .trim();
   }
 
   Future<void> _toggleVoiceInput() async {

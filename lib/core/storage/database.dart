@@ -1,6 +1,8 @@
 import 'package:path/path.dart' as p;
 import 'package:sqflite/sqflite.dart';
 
+import 'seed_data.dart';
+
 /// [v0.1.0] sqflite 数据库提供者：打开库 + 建表 + 迁移。
 ///
 /// 单例持有 [Database]；测试时通过 `databaseFactory = databaseFactoryFfi`
@@ -10,7 +12,7 @@ class DatabaseProvider {
   DatabaseProvider._();
 
   static const String dbName = 'wisemuse.db';
-  static const int dbVersion = 7;
+  static const int dbVersion = 8;
 
   static Database? _db;
 
@@ -93,6 +95,8 @@ class DatabaseProvider {
     await db.execute(
       'CREATE INDEX idx_chat_profile ON chat_messages(profile_id)',
     );
+    // v8: 幼小衔接知识库种子数据
+    await SeedData.populate(db);
   }
 
   /// 数据库迁移（版本升级时）。只做增量，不删旧数据。
@@ -169,6 +173,10 @@ class DatabaseProvider {
           'ALTER TABLE chat_messages ADD COLUMN image_paths TEXT',
         );
       } catch (_) {}
+    }
+    if (oldVersion < 8) {
+      // v7→v8: 幼小衔接知识库种子数据
+      await SeedData.populate(db);
     }
   }
 

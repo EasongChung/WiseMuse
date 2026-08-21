@@ -176,7 +176,7 @@ class TranslationEngine {
         return null;
       }
       final prompt = _buildLlmPrompt(text, source, target);
-      final result = await _llm.chat(prompt, predictLength: 512);
+      final result = await _llm.chat(prompt, predictLength: 256);
       if (result.isNotEmpty) {
         AppLog.d(_tag, 'llama 翻译成功');
         return result;

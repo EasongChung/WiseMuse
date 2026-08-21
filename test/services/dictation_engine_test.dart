@@ -53,14 +53,14 @@ void main() {
   });
 
   group('DictationEngine makeQuestions', () {
-    test('选字模式只取单字', () {
+    test('选字模式多字词逐字拆题', () {
       final qs = DictationEngine.makeQuestions(
         ['大', '你好', '小', '山'],
         mode: DictationMode.charSelect,
         count: 10,
       );
-      // 「你好」是双字，跳过；大/小/山各 1 题
-      expect(qs, hasLength(3));
+      // [v0.1.55] 多字词「你好」拆为「你」「好」两题；大/小/山各 1 题 = 5 题
+      expect(qs, hasLength(5));
       expect(qs.every((q) => q.options != null), isTrue);
     });
 

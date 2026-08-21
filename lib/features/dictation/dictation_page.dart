@@ -58,7 +58,10 @@ class _DictationPageState extends State<DictationPage> {
   @override
   void initState() {
     super.initState();
-    _showSourcePicker();
+    // [v0.1.55] 延迟到 mount 完成后弹出词源选择，避免刚构建时 context 异常
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _showSourcePicker();
+    });
   }
 
   /// [v0.1.38] 选择词源：生词本 / 手动输入 / 知识库。
@@ -112,7 +115,8 @@ class _DictationPageState extends State<DictationPage> {
   Future<void> _loadFromKnowledge() async {
     final scope = await KnowledgeScopePicker.show(context);
     if (scope == null || !mounted) {
-      if (mounted) Navigator.of(context).pop();
+      // 取消选择范围，重新弹回词源选择器
+      if (mounted) _showSourcePicker();
       return;
     }
     try {
@@ -130,25 +134,49 @@ class _DictationPageState extends State<DictationPage> {
           filtered.map((p) => p.text).where((t) => t.isNotEmpty).toList();
       if (words.isEmpty) {
         if (mounted) {
-          TopToast.show(context, '该范围无可用知识点');
+          TopToast.show(context, '该范围暂无知识点，请换个范围或词源');
+          _showSourcePicker();
         }
         return;
       }
       _showModeAndStart(words);
     } catch (e) {
       AppLog.e(_tag, '从知识库加载失败: $e');
+      if (mounted) {
+        TopToast.show(context, '加载知识库失败，已切换至预设练习词');
+        _showModeAndStart(const [
+          '大',
+          '小',
+          '上',
+          '下',
+          '人',
+          '山',
+          '水',
+          '火',
+          '日',
+          '月',
+        ]);
+      }
     }
   }
 
   Future<void> _loadManual() async {
     final input = await _showWordInputDialog();
     if (input == null || !mounted) {
-      if (mounted) Navigator.of(context).pop();
+      // 取消手动输入，重新弹回词源选择器
+      if (mounted) _showSourcePicker();
       return;
     }
-    _showModeAndStart(
-      input.split(RegExp(r'[\s,，、]+')).where((w) => w.isNotEmpty).toList(),
-    );
+    final words =
+        input.split(RegExp(r'[\s,，、]+')).where((w) => w.isNotEmpty).toList();
+    if (words.isEmpty) {
+      if (mounted) {
+        TopToast.show(context, '未输入有效词语');
+        _showSourcePicker();
+      }
+      return;
+    }
+    _showModeAndStart(words);
   }
 
   Future<void> _loadFromWordbook() async {
@@ -159,13 +187,31 @@ class _DictationPageState extends State<DictationPage> {
       if (!mounted) return;
 
       if (words.isEmpty) {
-        await _loadManual();
+        TopToast.show(context, '生词本暂无未掌握生词，已为您准备基础汉字练习');
+        _showModeAndStart(const [
+          '天',
+          '地',
+          '人',
+          '你',
+          '我',
+          '他',
+          '日',
+          '月',
+          '水',
+          '火',
+          '山',
+          '石',
+          '田',
+          '禾',
+        ]);
         return;
       }
       _showModeAndStart(words);
     } catch (e) {
       AppLog.e(_tag, '加载生词本失败: $e');
-      if (mounted) _showModeAndStart(['大', '小', '上', '下', '人', '山', '水', '火']);
+      if (mounted) {
+        _showModeAndStart(const ['大', '小', '上', '下', '人', '山', '水', '火']);
+      }
     }
   }
 
@@ -219,8 +265,8 @@ class _DictationPageState extends State<DictationPage> {
     );
 
     if (questions.isEmpty && mounted) {
-      TopToast.show(context, '没有适合该模式的题目，试试其他模式');
-      Navigator.of(context).pop();
+      TopToast.show(context, '没有适合该模式的题目，请换个词源或模式');
+      _showSourcePicker();
       return;
     }
 

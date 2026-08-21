@@ -4,6 +4,7 @@ import 'dart:io';
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
 import 'package:path/path.dart' as p;
 
@@ -301,9 +302,65 @@ class _SettingsPageState extends State<SettingsPage> {
                   // [v0.1.44] 本地大模型管理（合入 AI 离线优先）
                   _buildSectionTitle('本地大模型管理'),
                   _buildLocalModelManager(),
+                  const SizedBox(height: 16),
+                  _buildAboutSection(),
                 ],
               )
               : const Center(child: CircularProgressIndicator()),
+    );
+  }
+
+  Widget _buildAboutSection() {
+    return Padding(
+      padding: const EdgeInsets.only(top: 8, bottom: 16),
+      child: Column(
+        children: [
+          const Divider(height: 24),
+          const Text(
+            'WiseMuse · v0.1.55',
+            style: TextStyle(
+              fontSize: 13,
+              fontWeight: FontWeight.w600,
+              color: StudyPalette.inkSoft,
+            ),
+          ),
+          const SizedBox(height: 4),
+          const Text(
+            '作者：EasongChung',
+            style: TextStyle(fontSize: 12, color: StudyPalette.inkSoft),
+          ),
+          const SizedBox(height: 6),
+          InkWell(
+            borderRadius: BorderRadius.circular(6),
+            onTap: () {
+              Clipboard.setData(
+                const ClipboardData(
+                  text: 'https://github.com/EasongChung/WiseMuse',
+                ),
+              );
+              TopToast.show(context, '已复制仓库链接');
+            },
+            child: const Padding(
+              padding: EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(Icons.code, size: 14, color: StudyPalette.inkSoft),
+                  SizedBox(width: 4),
+                  Text(
+                    'github.com/EasongChung/WiseMuse',
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: StudyPalette.inkSoft,
+                      decoration: TextDecoration.underline,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 

@@ -41,20 +41,24 @@ class LlmService {
 
   /// 发送用户 prompt，返回完整生成文本。
   ///
-  /// [predictLength] 最大生成 token 数（默认 2048——Qwen3 系 thinking 模型
-  /// 思考块会占用大量 token，1024 常被思考截断导致没有正式回答）。
+  /// [predictLength] 最大生成 token 数（默认 512——普通问答足够，避免无谓等待）。
+  /// 若用于长文本生成（如知识提取），调用方请自行传入更大的值。
   ///
-  /// 返回前剥离 Qwen3/Qwen3.5 类模型的 thinking 思维链块（见 [_stripThinking]），
-  /// 只保留正式回答。剥离后为空说明模型把预算全花在思考上、未产出回答。
-  Future<String> chat(String prompt, {int predictLength = 2048}) async {
+  /// 返回前依次执行：
+  /// 1. 剥离 Qwen3/Qwen3.5 类模型的 thinking 思维链块（见 [_stripThinking]）
+  /// 2. 清理 MiniCPM 及其他模型的特殊 token（见 [_cleanSpecialTokens]）
+  Future<String> chat(String prompt, {int predictLength = 512}) async {
     final text = await _channel.invokeMethod<String>('send', {
       'prompt': prompt,
       'predictLength': predictLength,
     });
-    return _stripThinking(text ?? '');
+    var result = _stripThinking(text ?? '');
+    result = _cleanSpecialTokens(result);
+    return result;
   }
 
-  /// 剥离 Qwen3/Qwen3.5 类 hybrid reasoning 模型的 thinking（思维链）块。
+  /// 剥离 Qwen3/Qwen3.5 类 hybrid reasoning 模型的 thinking（思维链）块，
+  /// 并清理 MiniCPM 等模型中可能残留的特殊 token。
   ///
   /// 判定规则：
   /// - **有闭合块**（`<|im_start|>think ... <|im_end|>` 或 `<think>...</think>`）
@@ -84,6 +88,8 @@ class LlmService {
       RegExp(r'<\|im_start\|>|<\|im_end\|>|<think>|</think>'),
       '',
     );
+    // 清理 MiniCPM 等特殊标记
+    t = _cleanSpecialTokens(t);
     t = t.trim();
 
     // 无闭合块且剩余文本仍以 think 开头 → 思考被截断、正式回答未生成
@@ -95,6 +101,21 @@ class LlmService {
     }
 
     return t.trim();
+  }
+
+  /// 清理 MiniCPM / Llama / 通用模型的特殊 token（如 `<用户>`、`<AI>`、`<s>`、`</s>`、`<reserved_*>` 等）。
+  static String _cleanSpecialTokens(String text) {
+    if (text.isEmpty) return text;
+
+    var t = text;
+    // 移除 MiniCPM / ChatML / Llama 系列常见特殊标记与保留 token
+    t = t.replaceAll(
+      RegExp(
+        r'<用户>|<AI>|<s>|<\/s>|<reserved_\d+>|<\|user\|>|<\|assistant\|>|<\|system\|>|<\|endoftext\|>|<\|im_end\|>|<\|im_start\|>',
+      ),
+      '',
+    );
+    return t;
   }
 
   /// 基准测试，返回 markdown 表格字符串（模型/pp/tg t/s）。

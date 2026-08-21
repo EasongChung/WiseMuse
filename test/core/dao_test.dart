@@ -154,8 +154,11 @@ void main() {
       await kpDao.insert(a);
       await kpDao.insert(b);
 
-      expect((await kpDao.getAll()).length, 2);
-      expect((await kpDao.getAll(type: KnowledgeType.word)).length, 1);
+      expect((await kpDao.getAll()).length, 115); // 2 条测试数据 + 113 条种子数据
+      expect(
+        (await kpDao.getAll(type: KnowledgeType.word)).length,
+        88,
+      ); // 1 条测试 + 87 条种子 word 型
     });
 
     test('upsertByText 幂等去重', () async {

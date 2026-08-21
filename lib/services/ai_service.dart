@@ -30,11 +30,12 @@ class AiService {
 
   /// 调用 AI 完成文本生成，返回首个成功结果或 null。
   ///
-  /// [prompt] 用户 prompt；[predictLength] 本地 llama 最大生成 token；
+  /// [prompt] 用户 prompt；[predictLength] 最大生成 token（默认 512，
+  /// 普通问答足够；若用于知识提取等需要长输出的场景，调用方请手动传入更大的值）；
   /// [jsonObject] 云端传 response_format，本地 llama 仅在 prompt 追加约束。
   Future<AiResult?> complete(
     String prompt, {
-    int predictLength = 2048,
+    int predictLength = 512,
     bool jsonObject = false,
   }) async {
     final order = await _getEngineOrder();

@@ -325,7 +325,7 @@ class DictationEngine {
   /// 从词列表生成听写题目。
   ///
   /// [words] 词列表，[mode] 听写模式，[count] 最多出题数。
-  /// 选字模式仅取单字（长度 1）。
+  /// [v0.1.55] 选字模式若遇多字词，逐字拆分生成，保证词语亦可进入选字练习。
   static List<DictationQuestion> makeQuestions(
     List<String> words, {
     required DictationMode mode,
@@ -338,6 +338,15 @@ class DictationEngine {
         case DictationMode.charSelect:
           if (w.length == 1) {
             questions.add(makeCharSelectQuestion(w));
+          } else {
+            // 多字词逐字拆出单字生成题目
+            for (var i = 0; i < w.length; i++) {
+              if (questions.length >= count) break;
+              final ch = w[i];
+              if (RegExp(r'[一-龥]').hasMatch(ch)) {
+                questions.add(makeCharSelectQuestion(ch));
+              }
+            }
           }
           break;
         case DictationMode.spelling:
