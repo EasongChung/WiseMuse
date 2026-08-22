@@ -350,7 +350,7 @@ class _SettingsPageState extends State<SettingsPage> {
                     text: 'https://github.com/EasongChung/WiseMuse',
                   ),
                 );
-                TopToast.show(context, '已复制仓库链接');
+                if (mounted) TopToast.show(context, '已复制仓库链接');
               }
             },
             child: Padding(
