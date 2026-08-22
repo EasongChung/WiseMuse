@@ -61,7 +61,7 @@ class LlmService {
     AppLog.d(
       'llm',
       'chat ${sw.elapsedMilliseconds}ms '
-      '${result.length}chars',
+          '${result.length}chars',
     );
     return result;
   }
@@ -104,12 +104,12 @@ class LlmService {
     // 无闭合块但存在打开的 thinking 标记 → 思考被截断、正式回答未生成，丢弃
     // 仅当文本实际包含 thinking 标记（而非普通英文单词 "think"）时才触发，
     // 避免误杀 MiniCPM5 等模型以 "Think about..." 开头的正常回复。
-    final hasOpenThinkingMarker =
-        RegExp(r'<\|im_start\|>\s*think\b|```[Tt]hinking').hasMatch(t);
+    final hasOpenThinkingMarker = RegExp(
+      r'<\|im_start\|>\s*think\b|```[Tt]hinking',
+    ).hasMatch(t);
     if (!closed && hasOpenThinkingMarker) {
       return '';
     }
-
 
     return t.trim();
   }

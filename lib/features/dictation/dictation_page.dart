@@ -20,11 +20,7 @@ import '../../widgets/top_toast.dart';
 
 /// 一次答题记录（供完成后家长检查）。
 class _AnswerRecord {
-  _AnswerRecord({
-    required this.word,
-    required this.correct,
-    this.selected,
-  });
+  _AnswerRecord({required this.word, required this.correct, this.selected});
 
   final String word;
   final bool correct;
@@ -352,7 +348,10 @@ class _DictationPageState extends State<DictationPage> {
                     style: TextStyle(fontWeight: FontWeight.w600),
                   ),
                   subtitle: const Text('听句子 → 点击词语卡片按顺序排列'),
-                  leading: const Icon(Icons.grid_view, color: StudyPalette.ember),
+                  leading: const Icon(
+                    Icons.grid_view,
+                    color: StudyPalette.ember,
+                  ),
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.all(Radius.circular(12)),
                     side: BorderSide(color: StudyPalette.linen),
@@ -429,7 +428,9 @@ class _DictationPageState extends State<DictationPage> {
     final correct = DictationEngine.checkCharSelect(q.word, option);
 
     // 记录答题
-    _records.add(_AnswerRecord(word: q.word, correct: correct, selected: option));
+    _records.add(
+      _AnswerRecord(word: q.word, correct: correct, selected: option),
+    );
 
     setState(() {
       _selectedOption = option;
@@ -516,38 +517,39 @@ class _DictationPageState extends State<DictationPage> {
                 ConstrainedBox(
                   constraints: const BoxConstraints(maxHeight: 200),
                   child: ListView(
-                    children: _records.map((r) {
-                      return Padding(
-                        padding: const EdgeInsets.symmetric(vertical: 2),
-                        child: Row(
-                          children: [
-                            Icon(
-                              r.correct ? Icons.check_circle : Icons.cancel,
-                              size: 16,
-                              color:
-                                  r.correct
-                                      ? StudyPalette.moss
-                                      : StudyPalette.ember,
-                            ),
-                            const SizedBox(width: 8),
-                            Text(
-                              r.word,
-                              style: const TextStyle(fontSize: 16),
-                            ),
-                            if (r.selected != null && !r.correct) ...[
-                              const SizedBox(width: 8),
-                              Text(
-                                '（选了「${r.selected}」）',
-                                style: const TextStyle(
-                                  fontSize: 12,
-                                  color: StudyPalette.inkSoft,
+                    children:
+                        _records.map((r) {
+                          return Padding(
+                            padding: const EdgeInsets.symmetric(vertical: 2),
+                            child: Row(
+                              children: [
+                                Icon(
+                                  r.correct ? Icons.check_circle : Icons.cancel,
+                                  size: 16,
+                                  color:
+                                      r.correct
+                                          ? StudyPalette.moss
+                                          : StudyPalette.ember,
                                 ),
-                              ),
-                            ],
-                          ],
-                        ),
-                      );
-                    }).toList(),
+                                const SizedBox(width: 8),
+                                Text(
+                                  r.word,
+                                  style: const TextStyle(fontSize: 16),
+                                ),
+                                if (r.selected != null && !r.correct) ...[
+                                  const SizedBox(width: 8),
+                                  Text(
+                                    '（选了「${r.selected}」）',
+                                    style: const TextStyle(
+                                      fontSize: 12,
+                                      color: StudyPalette.inkSoft,
+                                    ),
+                                  ),
+                                ],
+                              ],
+                            ),
+                          );
+                        }).toList(),
                   ),
                 ),
               ],
@@ -654,10 +656,7 @@ class _DictationPageState extends State<DictationPage> {
         // 进度提示
         Text(
           '${_currentIndex + 1} / ${_questions.length}',
-          style: const TextStyle(
-            fontSize: 14,
-            color: StudyPalette.inkSoft,
-          ),
+          style: const TextStyle(fontSize: 14, color: StudyPalette.inkSoft),
         ),
         const SizedBox(height: 16),
 
@@ -714,16 +713,17 @@ class _DictationPageState extends State<DictationPage> {
                 Wrap(
                   spacing: 8,
                   runSpacing: 8,
-                  children: _records.map((r) {
-                    return Chip(
-                      label: Text(r.word),
-                      backgroundColor:
-                          r.correct
-                              ? StudyPalette.moss.withValues(alpha: 0.2)
-                              : StudyPalette.ember.withValues(alpha: 0.2),
-                      side: BorderSide.none,
-                    );
-                  }).toList(),
+                  children:
+                      _records.map((r) {
+                        return Chip(
+                          label: Text(r.word),
+                          backgroundColor:
+                              r.correct
+                                  ? StudyPalette.moss.withValues(alpha: 0.2)
+                                  : StudyPalette.ember.withValues(alpha: 0.2),
+                          side: BorderSide.none,
+                        );
+                      }).toList(),
                 ),
               ],
             ),

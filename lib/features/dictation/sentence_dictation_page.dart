@@ -114,9 +114,7 @@ class _SentenceDictationPageState extends State<SentenceDictationPage> {
     _playsRemaining--;
     setState(() => _ttsPlaying = false);
     _status =
-        _playsRemaining > 0
-            ? '再听一次？($_playsRemaining 次剩余)'
-            : '点击词语卡片，按正确顺序排列';
+        _playsRemaining > 0 ? '再听一次？($_playsRemaining 次剩余)' : '点击词语卡片，按正确顺序排列';
   }
 
   // ===== Word Jigsaw =====
