@@ -1,6 +1,8 @@
 import 'package:sqflite/sqflite.dart';
 
+import '../models/book.dart';
 import '../models/knowledge_point.dart';
+import 'book_dao.dart';
 import 'knowledge_point_dao.dart';
 
 /// [v0.1.55] 幼小衔接基础知识库种子数据（拼音、英文字母、基础汉字）。
@@ -13,6 +15,24 @@ class SeedData {
   /// 插入内置种子数据。
   static Future<void> populate(Database db) async {
     final dao = KnowledgePointDao(db);
+
+    // 确保 books 表有内置书籍记录（ID 必须固定，不能由 Book.create 随机生成）
+    final now = DateTime.now().microsecondsSinceEpoch;
+    final bookDao = BookDao(db);
+    final existing = await bookDao.getById(builtinBookId);
+    if (existing == null) {
+      await bookDao.insert(
+        Book(
+          id: builtinBookId,
+          title: builtinBookTitle,
+          source: BookSource.txt,
+          pageCount: 5,
+          importStatus: 0,
+          createdAt: now,
+          updatedAt: now,
+        ),
+      );
+    }
 
     // 1. 声母表（23个）
     const initials = [

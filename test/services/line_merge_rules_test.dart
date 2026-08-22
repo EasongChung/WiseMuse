@@ -11,6 +11,7 @@ bool merge(
   double indent = 0,
 }) => canMergeLines(
   prevRight: prevLine.length.toDouble(),
+  prevLeft: 0,
   blockRight: blockRight,
   nextLeft: indent,
   blockLeft: 0,
@@ -83,6 +84,21 @@ void main() {
     test('空行首/行尾一律不合并', () {
       expect(merge('a' * 19, ''), isFalse);
       expect(merge('', '下一行'), isFalse);
+    });
+
+    test('下一行行首在上一行行尾左侧（多列跨列）不合并', () {
+      // 模拟多列布局：上一行在第二列 (x=200..300)，下一行回到第一列 (x=0..100)
+      final result = canMergeLines(
+        prevRight: 300,
+        prevLeft: 200,
+        blockRight: 300,
+        nextLeft: 0,
+        blockLeft: 0,
+        charW: 10,
+        prevLastChar: '字',
+        nextFirstChar: '词',
+      );
+      expect(result, isFalse);
     });
   });
 

@@ -243,9 +243,6 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
           widget.book.lastReadPage = next;
         })
         .catchError((_) {});
-    if (_useOriginal && _pdfController != null) {
-      _pdfController!.setPage(next);
-    }
   }
 
   /// 文本模式翻页（+/- 翻页）。
@@ -487,6 +484,7 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
     int page,
     int workGeneration,
   ) async {
+    final sw = Stopwatch()..start();
     try {
       final png = await PdfService().renderPage(path, page, scale: 2.0);
       if (png == null || !_isWorkCurrent(workGeneration)) return const [];
@@ -501,19 +499,27 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
           if (b.boundingBox.right > w) w = b.boundingBox.right;
           if (b.boundingBox.bottom > h) h = b.boundingBox.bottom;
         }
-        return OcrGeometryService.buildSentences(
+        final sentences = OcrGeometryService.buildSentences(
           result.blocks,
           imageWidth: w,
           imageHeight: h,
         );
+        sw.stop();
+        AppLog.d(
+          _tag,
+          '扫描件 OCR($page) ${sw.elapsedMilliseconds}ms '
+          '${sentences.length}sentences',
+        );
+        return sentences;
       } finally {
         try {
           await File(tmp).delete();
         } catch (_) {}
       }
     } catch (e) {
+      sw.stop();
       if (_isWorkCurrent(workGeneration)) {
-        AppLog.e(_tag, '扫描件 OCR($page) 失败: $e');
+        AppLog.e(_tag, '扫描件 OCR($page) ${sw.elapsedMilliseconds}ms 失败: $e');
       }
       return const [];
     }

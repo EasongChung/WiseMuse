@@ -1,5 +1,7 @@
 import 'package:flutter/services.dart';
 
+import '../core/debug/app_log.dart';
+
 /// [v0.1.0] llama.android 本地 LLM 服务（MethodChannel → LlamaBridge.kt）。
 ///
 /// 封装本地大模型推理（AiChat/InferenceEngine 官方桥）：
@@ -48,12 +50,19 @@ class LlmService {
   /// 1. 剥离 Qwen3/Qwen3.5 类模型的 thinking 思维链块（见 [_stripThinking]）
   /// 2. 清理 MiniCPM 及其他模型的特殊 token（见 [_cleanSpecialTokens]）
   Future<String> chat(String prompt, {int predictLength = 512}) async {
+    final sw = Stopwatch()..start();
     final text = await _channel.invokeMethod<String>('send', {
       'prompt': prompt,
       'predictLength': predictLength,
     });
+    sw.stop();
     var result = _stripThinking(text ?? '');
     result = _cleanSpecialTokens(result);
+    AppLog.d(
+      'llm',
+      'chat ${sw.elapsedMilliseconds}ms '
+      '${result.length}chars',
+    );
     return result;
   }
 
@@ -92,13 +101,15 @@ class LlmService {
     t = _cleanSpecialTokens(t);
     t = t.trim();
 
-    // 无闭合块且剩余文本仍以 think 开头 → 思考被截断、正式回答未生成
-    if (!closed &&
-        RegExp(
-          r'^["“”\s]*(?:<\|im_start\|>)?[Tt]hink(?:ing)?[\s:：]',
-        ).hasMatch(t)) {
+    // 无闭合块但存在打开的 thinking 标记 → 思考被截断、正式回答未生成，丢弃
+    // 仅当文本实际包含 thinking 标记（而非普通英文单词 "think"）时才触发，
+    // 避免误杀 MiniCPM5 等模型以 "Think about..." 开头的正常回复。
+    final hasOpenThinkingMarker =
+        RegExp(r'<\|im_start\|>\s*think\b|```[Tt]hinking').hasMatch(t);
+    if (!closed && hasOpenThinkingMarker) {
       return '';
     }
+
 
     return t.trim();
   }

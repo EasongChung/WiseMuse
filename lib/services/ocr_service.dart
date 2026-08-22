@@ -16,12 +16,20 @@ class OcrService {
   /// OcrGeometryService 合成句子几何）。
   Future<OcrResult?> recognizeFile(String path) async {
     try {
+      final sw = Stopwatch()..start();
       final data = await _channel.invokeMethod<Map<Object?, Object?>>(
         'recognizeFile',
         {'path': path},
       );
+      sw.stop();
       if (data == null) return null;
-      return OcrResult.fromMap(data.cast<String, dynamic>());
+      final result = OcrResult.fromMap(data.cast<String, dynamic>());
+      final blocks = result?.blocks.length ?? 0;
+      AppLog.d(
+        _tag,
+        'recognizeFile ${sw.elapsedMilliseconds}ms ${blocks}blocks',
+      );
+      return result;
     } catch (e) {
       AppLog.e(_tag, 'recognizeFile 失败: $e');
       return null;

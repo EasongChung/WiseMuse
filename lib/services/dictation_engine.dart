@@ -2,21 +2,19 @@ import 'dart:math';
 
 /// [v0.1.0] 听写引擎：生成中文同音/形近干扰项、英文拼写判定。
 ///
-/// 三种听写模式：
+/// 两种听写模式：
 /// - [DictationMode.charSelect]：听音选字，从 4 个选项中选正确字
-/// - [DictationMode.spelling]：英文拼写，输入后自动判对错
-/// - [DictationMode.voice]：语音跟读，复用 Vosk ASR 识别后判对错
+/// - [DictationMode.spelling]：朗读列表，自动朗读词语供跟读记忆
+///
+/// 另有句子默写模式（[SentenceDictMode]）：拼字积木。
 
 /// 听写模式。
 enum DictationMode {
   /// 中文听音选字（4 选 1）。
   charSelect('听音选字'),
 
-  /// 英文拼写。
-  spelling('拼写'),
-
-  /// 语音跟读。
-  voice('语音跟读');
+  /// 朗读列表（自动朗读，供儿童跟读记忆）。
+  spelling('朗读列表');
 
   const DictationMode(this.label);
   final String label;
@@ -307,11 +305,6 @@ class DictationEngine {
     return DictationQuestion(word: word, lang: 'en');
   }
 
-  /// 为语音跟读生成题目。
-  static DictationQuestion makeVoiceQuestion(String word, String lang) {
-    return DictationQuestion(word: word, lang: lang);
-  }
-
   /// 检查听音选字答案。
   static bool checkCharSelect(String word, String selected) {
     return word == selected.trim();
@@ -351,9 +344,6 @@ class DictationEngine {
           break;
         case DictationMode.spelling:
           questions.add(makeSpellingQuestion(w));
-          break;
-        case DictationMode.voice:
-          questions.add(makeVoiceQuestion(w, 'zh'));
           break;
       }
     }

@@ -6,7 +6,9 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
+import 'package:package_info_plus/package_info_plus.dart';
 import 'package:path/path.dart' as p;
+import 'package:url_launcher/url_launcher.dart';
 
 import '../../core/debug/app_log.dart';
 import '../../core/models/model_ids.dart';
@@ -316,13 +318,19 @@ class _SettingsPageState extends State<SettingsPage> {
       child: Column(
         children: [
           const Divider(height: 24),
-          const Text(
-            'WiseMuse · v0.1.55',
-            style: TextStyle(
-              fontSize: 13,
-              fontWeight: FontWeight.w600,
-              color: StudyPalette.inkSoft,
-            ),
+          FutureBuilder<String>(
+            future: _getVersionString(),
+            builder: (context, snapshot) {
+              final version = snapshot.data ?? 'v0.1.0';
+              return Text(
+                'WiseMuse · $version',
+                style: const TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                  color: StudyPalette.inkSoft,
+                ),
+              );
+            },
           ),
           const SizedBox(height: 4),
           const Text(
@@ -332,22 +340,32 @@ class _SettingsPageState extends State<SettingsPage> {
           const SizedBox(height: 6),
           InkWell(
             borderRadius: BorderRadius.circular(6),
-            onTap: () {
-              Clipboard.setData(
-                const ClipboardData(
-                  text: 'https://github.com/EasongChung/WiseMuse',
-                ),
-              );
-              TopToast.show(context, '已复制仓库链接');
+            onTap: () async {
+              final uri = Uri.parse('https://github.com/EasongChung/WiseMuse');
+              if (await canLaunchUrl(uri)) {
+                await launchUrl(uri, mode: LaunchMode.externalApplication);
+              } else {
+                Clipboard.setData(
+                  const ClipboardData(
+                    text: 'https://github.com/EasongChung/WiseMuse',
+                  ),
+                );
+                TopToast.show(context, '已复制仓库链接');
+              }
             },
-            child: const Padding(
-              padding: EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
               child: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Icon(Icons.code, size: 14, color: StudyPalette.inkSoft),
-                  SizedBox(width: 4),
-                  Text(
+                  Image.asset(
+                    'assets/icons/github.png',
+                    width: 14,
+                    height: 14,
+                    color: StudyPalette.inkSoft,
+                  ),
+                  const SizedBox(width: 4),
+                  const Text(
                     'github.com/EasongChung/WiseMuse',
                     style: TextStyle(
                       fontSize: 12,
@@ -362,6 +380,15 @@ class _SettingsPageState extends State<SettingsPage> {
         ],
       ),
     );
+  }
+
+  static Future<String> _getVersionString() async {
+    try {
+      final info = await PackageInfo.fromPlatform();
+      return 'v${info.version}+${info.buildNumber}';
+    } catch (_) {
+      return 'v0.1.0';
+    }
   }
 
   Widget _buildSectionTitle(String title) {

@@ -33,6 +33,10 @@ dependencies:
   # Word 原文模式（docx→HTML 后 WebView 渲染）；Android 实现为纯 Java，无 AGP9 KGP 风险
   webview_flutter: 4.14.1
   flutter_markdown: 0.7.7+1
+  # 设置页 GitHub 链接（浏览器打开）
+  url_launcher: 6.3.1
+  # 运行时版本号（设置页底部展示）
+  package_info_plus: 10.2.1
 
 dev_dependencies:
   flutter_test:
@@ -43,6 +47,10 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
+
+  assets:
+    # [v0.1.56] 设置页底部 GitHub 仓库图标
+    - assets/icons/github.png
 
   # [v0.3.0] UI 重设计「暖色书房」：标题字体站酷快乐体（圆体童趣），打包进 assets 离线可用。
   fonts:

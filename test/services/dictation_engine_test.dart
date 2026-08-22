@@ -4,11 +4,10 @@ import 'package:wisemuse/services/dictation_engine.dart';
 
 void main() {
   group('DictationMode', () {
-    test('三种模式枚举', () {
-      expect(DictationMode.values, hasLength(3));
+    test('两种模式枚举', () {
+      expect(DictationMode.values, hasLength(2));
       expect(DictationMode.charSelect.label, '听音选字');
-      expect(DictationMode.spelling.label, '拼写');
-      expect(DictationMode.voice.label, '语音跟读');
+      expect(DictationMode.spelling.label, '朗读列表');
     });
   });
 

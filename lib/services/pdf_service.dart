@@ -32,11 +32,14 @@ class PdfService {
     double scale = 2.0,
   }) async {
     try {
+      final sw = Stopwatch()..start();
       final bytes = await _channel.invokeMethod<Uint8List>('renderPage', {
         'path': path,
         'pageIndex': pageIndex,
         'scale': scale,
       });
+      sw.stop();
+      AppLog.d(_tag, 'renderPage($pageIndex) 耗时 ${sw.elapsedMilliseconds}ms');
       return bytes;
     } catch (e) {
       AppLog.e(_tag, 'renderPage($pageIndex) 失败: $e');
@@ -57,9 +60,17 @@ class PdfService {
     int pageIndex,
   ) async {
     try {
+      final sw = Stopwatch()..start();
       final data = await _channel.invokeMethod<Map<Object?, Object?>>(
         'extractTextPositions',
         {'path': path, 'pageIndex': pageIndex},
+      );
+      sw.stop();
+      final chars = (data?['chars'] as List?)?.length ?? 0;
+      AppLog.d(
+        _tag,
+        'extractTextPositions($pageIndex) ${sw.elapsedMilliseconds}ms '
+        '${chars}chars',
       );
       return data?.cast<String, dynamic>();
     } catch (e) {

@@ -68,6 +68,7 @@ final RegExp _lineStartOrdinal = RegExp(
 /// [indentSlackChars] 默认 0.5，仅容忍字距抖动，不容忍真实缩进。
 bool canMergeLines({
   required double prevRight,
+  required double prevLeft,
   required double blockRight,
   required double nextLeft,
   required double blockLeft,
@@ -95,6 +96,13 @@ bool canMergeLines({
   if (nextLineText.isNotEmpty && _lineStartOrdinal.hasMatch(nextLineText)) {
     return false;
   }
+
+  // 5) 跨列/网格布局检测：下一行起于上一行起点的左侧。
+  // 多列排版中，上一行在右列（prevLeft 远离 blockLeft），下一行回到左列
+  // （nextLeft ≈ blockLeft），此时 nextLeft < prevLeft，不应合并。
+  // 正常换行中上一行起于左列（prevLeft ≈ blockLeft），下一行同样起于左侧，
+  // nextLeft ≈ prevLeft，不受此判据影响。
+  if (nextLeft < prevLeft - 0.5 * w) return false;
 
   return true;
 }

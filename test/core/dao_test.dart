@@ -41,7 +41,8 @@ void main() {
       final book = Book.create(title: '语文', source: BookSource.pdf);
       await bookDao.insert(book);
 
-      expect((await bookDao.getAll()).length, 1);
+      // +1：SeedData.populate 在初始化时插入内置书籍（幼小衔接基础知识）
+      expect((await bookDao.getAll()).length, 2);
       expect((await bookDao.getById(book.id))!.title, '语文');
 
       book.title = '数学';
@@ -62,7 +63,8 @@ void main() {
       await bookDao.update(a); // a 更新后排前
       final all = await bookDao.getAll();
       expect(all.first.id, a.id);
-      expect(all.length, 2);
+      // +1：SeedData.populate 在初始化时插入内置书籍
+      expect(all.length, 3);
     });
   });
 

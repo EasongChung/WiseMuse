@@ -175,6 +175,7 @@ List<SentenceBox> buildSentences(
         final prev = block[i - 1];
         final merge = canMergeLines(
           prevRight: prev.xMax,
+          prevLeft: prev.xMin,
           blockRight: blockRight,
           nextLeft: line.xMin,
           blockLeft: blockLeft,

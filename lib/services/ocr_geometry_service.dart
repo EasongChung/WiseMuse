@@ -128,6 +128,7 @@ class OcrGeometryService {
           if (sb.isNotEmpty && rects.isNotEmpty) {
             final merge = canMergeLines(
               prevRight: rects.last.right,
+              prevLeft: rects.last.left,
               blockRight: blockRight / imageWidth,
               nextLeft: rx,
               blockLeft: blockLeft / imageWidth,

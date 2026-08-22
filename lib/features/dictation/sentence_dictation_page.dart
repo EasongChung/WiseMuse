@@ -1,27 +1,21 @@
-import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
-import 'package:permission_handler/permission_handler.dart' as perm;
 
 import '../../core/debug/app_log.dart';
 import '../../core/models/learning_record.dart';
 import '../../core/storage/database.dart';
 import '../../core/storage/learning_record_dao.dart';
 import '../../core/theme/app_theme.dart';
-import '../../services/asr_service.dart';
 import '../../services/mastery_service.dart';
 import '../../services/native_tts_service.dart';
 import '../../services/tts_service.dart';
-import '../../services/vosk_asr_service.dart';
-import '../../widgets/model_panel.dart';
-import '../follow/scoring.dart';
 
 /// [v0.1.35] Sentence dictation page for the dictation module.
 ///
-/// Two modes:
-/// - [SentenceDictMode.wordJigsaw]: listen then tap word cards in order
-/// - [SentenceDictMode.voiceDictation]: listen then speak for Vosk scoring
+/// 模式：[SentenceDictMode.wordJigsaw] 听句子 → 点击词语卡片按正确顺序排列。
+///
+/// [v0.1.56] 删除语音默写模式，仅保留拼字积木。
 class SentenceDictationPage extends StatefulWidget {
   const SentenceDictationPage({
     super.key,
@@ -36,9 +30,9 @@ class SentenceDictationPage extends StatefulWidget {
   State<SentenceDictationPage> createState() => _SentenceDictationPageState();
 }
 
+/// 句子默写模式（仅拼字积木）。
 enum SentenceDictMode {
-  wordJigsaw('拼字积木'),
-  voiceDictation('语音默写');
+  wordJigsaw('拼字积木');
 
   const SentenceDictMode(this.label);
   final String label;
@@ -48,18 +42,14 @@ class _SentenceDictationPageState extends State<SentenceDictationPage> {
   static const _tag = 'sent_dict';
 
   final TtsService _tts = NativeTtsService();
-  final AsrService _asr = VoskAsrService();
-  final _panelKey = GlobalKey<ModelPanelState>();
 
-  SentenceDictMode _mode = SentenceDictMode.wordJigsaw;
+  final SentenceDictMode _mode = SentenceDictMode.wordJigsaw;
   int _currentIndex = 0;
   int _correctCount = 0;
   bool _loading = true;
   bool _ttsPlaying = false;
-  bool _operationBusy = false;
   bool _submitting = false;
   String _status = '准备中...';
-  String? _recognized;
 
   late List<_WordCard> _wordCards;
   final List<String> _placedWords = [];
@@ -69,55 +59,13 @@ class _SentenceDictationPageState extends State<SentenceDictationPage> {
   @override
   void initState() {
     super.initState();
-    _init();
-  }
-
-  Future<void> _init() async {
-    final mode = await showDialog<SentenceDictMode>(
-      context: context,
-      builder:
-          (ctx) => AlertDialog(
-            title: const Text('选择默写模式'),
-            content: Column(
-              mainAxisSize: MainAxisSize.min,
-              children:
-                  SentenceDictMode.values.map((m) {
-                    return Padding(
-                      padding: const EdgeInsets.only(bottom: 8),
-                      child: ListTile(
-                        title: Text(
-                          m.label,
-                          style: const TextStyle(fontWeight: FontWeight.w600),
-                        ),
-                        subtitle: Text(
-                          m == SentenceDictMode.wordJigsaw
-                              ? '听句子 → 点击词语卡片按正确顺序排列'
-                              : '听句子 → 跟读录音 → Vosk 自动评分',
-                        ),
-                        leading: Icon(
-                          m == SentenceDictMode.wordJigsaw
-                              ? Icons.grid_view
-                              : Icons.record_voice_over,
-                          color: StudyPalette.ember,
-                        ),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(12),
-                          side: const BorderSide(color: StudyPalette.linen),
-                        ),
-                        onTap: () => Navigator.of(ctx).pop(m),
-                      ),
-                    );
-                  }).toList(),
-            ),
-          ),
-    );
-    if (mode == null || !mounted) {
-      if (mounted) Navigator.of(context).pop();
-      return;
-    }
-    _mode = mode;
     setState(() => _loading = false);
     _nextSentence();
+  }
+
+  @override
+  void dispose() {
+    super.dispose();
   }
 
   String get _currentSentence => widget.sentences[_currentIndex];
@@ -127,13 +75,10 @@ class _SentenceDictationPageState extends State<SentenceDictationPage> {
       _finish();
       return;
     }
-    if (_mode == SentenceDictMode.wordJigsaw) {
-      _initJigsaw();
-    }
+    _initJigsaw();
     _playsRemaining = _playCount;
     setState(() {
       _submitting = false;
-      _recognized = null;
       _placedWords.clear();
       _status = '听句子，准备默写';
     });
@@ -171,9 +116,7 @@ class _SentenceDictationPageState extends State<SentenceDictationPage> {
     _status =
         _playsRemaining > 0
             ? '再听一次？($_playsRemaining 次剩余)'
-            : (_mode == SentenceDictMode.wordJigsaw
-                ? '点击词语卡片，按正确顺序排列'
-                : '点击麦克风跟读默写');
+            : '点击词语卡片，按正确顺序排列';
   }
 
   // ===== Word Jigsaw =====
@@ -208,56 +151,6 @@ class _SentenceDictationPageState extends State<SentenceDictationPage> {
     _playSentence();
   }
 
-  // ===== Voice Dictation =====
-
-  Future<void> _startVoice() async {
-    if (_ttsPlaying || _operationBusy || _submitting) return;
-    final mic = await perm.Permission.microphone.request();
-    if (!mic.isGranted) {
-      _setStatus('麦克风权限被拒绝');
-      return;
-    }
-    setState(() => _operationBusy = true);
-    await _tts.stop();
-    if (!(_panelKey.currentState?.isReady ?? false)) {
-      _setStatus('请先加载语音模型');
-      setState(() => _operationBusy = false);
-      return;
-    }
-    if (!await _asr.start()) {
-      _setStatus('启动录音失败');
-      setState(() => _operationBusy = false);
-      return;
-    }
-    _setStatus('录音中... 说完点停止');
-  }
-
-  Future<void> _stopVoice() async {
-    if (!_operationBusy) return;
-    setState(() => _submitting = true);
-    try {
-      final text = await _asr.stop();
-      setState(() => _operationBusy = false);
-      if (!mounted) return;
-      _recognized = text;
-      final score = FollowScorer.scoreFollow(_currentSentence, text);
-      if (score.passed) {
-        _onCorrect();
-      } else {
-        _onWrong();
-      }
-    } catch (e) {
-      AppLog.e(_tag, '识别失败: $e');
-      if (mounted) {
-        setState(() {
-          _operationBusy = false;
-          _submitting = false;
-        });
-      }
-      _setStatus('识别失败，请重试');
-    }
-  }
-
   // ===== Scoring & Persistence =====
 
   void _onCorrect() {
@@ -285,7 +178,7 @@ class _SentenceDictationPageState extends State<SentenceDictationPage> {
           type: LearningType.dictation,
           target: _currentSentence,
           result: correct ? 100.0 : 0.0,
-          detail: jsonEncode({'mode': _mode.name, 'recognized': _recognized}),
+          detail: jsonEncode({'mode': _mode.name}),
         ),
       );
       if (!correct) {
@@ -338,10 +231,6 @@ class _SentenceDictationPageState extends State<SentenceDictationPage> {
             ],
           ),
     );
-  }
-
-  void _setStatus(String s) {
-    if (mounted) setState(() => _status = s);
   }
 
   @override
@@ -434,12 +323,7 @@ class _SentenceDictationPageState extends State<SentenceDictationPage> {
   }
 
   Widget _buildContent() {
-    switch (_mode) {
-      case SentenceDictMode.wordJigsaw:
-        return _buildJigsawContent();
-      case SentenceDictMode.voiceDictation:
-        return _buildVoiceContent();
-    }
+    return _buildJigsawContent();
   }
 
   Widget _buildJigsawContent() {
@@ -524,76 +408,6 @@ class _SentenceDictationPageState extends State<SentenceDictationPage> {
             icon: const Icon(Icons.refresh, size: 18),
             label: const Text('重新排列'),
           ),
-      ],
-    );
-  }
-
-  Widget _buildVoiceContent() {
-    return Column(
-      children: [
-        // Recognition result
-        if (_recognized != null)
-          Card(
-            child: Padding(
-              padding: const EdgeInsets.all(16),
-              child: Column(
-                children: [
-                  const Text(
-                    '你说的是：',
-                    style: TextStyle(fontSize: 13, color: StudyPalette.inkSoft),
-                  ),
-                  const SizedBox(height: 8),
-                  Text(
-                    _recognized!,
-                    style: const TextStyle(
-                      fontSize: 18,
-                      color: StudyPalette.ink,
-                    ),
-                    textAlign: TextAlign.center,
-                  ),
-                ],
-              ),
-            ),
-          ),
-
-        const Spacer(),
-
-        // Mic button
-        if (!_submitting)
-          Column(
-            children: [
-              IconButton(
-                icon: Icon(
-                  _operationBusy ? Icons.stop_circle : Icons.mic,
-                  size: 64,
-                  color:
-                      _operationBusy
-                          ? StudyPalette.ember
-                          : StudyPalette.spinePdf,
-                ),
-                onPressed:
-                    _ttsPlaying
-                        ? null
-                        : (_operationBusy ? _stopVoice : _startVoice),
-                tooltip: _operationBusy ? '停止录音' : '开始录音',
-              ),
-              const SizedBox(height: 8),
-              Text(
-                _operationBusy ? '点击停止' : '点击麦克风跟读默写',
-                style: const TextStyle(
-                  fontSize: 12,
-                  color: StudyPalette.inkSoft,
-                ),
-              ),
-            ],
-          )
-        else
-          const Center(child: CircularProgressIndicator()),
-
-        const Spacer(),
-
-        // Model panel (collapsed)
-        SizedBox(height: 80, child: ModelPanel(key: _panelKey, asr: _asr)),
       ],
     );
   }

@@ -15,14 +15,32 @@ import '../../services/dictation_engine.dart';
 import '../../services/mastery_service.dart';
 import '../../services/native_tts_service.dart';
 import '../../services/tts_service.dart';
-import '../follow/follow_page.dart';
 import 'sentence_dictation_page.dart';
 import '../../widgets/top_toast.dart';
 
-/// [v0.1.0] 听写页面：中文听音选字 / 英文拼写 / 语音跟读 三种模式。
+/// 一次答题记录（供完成后家长检查）。
+class _AnswerRecord {
+  _AnswerRecord({
+    required this.word,
+    required this.correct,
+    this.selected,
+  });
+
+  final String word;
+  final bool correct;
+  final String? selected;
+}
+
+/// [v0.1.0] 听写页面：中文听音选字 / 朗读列表 两种模式。
 ///
 /// 词源：生词本（优先未掌握词）或手动输入。
 /// 结果记入 LearningRecord。
+///
+/// [v0.1.56] 儿童化改造：
+/// - 选字模式：答后显示对错文字 + 颜色反馈，2.5 秒自动进入下一题
+/// - 拼写模式改为「朗读列表」：全屏显示词语，自动朗读，3 秒自动切换
+/// - 拼字积木直接作为听写一级目录选项
+/// - 完成后展示答题记录供家长检查
 class DictationPage extends StatefulWidget {
   const DictationPage({super.key});
 
@@ -40,20 +58,22 @@ class _DictationPageState extends State<DictationPage> {
   int _currentIndex = 0;
   int _correctCount = 0;
 
-  // 拼写输入
-  final _spellingCtrl = TextEditingController();
+  // 答题记录（家长检查用）
+  final List<_AnswerRecord> _records = [];
 
-  // 结果反馈
+  // 选字模式已选
+  String? _selectedOption;
+
+  // 反馈状态
   bool _showResult = false;
-  bool _lastCorrect = false;
 
   bool _loading = true;
   bool _started = false;
   bool _ttsPlaying = false;
   bool _submitting = false;
 
-  // 选字模式已选
-  String? _selectedOption;
+  // 自动倒计时
+  Timer? _autoNextTimer;
 
   @override
   void initState() {
@@ -62,6 +82,12 @@ class _DictationPageState extends State<DictationPage> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) _showSourcePicker();
     });
+  }
+
+  @override
+  void dispose() {
+    _autoNextTimer?.cancel();
+    super.dispose();
   }
 
   /// [v0.1.38] 选择词源：生词本 / 手动输入 / 知识库。
@@ -230,7 +256,7 @@ class _DictationPageState extends State<DictationPage> {
       return;
     }
 
-    // 句子默写模式
+    // 句子默写（拼字积木）模式
     if (modeStr == 'sentence') {
       if (mounted) {
         Navigator.of(context).pushReplacement(
@@ -246,17 +272,23 @@ class _DictationPageState extends State<DictationPage> {
       return;
     }
 
-    final mode = DictationMode.values.firstWhere((m) => m.name == modeStr);
-
-    // 语音跟读跳转到 FollowPage
-    if (mode == DictationMode.voice) {
+    // 拼字积木（直接跳转，强制 wordJigsaw 模式）
+    if (modeStr == 'wordJigsaw') {
       if (mounted) {
         Navigator.of(context).pushReplacement(
-          MaterialPageRoute(builder: (_) => const FollowPage()),
+          MaterialPageRoute<void>(
+            builder:
+                (_) => SentenceDictationPage(
+                  sentences: words.where((w) => w.length >= 2).toList(),
+                  bookId: null,
+                ),
+          ),
         );
       }
       return;
     }
+
+    final mode = DictationMode.values.firstWhere((m) => m.name == modeStr);
 
     final questions = DictationEngine.makeQuestions(
       words,
@@ -302,9 +334,7 @@ class _DictationPageState extends State<DictationPage> {
                       leading: Icon(
                         mode == DictationMode.charSelect
                             ? Icons.text_fields
-                            : mode == DictationMode.spelling
-                            ? Icons.keyboard
-                            : Icons.record_voice_over,
+                            : Icons.volume_up,
                         color: StudyPalette.ember,
                       ),
                       shape: RoundedRectangleBorder(
@@ -318,10 +348,23 @@ class _DictationPageState extends State<DictationPage> {
                 const Divider(height: 1),
                 ListTile(
                   title: const Text(
+                    '拼字积木',
+                    style: TextStyle(fontWeight: FontWeight.w600),
+                  ),
+                  subtitle: const Text('听句子 → 点击词语卡片按顺序排列'),
+                  leading: const Icon(Icons.grid_view, color: StudyPalette.ember),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.all(Radius.circular(12)),
+                    side: BorderSide(color: StudyPalette.linen),
+                  ),
+                  onTap: () => Navigator.of(context).pop('wordJigsaw'),
+                ),
+                ListTile(
+                  title: const Text(
                     '句子默写',
                     style: TextStyle(fontWeight: FontWeight.w600),
                   ),
-                  subtitle: const Text('拼字积木 / 语音默写，逐句评分'),
+                  subtitle: const Text('逐句拼字积木，适合较长句子'),
                   leading: const Icon(Icons.article, color: StudyPalette.ember),
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.all(Radius.circular(12)),
@@ -340,9 +383,7 @@ class _DictationPageState extends State<DictationPage> {
       case DictationMode.charSelect:
         return '听发音 → 从 4 个字中选正确的';
       case DictationMode.spelling:
-        return '听发音 → 拼写输入 → 自动判对错';
-      case DictationMode.voice:
-        return '听发音 → 跟读录音 → Vosk 识别评分';
+        return '听发音 → 看词语跟读记忆';
     }
   }
 
@@ -387,32 +428,27 @@ class _DictationPageState extends State<DictationPage> {
     final q = _questions[_currentIndex];
     final correct = DictationEngine.checkCharSelect(q.word, option);
 
+    // 记录答题
+    _records.add(_AnswerRecord(word: q.word, correct: correct, selected: option));
+
     setState(() {
       _selectedOption = option;
-      _lastCorrect = correct;
       _showResult = true;
       _submitting = true;
     });
 
     _record(correct);
-  }
 
-  void _submitSpelling() {
-    if (_submitting || _showResult) return;
-    final q = _questions[_currentIndex];
-    final input = _spellingCtrl.text.trim();
-    final correct = DictationEngine.checkSpelling(q.word, input);
-
-    setState(() {
-      _lastCorrect = correct;
-      _showResult = true;
-      _submitting = true;
+    // 2.5 秒后自动进入下一题
+    _autoNextTimer?.cancel();
+    _autoNextTimer = Timer(const Duration(milliseconds: 2500), () {
+      if (mounted && !_submitting) {
+        _next();
+      }
     });
-
-    _record(correct);
   }
 
-  Future<void> _record(bool correct) async {
+  void _record(bool correct) async {
     try {
       final q = _questions[_currentIndex];
       if (correct) _correctCount++;
@@ -435,6 +471,7 @@ class _DictationPageState extends State<DictationPage> {
   }
 
   void _next() {
+    _autoNextTimer?.cancel();
     if (_currentIndex + 1 >= _questions.length) {
       _finish();
       return;
@@ -442,14 +479,13 @@ class _DictationPageState extends State<DictationPage> {
     setState(() {
       _currentIndex++;
       _showResult = false;
-      _lastCorrect = false;
       _selectedOption = null;
-      _spellingCtrl.clear();
     });
     _playCurrent();
   }
 
   void _finish() {
+    _autoNextTimer?.cancel();
     final total = _questions.length;
     final correct = _correctCount;
     showDialog(
@@ -458,10 +494,63 @@ class _DictationPageState extends State<DictationPage> {
       builder:
           (context) => AlertDialog(
             title: const Text('听写完成！'),
-            content: Text(
-              '共 $total 题\n正确 $correct 题\n得分 ${total > 0 ? (correct * 100 / total).round() : 0} 分',
-              style: const TextStyle(fontSize: 18, height: 1.6),
-              textAlign: TextAlign.center,
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  '共 $total 题\n正确 $correct 题\n'
+                  '得分 ${total > 0 ? (correct * 100 / total).round() : 0} 分',
+                  style: const TextStyle(fontSize: 18, height: 1.6),
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 16),
+                const Text(
+                  '答题记录',
+                  style: TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
+                    color: StudyPalette.inkSoft,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                ConstrainedBox(
+                  constraints: const BoxConstraints(maxHeight: 200),
+                  child: ListView(
+                    children: _records.map((r) {
+                      return Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 2),
+                        child: Row(
+                          children: [
+                            Icon(
+                              r.correct ? Icons.check_circle : Icons.cancel,
+                              size: 16,
+                              color:
+                                  r.correct
+                                      ? StudyPalette.moss
+                                      : StudyPalette.ember,
+                            ),
+                            const SizedBox(width: 8),
+                            Text(
+                              r.word,
+                              style: const TextStyle(fontSize: 16),
+                            ),
+                            if (r.selected != null && !r.correct) ...[
+                              const SizedBox(width: 8),
+                              Text(
+                                '（选了「${r.selected}」）',
+                                style: const TextStyle(
+                                  fontSize: 12,
+                                  color: StudyPalette.inkSoft,
+                                ),
+                              ),
+                            ],
+                          ],
+                        ),
+                      );
+                    }).toList(),
+                  ),
+                ),
+              ],
             ),
             actions: [
               FilledButton(
@@ -533,7 +622,7 @@ class _DictationPageState extends State<DictationPage> {
               child:
                   mode == DictationMode.charSelect
                       ? _buildCharSelect()
-                      : _buildSpelling(),
+                      : _buildReadAloudList(),
             ),
           ],
         ),
@@ -554,17 +643,46 @@ class _DictationPageState extends State<DictationPage> {
     );
   }
 
-  Widget _buildSpelling() {
+  /// [v0.1.56] 朗读列表模式：全屏显示当前词语，自动朗读，3 秒后自动切换下一词。
+  Widget _buildReadAloudList() {
     final q = _questions[_currentIndex];
+    final isLast = _currentIndex + 1 >= _questions.length;
 
     return Column(
-      mainAxisSize: MainAxisSize.min,
+      mainAxisAlignment: MainAxisAlignment.center,
       children: [
-        const Text(
-          '听发音，输入拼写',
-          style: TextStyle(fontSize: 14, color: StudyPalette.inkSoft),
+        // 进度提示
+        Text(
+          '${_currentIndex + 1} / ${_questions.length}',
+          style: const TextStyle(
+            fontSize: 14,
+            color: StudyPalette.inkSoft,
+          ),
         ),
-        const SizedBox(height: 12),
+        const SizedBox(height: 16),
+
+        // 当前词语（大字显示）
+        Container(
+          padding: const EdgeInsets.all(32),
+          decoration: BoxDecoration(
+            color: StudyPalette.parchmentDeep.withValues(alpha: 0.3),
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(
+              color: StudyPalette.ember.withValues(alpha: 0.3),
+              width: 2,
+            ),
+          ),
+          child: Text(
+            q.word,
+            style: const TextStyle(
+              fontSize: 48,
+              fontWeight: FontWeight.w700,
+              color: StudyPalette.ink,
+            ),
+            textAlign: TextAlign.center,
+          ),
+        ),
+        const SizedBox(height: 32),
 
         // 重新播放
         IconButton(
@@ -576,56 +694,49 @@ class _DictationPageState extends State<DictationPage> {
           onPressed: _ttsPlaying ? null : _playCurrent,
           tooltip: '再听一遍',
         ),
-        const SizedBox(height: 24),
+        const SizedBox(height: 16),
 
-        // 输入框
-        TextField(
-          controller: _spellingCtrl,
-          decoration: InputDecoration(
-            hintText: '输入拼写',
-            border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-            suffixIcon:
-                _showResult
-                    ? Icon(
-                      _lastCorrect ? Icons.check : Icons.close,
-                      color:
-                          _lastCorrect ? StudyPalette.moss : StudyPalette.ember,
-                    )
-                    : IconButton(
-                      icon: const Icon(Icons.send),
-                      onPressed: _submitSpelling,
-                    ),
+        // 已朗读词语列表
+        if (_records.isNotEmpty)
+          Expanded(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Text(
+                  '已读词语',
+                  style: TextStyle(
+                    fontSize: 13,
+                    color: StudyPalette.inkSoft,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: _records.map((r) {
+                    return Chip(
+                      label: Text(r.word),
+                      backgroundColor:
+                          r.correct
+                              ? StudyPalette.moss.withValues(alpha: 0.2)
+                              : StudyPalette.ember.withValues(alpha: 0.2),
+                      side: BorderSide.none,
+                    );
+                  }).toList(),
+                ),
+              ],
+            ),
           ),
-          autofocus: true,
-          textInputAction: TextInputAction.send,
-          onSubmitted:
-              (_showResult || _submitting) ? null : (_) => _submitSpelling(),
-          enabled: !_showResult,
-        ),
 
         const SizedBox(height: 16),
 
-        if (_showResult)
-          Column(
-            children: [
-              Text(
-                _lastCorrect ? '正确！' : '答案是「${q.word}」',
-                style: TextStyle(
-                  fontSize: 18,
-                  fontWeight: FontWeight.w600,
-                  color: _lastCorrect ? StudyPalette.moss : StudyPalette.ember,
-                ),
-              ),
-              const SizedBox(height: 16),
-              FilledButton.icon(
-                onPressed: _submitting ? null : _next,
-                icon: const Icon(Icons.arrow_forward),
-                label: Text(
-                  _currentIndex + 1 >= _questions.length ? '完成' : '下一题',
-                ),
-              ),
-            ],
-          ),
+        // 下一题按钮（也可等自动切换）
+        FilledButton.icon(
+          onPressed: _submitting ? null : _next,
+          icon: Icon(isLast ? Icons.flag : Icons.arrow_forward),
+          label: Text(isLast ? '完成' : '下一词'),
+        ),
       ],
     );
   }
