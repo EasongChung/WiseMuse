@@ -225,16 +225,21 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
     _speakingStartedAt = 0;
     unawaited(_tts.stop());
     if (!mounted) return;
-    setState(() {
-      _pdfCurrentPage = next;
-      _textPageIndex = next;
-      _textHighlightIndex = null;
-      _activeSentenceIndex = null;
-      _activeSentenceText = null;
-      _selectedText = null;
-      _imgHighlight = null;
-      _pdfSentenceCache.clear();
-      _pageGeomCache.clear();
+    // [v0.1.57] 延迟一帧 setState：让原生 PDFView 的吸附动画完整收尾后再触发
+    // Flutter 侧重绘，避免两者竞争造成掉帧（低配机尤甚）。
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      setState(() {
+        _pdfCurrentPage = next;
+        _textPageIndex = next;
+        _textHighlightIndex = null;
+        _activeSentenceIndex = null;
+        _activeSentenceText = null;
+        _selectedText = null;
+        _imgHighlight = null;
+        // 仅清当前页的句子高亮缓存（几何缓存按页码 key，翻回不应重提，保留）。
+        _pdfSentenceCache.remove(_pdfCurrentPage);
+      });
     });
     // [v0.1.48] 保存阅读进度
     DatabaseProvider.database
@@ -329,9 +334,9 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
         return;
       }
       await controller.setPageSize(page, geom.pageWidth, geom.pageHeight);
-    } catch (e) {
+    } catch (e, s) {
       if (mounted && viewGeneration == _pdfViewGeneration) {
-        AppLog.e(_tag, 'syncPageSize($page) 失败: $e');
+        AppLog.e(_tag, 'syncPageSize($page) 失败: $e\n$s');
       }
     }
   }
@@ -343,6 +348,24 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
     final geom = data == null ? null : PdfPageGeometry.fromMap(data);
     _pageGeomCache[page] = geom;
     return geom;
+  }
+
+  /// [v0.1.57] 异步预取当前页前后各一页的几何（仅几何，不进句子缓存）。
+  ///
+  /// 低配机上 PDFBox 逐字符提取坐标耗时可观；提前把相邻页的 CropBox 尺寸
+  /// 填入 `_pageGeomCache`，用户翻回或连续翻页时 `setPageSize` 无需等待。
+  /// 仅预取几何（不走 OCR/句子合成），避免把内存撑大。
+  Future<void> _preloadAdjacentPages(String path, int page) async {
+    final total = _pageTexts.length;
+    for (final adj in [page - 1, page + 1]) {
+      if (adj < 0 || adj >= total) continue;
+      if (_pageGeomCache.containsKey(adj)) continue; // 已有则跳过
+      try {
+        await _getPageGeom(path, adj);
+      } catch (_) {
+        // 预取失败不影响主流程，静默忽略
+      }
+    }
   }
 
   /// 点击 PDF：命中句子 → 高亮 + 朗读；句子未中 → 段落兜底（仅高亮）。
@@ -499,8 +522,9 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
           if (b.boundingBox.right > w) w = b.boundingBox.right;
           if (b.boundingBox.bottom > h) h = b.boundingBox.bottom;
         }
+        final blocks = result.blocks;
         final sentences = OcrGeometryService.buildSentences(
-          result.blocks,
+          blocks,
           imageWidth: w,
           imageHeight: h,
         );
@@ -508,7 +532,7 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
         AppLog.d(
           _tag,
           '扫描件 OCR($page) ${sw.elapsedMilliseconds}ms '
-          '${sentences.length}sentences',
+          '${blocks.length}blocks→${sentences.length}sentences',
         );
         return sentences;
       } finally {
@@ -516,10 +540,10 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
           await File(tmp).delete();
         } catch (_) {}
       }
-    } catch (e) {
+    } catch (e, s) {
       sw.stop();
       if (_isWorkCurrent(workGeneration)) {
-        AppLog.e(_tag, '扫描件 OCR($page) ${sw.elapsedMilliseconds}ms 失败: $e');
+        AppLog.e(_tag, '扫描件 OCR($page) ${sw.elapsedMilliseconds}ms 失败: $e\n$s');
       }
       return const [];
     }
@@ -901,7 +925,11 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
         _syncPage(page);
         final c = _pdfController;
         if (c != null) {
-          await _syncPageSize(c, page, viewGeneration);
+          // [v0.1.57] 去掉 await：不阻塞 onPageChanged 回调，让原生吸附动画
+          // 完整收尾。CropBox 尺寸异步到位即可，点击命中不依赖它立即返回。
+          unawaited(_syncPageSize(c, page, viewGeneration));
+          // [v0.1.57] 预取相邻页几何，降低翻回/连续翻页时 setPageSize 的首访延迟。
+          unawaited(_preloadAdjacentPages(path, page));
         }
       },
       onTap: (details) {

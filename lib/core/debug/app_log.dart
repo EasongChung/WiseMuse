@@ -70,16 +70,17 @@ class AppLog {
   }
 
   /// [v0.1.53] 记录 debug 日志，自动提取调用方位置。
-  static void d(String tag, String message) =>
-      _writeSync('debug', tag, message, _callerInfo());
+  /// [context] 附加 KV 对（如入参/出参摘要），格式化为 `[key=val ...]` 追加到消息。
+  static void d(String tag, String message, [Map<String, dynamic>? context]) =>
+      _writeSync('debug', tag, message, _callerInfo(), context);
 
   /// [v0.1.53] 记录 warn 日志，自动提取调用方位置。
-  static void w(String tag, String message) =>
-      _writeSync('warn', tag, message, _callerInfo());
+  static void w(String tag, String message, [Map<String, dynamic>? context]) =>
+      _writeSync('warn', tag, message, _callerInfo(), context);
 
   /// [v0.1.53] 记录 error 日志，自动提取调用方位置。
-  static void e(String tag, String message) =>
-      _writeSync('error', tag, message, _callerInfo());
+  static void e(String tag, String message, [Map<String, dynamic>? context]) =>
+      _writeSync('error', tag, message, _callerInfo(), context);
 
   /// [v0.1.53] 从堆栈提取调用方信息（文件:行号:函数）。
   static String _callerInfo() {
@@ -127,8 +128,11 @@ class AppLog {
     String tag,
     String message, [
     String caller = '',
+    Map<String, dynamic>? context,
   ]) {
-    for (final line in message.split('\n')) {
+    final ctxStr = _formatContext(context);
+    final fullMessage = ctxStr.isNotEmpty ? '$message $ctxStr' : message;
+    for (final line in fullMessage.split('\n')) {
       final t = _stamp();
       final entry = LogEntry(
         t: t,
@@ -136,6 +140,7 @@ class AppLog {
         tag: tag,
         message: line,
         caller: caller,
+        context: ctxStr,
       );
       final buf =
           entries.value.length >= kBufferLines
@@ -145,13 +150,13 @@ class AppLog {
 
       if (!kReleaseMode) {
         final callerStr = caller.isNotEmpty ? ' $caller' : '';
-        debugPrint('[$tag]$callerStr $line');
+        debugPrint('[$tag]$callerStr$ctxStr $line');
       }
       if (!enabled) continue;
       try {
         final callerStr = caller.isNotEmpty ? ' $caller' : '';
         _file?.writeAsStringSync(
-          '$t [$level] [$tag]$callerStr $line\n',
+          '$t [$level] [$tag]$callerStr$ctxStr $line\n',
           mode: FileMode.append,
           flush: true, // 关键：flush 后才能在进程被 kill 时保住这一行
         );
@@ -159,6 +164,30 @@ class AppLog {
         // 磁盘写失败（空间满/文件被删）降级为仅内存
       }
     }
+  }
+
+  /// 将 [context] KV 对格式化为 `[key=val ...]` 字符串；空则返回空串。
+  /// 值若是 Map/List 则 JSON 化，其余 `toString()`；长度截断到 200 字符防刷屏。
+  static String _formatContext(Map<String, dynamic>? context) {
+    if (context == null || context.isEmpty) return '';
+    final parts = <String>[];
+    for (final entry in context.entries) {
+      final v = entry.value;
+      final s =
+          (v is Map || v is List)
+              ? (() {
+                try {
+                  return v.toString();
+                } catch (_) {
+                  return '?';
+                }
+              })()
+              : v.toString();
+      parts.add(
+        '${entry.key}=${s.length > 200 ? '${s.substring(0, 200)}…' : s}',
+      );
+    }
+    return '[${parts.join(' ')}]';
   }
 
   static String _stamp() {
@@ -173,7 +202,10 @@ class AppLog {
     final sb = StringBuffer();
     for (final e in entries.value) {
       final callerStr = e.caller.isNotEmpty ? ' ${e.caller}' : '';
-      sb.writeln('${e.t} [${e.level}] [${e.tag}]$callerStr ${e.message}');
+      final ctxStr = e.context.isNotEmpty ? ' ${e.context}' : '';
+      sb.writeln(
+        '${e.t} [${e.level}] [${e.tag}]$callerStr$ctxStr ${e.message}',
+      );
     }
     return sb.toString();
   }
@@ -198,6 +230,7 @@ class LogEntry {
     required this.tag,
     required this.message,
     this.caller = '', // [v0.1.53] 调用方位置（文件:行号）
+    this.context = '', // [v0.1.57] 附加 KV 对（如入参/出参摘要）
   });
 
   final String t;
@@ -207,4 +240,7 @@ class LogEntry {
 
   /// [v0.1.53] 调用方位置（文件名:行号），空串表示无。
   final String caller;
+
+  /// [v0.1.57] 附加 KV 对格式化串（如 `[model=qwen2.5 tokens=128]`），空串表示无。
+  final String context;
 }

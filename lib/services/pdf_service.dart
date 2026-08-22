@@ -32,6 +32,10 @@ class PdfService {
     double scale = 2.0,
   }) async {
     try {
+      AppLog.d(
+        _tag,
+        'renderPage 入参: path=${_fileName(path)} page=$pageIndex scale=$scale',
+      );
       final sw = Stopwatch()..start();
       final bytes = await _channel.invokeMethod<Uint8List>('renderPage', {
         'path': path,
@@ -39,10 +43,15 @@ class PdfService {
         'scale': scale,
       });
       sw.stop();
-      AppLog.d(_tag, 'renderPage($pageIndex) 耗时 ${sw.elapsedMilliseconds}ms');
+      final size = bytes?.length ?? 0;
+      AppLog.d(
+        _tag,
+        'renderPage 出参: page=$pageIndex ${sw.elapsedMilliseconds}ms '
+        '${size}bytes',
+      );
       return bytes;
-    } catch (e) {
-      AppLog.e(_tag, 'renderPage($pageIndex) 失败: $e');
+    } catch (e, s) {
+      AppLog.e(_tag, 'renderPage 异常: page=$pageIndex $e\n$s');
       return null;
     }
   }
@@ -60,6 +69,10 @@ class PdfService {
     int pageIndex,
   ) async {
     try {
+      AppLog.d(
+        _tag,
+        'extractTextPositions 入参: path=${_fileName(path)} page=$pageIndex',
+      );
       final sw = Stopwatch()..start();
       final data = await _channel.invokeMethod<Map<Object?, Object?>>(
         'extractTextPositions',
@@ -67,14 +80,16 @@ class PdfService {
       );
       sw.stop();
       final chars = (data?['chars'] as List?)?.length ?? 0;
+      final pw = data?['pageWidth'];
+      final ph = data?['pageHeight'];
       AppLog.d(
         _tag,
-        'extractTextPositions($pageIndex) ${sw.elapsedMilliseconds}ms '
-        '${chars}chars',
+        'extractTextPositions 出参: page=$pageIndex ${sw.elapsedMilliseconds}ms '
+        '${chars}chars $pw x $ph',
       );
       return data?.cast<String, dynamic>();
-    } catch (e) {
-      AppLog.e(_tag, 'extractTextPositions($pageIndex) 失败: $e');
+    } catch (e, s) {
+      AppLog.e(_tag, 'extractTextPositions 异常: page=$pageIndex $e\n$s');
       return null;
     }
   }
@@ -82,15 +97,26 @@ class PdfService {
   /// 提取整本 PDF 逐页纯文本（索引 = 页码 - 1）；失败返回 null。
   Future<List<String>?> extractTexts(String path) async {
     try {
+      AppLog.d(_tag, 'extractTexts 入参: path=${_fileName(path)}');
+      final sw = Stopwatch()..start();
       final pages = await _channel.invokeMethod<List<Object?>>('extractTexts', {
         'path': path,
       });
+      sw.stop();
+      final count = pages?.length ?? 0;
+      AppLog.d(
+        _tag,
+        'extractTexts 出参: ${sw.elapsedMilliseconds}ms $count pages',
+      );
       return pages?.map((e) => e?.toString() ?? '').toList();
-    } catch (e) {
-      AppLog.e(_tag, 'extractTexts 失败: $e');
+    } catch (e, s) {
+      AppLog.e(_tag, 'extractTexts 异常: $e\n$s');
       return null;
     }
   }
+
+  /// 从路径提取文件名（脱敏，避免日志泄露完整路径）。
+  static String _fileName(String path) => path.split('/').last.split('\\').last;
 }
 
 /// [v0.2.0] PDF 单页字符坐标解析后的便捷视图。

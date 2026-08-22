@@ -16,6 +16,7 @@ class OcrService {
   /// OcrGeometryService 合成句子几何）。
   Future<OcrResult?> recognizeFile(String path) async {
     try {
+      AppLog.d(_tag, 'recognizeFile 入参: path=${_fileName(path)}');
       final sw = Stopwatch()..start();
       final data = await _channel.invokeMethod<Map<Object?, Object?>>(
         'recognizeFile',
@@ -25,16 +26,23 @@ class OcrService {
       if (data == null) return null;
       final result = OcrResult.fromMap(data.cast<String, dynamic>());
       final blocks = result?.blocks.length ?? 0;
+      final textLen = result?.text.length ?? 0;
+      final w = result?.width;
+      final h = result?.height;
       AppLog.d(
         _tag,
-        'recognizeFile ${sw.elapsedMilliseconds}ms ${blocks}blocks',
+        'recognizeFile 出参: ${sw.elapsedMilliseconds}ms '
+        '$textLen chars $blocks blocks $w x $h',
       );
       return result;
-    } catch (e) {
-      AppLog.e(_tag, 'recognizeFile 失败: $e');
+    } catch (e, s) {
+      AppLog.e(_tag, 'recognizeFile 异常: ${_fileName(path)} $e\n$s');
       return null;
     }
   }
+
+  /// 从路径提取文件名（脱敏，避免日志泄露完整路径）。
+  static String _fileName(String path) => path.split('/').last.split('\\').last;
 }
 
 /// OCR 识别结果（含块/行结构）。

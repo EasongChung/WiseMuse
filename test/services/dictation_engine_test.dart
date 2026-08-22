@@ -7,7 +7,7 @@ void main() {
     test('两种模式枚举', () {
       expect(DictationMode.values, hasLength(2));
       expect(DictationMode.charSelect.label, '听音选字');
-      expect(DictationMode.spelling.label, '朗读列表');
+      expect(DictationMode.spelling.label, '听写');
     });
   });
 

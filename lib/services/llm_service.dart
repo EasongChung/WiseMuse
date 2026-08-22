@@ -51,18 +51,32 @@ class LlmService {
   /// 2. 清理 MiniCPM 及其他模型的特殊 token（见 [_cleanSpecialTokens]）
   Future<String> chat(String prompt, {int predictLength = 512}) async {
     final sw = Stopwatch()..start();
+    final promptLen = prompt.length;
+    AppLog.d(
+      'llm',
+      'chat 入参: predictLength=$predictLength prompt=$promptLen chars '
+          'loaded=$_loaded',
+    );
     final text = await _channel.invokeMethod<String>('send', {
       'prompt': prompt,
       'predictLength': predictLength,
     });
     sw.stop();
+    final rawLen = (text ?? '').length;
     var result = _stripThinking(text ?? '');
     result = _cleanSpecialTokens(result);
+    final outLen = result.length;
     AppLog.d(
       'llm',
-      'chat ${sw.elapsedMilliseconds}ms '
-          '${result.length}chars',
+      'chat 出参: ${sw.elapsedMilliseconds}ms '
+          'raw=$rawLen clean=$outLen',
     );
+    if (rawLen > 0 && outLen == 0) {
+      AppLog.w(
+        'llm',
+        'chat 清洗后为空！raw=$rawLen raw_head="${text?.substring(0, 80)}"',
+      );
+    }
     return result;
   }
 
@@ -101,11 +115,12 @@ class LlmService {
     t = _cleanSpecialTokens(t);
     t = t.trim();
 
-    // 无闭合块但存在打开的 thinking 标记 → 思考被截断、正式回答未生成，丢弃
-    // 仅当文本实际包含 thinking 标记（而非普通英文单词 "think"）时才触发，
-    // 避免误杀 MiniCPM5 等模型以 "Think about..." 开头的正常回复。
+    // 无闭合块但存在打开的 thinking 标记 → 思考被截断、正式回答未生成，丢弃。
+    // 判据收紧：仅匹配真正的 thinking 角色标记（`<|im_start|>think`）或
+    // ` ```Thinking` 代码块开头，避免误杀 MiniCPM5 等模型以普通英文
+    // "Think about..." 开头的正常回复（无特殊 token 包裹）。
     final hasOpenThinkingMarker = RegExp(
-      r'<\|im_start\|>\s*think\b|```[Tt]hinking',
+      r'<\|im_start\|>think\b|```[Tt]hinking',
     ).hasMatch(t);
     if (!closed && hasOpenThinkingMarker) {
       return '';

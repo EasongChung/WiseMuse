@@ -11,7 +11,6 @@ import '../../services/book_import_service.dart';
 import '../../services/picker_service.dart';
 import '../../services/rag/rag_retrieval_service.dart';
 import '../../widgets/import_sheet.dart';
-import '../debug/log_page.dart';
 import '../reader/reader_page.dart';
 import '../../widgets/top_toast.dart';
 
@@ -232,19 +231,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('我的书架'),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.receipt_long_outlined),
-            tooltip: '运行日志',
-            onPressed:
-                () => Navigator.of(
-                  context,
-                ).push(MaterialPageRoute(builder: (_) => const LogPage())),
-          ),
-        ],
-      ),
+      appBar: AppBar(title: const Text('我的书架')),
       body: _buildBody(),
       floatingActionButton: FloatingActionButton.extended(
         onPressed: _importing ? null : _onImport,

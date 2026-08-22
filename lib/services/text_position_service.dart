@@ -182,6 +182,7 @@ List<SentenceBox> buildSentences(
           charW: charW,
           prevLastChar: lastChar,
           nextFirstChar: line.chars.first['c'].toString(),
+          prevLineText: prev.text,
           nextLineText: line.text,
         );
         if (!merge) {

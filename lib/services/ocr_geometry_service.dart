@@ -100,43 +100,60 @@ class OcrGeometryService {
         lastChar = '';
       }
 
+      // 追踪上一行的原始文本，供 canMergeLines 的 prevLineText 参数使用
+      // （检测上一行含连续 2 空格时的跨行合并拦截）。
+      String prevLineFullText = '';
+
       for (final line in block.lines) {
         final text = line.text.trim();
         if (text.isEmpty) {
           // 空行是段落硬边界
           flush();
+          prevLineFullText = '';
           continue;
         }
 
         final rr = _normRect(line.boundingBox, imageWidth, imageHeight);
         final rx = _normX(line.boundingBox.left, imageWidth);
 
-        // **行内先按终止标点切段**（复用 sentenceTerms，与 PDF/文本侧同源）。
+        // **行内先按终止标点切段，再按连续 2 空格切段**（与 sentence_splitter
+        // 同源：2+ 空格是多列/表格布局的列间分隔信号，应断句）。
         // ML Kit 一行可能含多个句子；段末是终止标点时该段独立成句。
         final segments = _splitLineByTerms(text);
         if (segments.isEmpty) continue;
 
-        for (final seg in segments) {
+        // 同行含连续 2 空格 → 列间边界，段与段之间强制断开，不合并。
+        final lineHasDoubleSpaces = line.text.contains('  ');
+
+        for (var i = 0; i < segments.length; i++) {
+          final seg = segments[i];
           final segText = seg.trim();
           if (segText.isEmpty) continue;
           final segFirst = segText[0];
           final segLast = segText[segText.length - 1];
           final segEndsTerm = sentenceTerms.contains(segLast);
 
-          // 已有挂起句，且本段是行首第一段 → 先判定是否与上一句跨行合并
-          // （仅当上一句未结束——行内切段后段末无终止标点才可能挂起）。
+          // 已有挂起句时判定是否与上一段跨行/跨段合并：
+          // - 同行连续 2 空格切出的非首段 → 强制断开（列间不合并）
+          // - 否则走 canMergeLines 几何判据（含 prevLineText/nextLineText 的
+          //   2 空格检测，与 sentence_splitter 同源）
           if (sb.isNotEmpty && rects.isNotEmpty) {
-            final merge = canMergeLines(
-              prevRight: rects.last.right,
-              prevLeft: rects.last.left,
-              blockRight: blockRight / imageWidth,
-              nextLeft: rx,
-              blockLeft: blockLeft / imageWidth,
-              charW: charW / imageWidth,
-              prevLastChar: lastChar,
-              nextFirstChar: segFirst,
-              nextLineText: segText,
-            );
+            final forceFlush = lineHasDoubleSpaces && i > 0;
+            final merge =
+                forceFlush
+                    ? false
+                    : canMergeLines(
+                      prevRight: rects.last.right,
+                      prevLeft: rects.last.left,
+                      blockRight: blockRight / imageWidth,
+                      nextLeft: rx,
+                      blockLeft: blockLeft / imageWidth,
+                      charW: charW / imageWidth,
+                      prevLastChar: lastChar,
+                      nextFirstChar: segFirst,
+                      prevLineText: i == 0 ? prevLineFullText : '',
+                      nextLineText: segText,
+                    );
             if (!merge) {
               flush();
             } else if (needsSpaceBetween(lastChar, segFirst)) {
@@ -149,6 +166,7 @@ class OcrGeometryService {
           lastChar = segLast;
           if (segEndsTerm) flush();
         }
+        prevLineFullText = line.text;
       }
       // 块结束: 收尾残留句
       flush();

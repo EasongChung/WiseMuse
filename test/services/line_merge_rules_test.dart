@@ -100,6 +100,64 @@ void main() {
       );
       expect(result, isFalse);
     });
+
+    group('[判据5] 同行连续 2 空格 → 不合并（多列/表格列间分隔）', () {
+      test('上一行含连续 2 空格 → 不合并', () {
+        // 四条几何判据全满足，但上一行含 "  "（两列之间以 2 空格分隔）
+        expect(
+          canMergeLines(
+            prevRight: 19,
+            prevLeft: 0,
+            blockRight: 20,
+            nextLeft: 0,
+            blockLeft: 0,
+            charW: 1,
+            prevLastChar: 'b',
+            nextFirstChar: '续',
+            prevLineText: 'col1  col2',
+            nextLineText: '续行内容',
+          ),
+          isFalse,
+        );
+      });
+
+      test('下一行含连续 2 空格 → 不合并', () {
+        expect(
+          canMergeLines(
+            prevRight: 19,
+            prevLeft: 0,
+            blockRight: 20,
+            nextLeft: 0,
+            blockLeft: 0,
+            charW: 1,
+            prevLastChar: 'a',
+            nextFirstChar: 'b',
+            prevLineText: '上一行',
+            nextLineText: 'col1  col2',
+          ),
+          isFalse,
+        );
+      });
+
+      test('无连续 2 空格 → 不受影响', () {
+        // 单空格是词间正常空格，不触发断句
+        expect(
+          canMergeLines(
+            prevRight: 19,
+            prevLeft: 0,
+            blockRight: 20,
+            nextLeft: 0,
+            blockLeft: 0,
+            charW: 1,
+            prevLastChar: 'a',
+            nextFirstChar: '续',
+            prevLineText: 'no double space',
+            nextLineText: '续行内容',
+          ),
+          isTrue,
+        );
+      });
+    });
   });
 
   group('needsSpaceBetween', () {

@@ -355,25 +355,11 @@ class _SettingsPageState extends State<SettingsPage> {
             },
             child: Padding(
               padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Image.asset(
-                    'assets/icons/github.png',
-                    width: 14,
-                    height: 14,
-                    color: StudyPalette.inkSoft,
-                  ),
-                  const SizedBox(width: 4),
-                  const Text(
-                    'github.com/EasongChung/WiseMuse',
-                    style: TextStyle(
-                      fontSize: 12,
-                      color: StudyPalette.inkSoft,
-                      decoration: TextDecoration.underline,
-                    ),
-                  ),
-                ],
+              child: Image.asset(
+                'assets/icons/github.png',
+                width: 24,
+                height: 24,
+                color: StudyPalette.inkSoft,
               ),
             ),
           ),
@@ -385,7 +371,7 @@ class _SettingsPageState extends State<SettingsPage> {
   static Future<String> _getVersionString() async {
     try {
       final info = await PackageInfo.fromPlatform();
-      return 'v${info.version}+${info.buildNumber}';
+      return 'v${info.version}';
     } catch (_) {
       return 'v0.1.0';
     }

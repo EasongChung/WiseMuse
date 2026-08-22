@@ -48,7 +48,7 @@ final RegExp _lineStartOrdinal = RegExp(
 
 /// 判定「上一行行尾」与「下一行行首」是否属于同一句的自动折行。
 ///
-/// 四条判据全部满足才允许合并（任一不满足即断句）：
+/// 五条判据全部满足才允许合并（任一不满足即断句）：
 ///
 /// 1. **行末贴右边界**——`blockRight - prevRight <= endSlackChars * charW`。
 ///    自动折行是因为排不下才换行，行末必然接近版心右边界；段落最后一行
@@ -57,6 +57,9 @@ final RegExp _lineStartOrdinal = RegExp(
 /// 3. **下一行无缩进**——`nextLeft - blockLeft <= indentSlackChars * charW`。
 ///    首行缩进（中文常见 2 字符）说明这是新段落。
 /// 4. **行首无符号/序号**——见 [_lineStartBreakers] 与 [_lineStartOrdinal]。
+/// 5. **同行无连续 2 空格**——[prevLineText] 或 [nextLineText] 含连续 2 个
+///    及以上空格时不合并。多列排版/表格中列间以 2+ 空格分隔，是跨列边界信号。
+///    与 [sentence_splitter] 的 2+ 空格断句规则同源（G2.5.1「只改一侧」教训）。
 ///
 /// 度量参数（[prevRight] / [blockRight] / [nextLeft] / [blockLeft] / [charW]）
 /// 必须同一单位：PDF 几何侧统一用 PDF 点，OCR 侧用归一化值，文本侧统一用字符数。
@@ -75,6 +78,7 @@ bool canMergeLines({
   required double charW,
   required String prevLastChar,
   required String nextFirstChar,
+  String prevLineText = '',
   String nextLineText = '',
   double endSlackChars = 2.0,
   double indentSlackChars = 0.5,
@@ -103,6 +107,11 @@ bool canMergeLines({
   // 正常换行中上一行起于左列（prevLeft ≈ blockLeft），下一行同样起于左侧，
   // nextLeft ≈ prevLeft，不受此判据影响。
   if (nextLeft < prevLeft - 0.5 * w) return false;
+
+  // 6) 同行连续 2 空格 → 不合并（多列/表格布局特征）。
+  // 上一行或下一行含连续 2 个及以上空格，说明行内存在列间分隔，不应与
+  // 相邻行合并。与 sentence_splitter 的 2+ 空格断句规则同源。
+  if (prevLineText.contains('  ') || nextLineText.contains('  ')) return false;
 
   return true;
 }

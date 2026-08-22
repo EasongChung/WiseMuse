@@ -13,8 +13,8 @@ enum DictationMode {
   /// 中文听音选字（4 选 1）。
   charSelect('听音选字'),
 
-  /// 朗读列表（自动朗读，供儿童跟读记忆）。
-  spelling('朗读列表');
+  /// 听写（自动朗读词语，供儿童跟读记忆）。
+  spelling('听写');
 
   const DictationMode(this.label);
   final String label;

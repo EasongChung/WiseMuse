@@ -34,7 +34,7 @@ class _AnswerRecord {
 ///
 /// [v0.1.56] 儿童化改造：
 /// - 选字模式：答后显示对错文字 + 颜色反馈，2.5 秒自动进入下一题
-/// - 拼写模式改为「朗读列表」：全屏显示词语，自动朗读，3 秒自动切换
+/// - 拼写模式改为「听写」：全屏显示词语，自动朗读，3 秒自动切换
 /// - 拼字积木直接作为听写一级目录选项
 /// - 完成后展示答题记录供家长检查
 class DictationPage extends StatefulWidget {
@@ -252,22 +252,6 @@ class _DictationPageState extends State<DictationPage> {
       return;
     }
 
-    // 句子默写（拼字积木）模式
-    if (modeStr == 'sentence') {
-      if (mounted) {
-        Navigator.of(context).pushReplacement(
-          MaterialPageRoute<void>(
-            builder:
-                (_) => SentenceDictationPage(
-                  sentences: words.where((w) => w.length >= 4).toList(),
-                  bookId: null,
-                ),
-          ),
-        );
-      }
-      return;
-    }
-
     // 拼字积木（直接跳转，强制 wordJigsaw 模式）
     if (modeStr == 'wordJigsaw') {
       if (mounted) {
@@ -357,19 +341,6 @@ class _DictationPageState extends State<DictationPage> {
                     side: BorderSide(color: StudyPalette.linen),
                   ),
                   onTap: () => Navigator.of(context).pop('wordJigsaw'),
-                ),
-                ListTile(
-                  title: const Text(
-                    '句子默写',
-                    style: TextStyle(fontWeight: FontWeight.w600),
-                  ),
-                  subtitle: const Text('逐句拼字积木，适合较长句子'),
-                  leading: const Icon(Icons.article, color: StudyPalette.ember),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.all(Radius.circular(12)),
-                    side: BorderSide(color: StudyPalette.linen),
-                  ),
-                  onTap: () => Navigator.of(context).pop('sentence'),
                 ),
               ],
             ),
