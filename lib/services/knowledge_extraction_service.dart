@@ -1,7 +1,10 @@
 import '../core/models/book.dart';
+import '../core/models/knowledge_extraction_job.dart';
 import '../core/models/knowledge_point.dart';
 import '../core/models/sentence.dart';
+import '../core/storage/book_dao.dart';
 import '../core/storage/database.dart';
+import '../core/storage/knowledge_extraction_job_dao.dart';
 import '../core/storage/knowledge_point_dao.dart';
 import '../core/storage/sentence_dao.dart';
 import '../core/utils/json_util.dart';
@@ -40,6 +43,8 @@ class KnowledgeExtractionService {
       KnowledgeExtractionService();
 
   final AiService _ai;
+  final Map<String, Future<KnowledgeExtractionResult>> _activeRuns = {};
+  Future<void>? _resumeFuture;
 
   /// 全局任务状态回调列表。
   final List<void Function(KnowledgeTaskProgress)> _listeners = [];
@@ -176,97 +181,219 @@ class KnowledgeExtractionService {
     );
   }
 
-  /// 整本批量提取（支持后台运行与通知）。
+  /// 整本批量提取。默认恢复当前任务，restart=true 时创建新任务代次。
   Future<KnowledgeExtractionResult> extractBook(
     Book book, {
     void Function(int done, int total)? onProgress,
+    bool restart = false,
+  }) {
+    final active = _activeRuns[book.id];
+    if (active != null) return active;
+    final future = _runBook(book, onProgress: onProgress, restart: restart);
+    _activeRuns[book.id] = future;
+    return future.whenComplete(() => _activeRuns.remove(book.id));
+  }
+
+  Future<KnowledgeExtractionResult> _runBook(
+    Book book, {
+    void Function(int done, int total)? onProgress,
+    required bool restart,
   }) async {
     final db = await DatabaseProvider.database;
     final sentenceDao = SentenceDao(db);
     final allSentences = await sentenceDao.getByBook(book.id);
-
     if (allSentences.isEmpty) {
       return const KnowledgeExtractionResult(errors: ['书籍无可提取文本']);
     }
 
-    // [v0.1.48] 章节索引与智能按页回落
-    final indexedSentences = ChapterIndexer.assignChapters(allSentences);
-    final detectedChapters = indexedSentences.map((s) => s.chapter).toSet();
-    final hasValidChapters = detectedChapters.length >= 2;
-
-    // 按页分组
+    final indexed = ChapterIndexer.assignChapters(allSentences);
+    final chapters = indexed.map((s) => s.chapter).toSet();
+    final hasValidChapters = chapters.length >= 2;
     final pageGroups = <int, List<Sentence>>{};
-    for (final s in indexedSentences) {
-      pageGroups.putIfAbsent(s.page, () => []).add(s);
+    for (final sentence in indexed) {
+      pageGroups.putIfAbsent(sentence.page, () => []).add(sentence);
+    }
+    final pageChapters = <int, int>{
+      for (final entry in pageGroups.entries)
+        entry.key: hasValidChapters ? entry.value.first.chapter : 0,
+    };
+    final jobDao = KnowledgeExtractionJobDao(db);
+    var job = await jobDao.getByBook(book.id);
+    if (restart || job == null || job.status == KnowledgeJobStatus.completed) {
+      job = await jobDao.createJob(bookId: book.id, pageChapters: pageChapters);
+    }
+    final token = await jobDao.claim(job.id);
+    if (token == null) {
+      return KnowledgeExtractionResult(errors: ['《${book.title}》已有提取任务正在运行']);
     }
 
-    final allPoints = <KnowledgePoint>[];
+    final pointsDao = KnowledgePointDao(db);
+    final pages = await jobDao.getPages(job.id);
     final errors = <String>[];
+    final allPoints = <KnowledgePoint>[];
     String? summary;
-    var done = 0;
-    final total = pageGroups.length;
-
-    _notify(
-      KnowledgeTaskProgress(
-        bookId: book.id,
-        bookTitle: book.title,
-        done: 0,
-        total: total,
-        pointCount: 0,
-        isRunning: true,
-      ),
+    var done =
+        pages.where((p) => p.status == KnowledgePageStatus.completed).length;
+    var pointCount = await pointsDao.countByBook(book.id);
+    _publishProgress(
+      book,
+      done: done,
+      total: pages.length,
+      pointCount: pointCount,
+      running: true,
+      onProgress: onProgress,
     );
 
-    for (final entry in pageGroups.entries) {
-      final page = entry.key;
-      final sentences = entry.value;
-      // 若章节结构不清晰，回落为 0（UI 侧显示按页）
-      final chapter = hasValidChapters ? sentences.first.chapter : 0;
-
+    for (final checkpoint in pages) {
+      if (checkpoint.status == KnowledgePageStatus.completed) continue;
+      final pageSentences = pageGroups[checkpoint.page] ?? const <Sentence>[];
+      if (!await jobDao.markPageRunning(job.id, token, checkpoint)) continue;
+      await jobDao.renew(job.id, token);
       final result = await extractForScope(
         bookId: book.id,
-        page: page,
-        chapter: chapter,
-        sentences: sentences,
-        persist: true,
+        page: checkpoint.page,
+        chapter: checkpoint.chapter,
+        sentences: pageSentences,
+        persist: false,
       );
-
+      if (result.errors.isNotEmpty) {
+        final message = result.errors.join('；');
+        errors.add(message);
+        await jobDao.markPageFailed(job.id, token, checkpoint.page, message);
+        _publishProgress(
+          book,
+          done: done,
+          total: pages.length,
+          pointCount: pointCount,
+          running: false,
+          error: message,
+          onProgress: onProgress,
+        );
+        return KnowledgeExtractionResult(
+          summary: summary,
+          points: allPoints,
+          errors: errors,
+        );
+      }
+      await db.transaction((txn) async {
+        for (final point in result.points) {
+          await pointsDao.upsertByTextInExecutor(
+            txn,
+            book.id,
+            point.type,
+            point.text,
+            page: point.page,
+            chapter: point.chapter,
+            definition: point.definition,
+            extra: point.extra,
+          );
+        }
+        pointCount = await pointsDao.countByBookInExecutor(txn, book.id);
+        final completed = done + 1;
+        final ok = await jobDao.completePage(
+          txn,
+          jobId: job!.id,
+          token: token,
+          page: checkpoint.page,
+          pointCount: pointCount,
+          isLastPage: completed == pages.length,
+        );
+        if (!ok) throw StateError('知识提取任务已被其他运行实例接管');
+      });
+      done++;
       allPoints.addAll(result.points);
-      errors.addAll(result.errors);
       if (result.summary != null) {
         summary =
             summary == null ? result.summary : '$summary\n\n${result.summary}';
       }
-
-      done++;
-      onProgress?.call(done, total);
-      _notify(
-        KnowledgeTaskProgress(
-          bookId: book.id,
-          bookTitle: book.title,
-          done: done,
-          total: total,
-          pointCount: allPoints.length,
-          isRunning: done < total,
-        ),
+      onProgress?.call(done, pages.length);
+      _publishProgress(
+        book,
+        done: done,
+        total: pages.length,
+        pointCount: pointCount,
+        running: done < pages.length,
+        onProgress: onProgress,
       );
     }
 
-    _notify(
-      KnowledgeTaskProgress(
-        bookId: book.id,
-        bookTitle: book.title,
-        done: total,
-        total: total,
-        pointCount: allPoints.length,
-        isRunning: false,
-      ),
+    _publishProgress(
+      book,
+      done: done,
+      total: pages.length,
+      pointCount: pointCount,
+      running: false,
+      onProgress: onProgress,
     );
-
     return KnowledgeExtractionResult(
       summary: summary,
       points: allPoints,
       errors: errors,
+    );
+  }
+
+  Future<void> clearCheckpoint(String bookId) async {
+    final db = await DatabaseProvider.database;
+    await KnowledgeExtractionJobDao(db).clearBook(bookId);
+  }
+
+  Future<void> resumePendingJobs() async {
+    final inFlight = _resumeFuture;
+    if (inFlight != null) return inFlight;
+    final future = _resumePendingJobs();
+    _resumeFuture = future;
+    try {
+      await future;
+    } finally {
+      if (identical(_resumeFuture, future)) _resumeFuture = null;
+    }
+  }
+
+  Future<void> _resumePendingJobs() async {
+    final db = await DatabaseProvider.database;
+    final jobs = await KnowledgeExtractionJobDao(db).getRecoverable();
+    for (final job in jobs) {
+      final rows = await BookDao(db).getById(job.bookId);
+      if (rows != null) await extractBook(rows);
+    }
+    final unfinished = await KnowledgeExtractionJobDao(db).getUnfinished();
+    for (final job in unfinished) {
+      if (jobs.any((candidate) => candidate.id == job.id)) continue;
+      final book = await BookDao(db).getById(job.bookId);
+      if (book == null) continue;
+      _notify(
+        KnowledgeTaskProgress(
+          bookId: job.bookId,
+          bookTitle: book.title,
+          done: job.completedPages,
+          total: job.totalPages,
+          pointCount: job.pointCount,
+          isRunning: false,
+          error: job.lastError,
+        ),
+      );
+    }
+  }
+
+  void _publishProgress(
+    Book book, {
+    required int done,
+    required int total,
+    required int pointCount,
+    required bool running,
+    String? error,
+    void Function(int done, int total)? onProgress,
+  }) {
+    _notify(
+      KnowledgeTaskProgress(
+        bookId: book.id,
+        bookTitle: book.title,
+        done: done,
+        total: total,
+        pointCount: pointCount,
+        isRunning: running,
+        error: error,
+      ),
     );
   }
 

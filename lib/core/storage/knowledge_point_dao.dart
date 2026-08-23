@@ -49,16 +49,51 @@ class KnowledgePointDao {
     String? definition,
     String? extra,
     String source = 'ai',
+  }) => upsertByTextInExecutor(
+    db,
+    bookId,
+    type,
+    text,
+    page: page,
+    chapter: chapter,
+    definition: definition,
+    extra: extra,
+    source: source,
+  );
+
+  Future<String> upsertByTextInExecutor(
+    DatabaseExecutor executor,
+    String bookId,
+    KnowledgeType type,
+    String text, {
+    int? page,
+    int? chapter,
+    String? definition,
+    String? extra,
+    String source = 'ai',
   }) async {
-    final existing = await findByBookTypeText(bookId, type, text);
-    if (existing != null) {
-      existing
-        ..page = page
-        ..chapter = chapter
-        ..definition = definition ?? existing.definition
-        ..extra = extra ?? existing.extra
-        ..updatedAt = DateTime.now().microsecondsSinceEpoch;
-      await update(existing);
+    final rows = await executor.query(
+      _table,
+      where: 'book_id = ? AND type = ? AND text = ?',
+      whereArgs: [bookId, type.name, text],
+      limit: 1,
+    );
+    if (rows.isNotEmpty) {
+      final existing =
+          KnowledgePoint.fromMap(rows.first)
+            ..page = page
+            ..chapter = chapter
+            ..definition = definition ?? (rows.first['definition'] as String?)
+            ..extra = extra ?? (rows.first['extra'] as String?);
+      final data =
+          existing.toMap()
+            ..['updated_at'] = DateTime.now().microsecondsSinceEpoch;
+      await executor.update(
+        _table,
+        data,
+        where: 'id = ?',
+        whereArgs: [existing.id],
+      );
       return existing.id;
     }
     final kp = KnowledgePoint.create(
@@ -71,7 +106,11 @@ class KnowledgePointDao {
       extra: extra,
       source: source,
     );
-    await insert(kp);
+    await executor.insert(
+      _table,
+      kp.toMap(),
+      conflictAlgorithm: ConflictAlgorithm.replace,
+    );
     return kp.id;
   }
 
@@ -194,11 +233,17 @@ class KnowledgePointDao {
       db.delete(_table, where: 'book_id = ?', whereArgs: [bookId]);
 
   /// 某书知识点总数。
-  Future<int> countByBook(String bookId) async =>
+  Future<int> countByBook(String bookId) => countByBookInExecutor(db, bookId);
+
+  Future<int> countByBookInExecutor(
+    DatabaseExecutor executor,
+    String bookId,
+  ) async =>
       Sqflite.firstIntValue(
-        await db.rawQuery('SELECT COUNT(*) FROM $_table WHERE book_id = ?', [
-          bookId,
-        ]),
+        await executor.rawQuery(
+          'SELECT COUNT(*) FROM $_table WHERE book_id = ?',
+          [bookId],
+        ),
       ) ??
       0;
 }

@@ -8,6 +8,7 @@ import '../../core/storage/book_dao.dart';
 import '../../core/storage/database.dart';
 import '../../core/theme/app_theme.dart';
 import '../../services/book_import_service.dart';
+import '../../services/knowledge_extraction_service.dart';
 import '../../services/picker_service.dart';
 import '../../services/rag/rag_retrieval_service.dart';
 import '../../widgets/import_sheet.dart';
@@ -39,6 +40,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     _refresh();
+    KnowledgeExtractionService.instance.resumePendingJobs();
     // 轮询导入状态（加快刷新频率为 800ms，确保第一时间捕获新建的书籍和页数更新）
     _progressTimer = Timer.periodic(const Duration(milliseconds: 800), (_) {
       if (_importing || _books.any((b) => b.importStatus == 1)) {
@@ -59,6 +61,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
       _resumeInterruptedImports();
+      KnowledgeExtractionService.instance.resumePendingJobs();
     }
   }
 

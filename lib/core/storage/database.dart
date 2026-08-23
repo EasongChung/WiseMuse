@@ -12,7 +12,7 @@ class DatabaseProvider {
   DatabaseProvider._();
 
   static const String dbName = 'wisemuse.db';
-  static const int dbVersion = 10;
+  static const int dbVersion = 11;
 
   static Database? _db;
 
@@ -60,6 +60,50 @@ class DatabaseProvider {
   static const String _createChatMessagesSql = '''
       CREATE TABLE IF NOT EXISTS chat_messages (\n        id TEXT PRIMARY KEY,\n        session_id TEXT,\n        image_paths TEXT,\n        profile_id TEXT NOT NULL DEFAULT 'default',\n        scope TEXT NOT NULL DEFAULT 'normal',\n        role TEXT NOT NULL,\n        content TEXT NOT NULL,\n        book_id TEXT,\n        book_title TEXT,\n        sources TEXT,\n        created_at INTEGER NOT NULL\n      )\n    ''';
 
+  static const String _createKnowledgeJobsSql = '''
+      CREATE TABLE IF NOT EXISTS knowledge_extraction_jobs (
+        id TEXT PRIMARY KEY,
+        book_id TEXT NOT NULL,
+        profile_id TEXT NOT NULL DEFAULT 'default',
+        status TEXT NOT NULL DEFAULT 'pending',
+        total_pages INTEGER NOT NULL DEFAULT 0,
+        completed_pages INTEGER NOT NULL DEFAULT 0,
+        current_page INTEGER,
+        point_count INTEGER NOT NULL DEFAULT 0,
+        last_error TEXT,
+        run_token TEXT,
+        lease_until INTEGER,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL,
+        UNIQUE(profile_id, book_id)
+      )
+    ''';
+
+  static const String _createKnowledgeJobPagesSql = '''
+      CREATE TABLE IF NOT EXISTS knowledge_extraction_job_pages (
+        job_id TEXT NOT NULL,
+        book_id TEXT NOT NULL,
+        profile_id TEXT NOT NULL DEFAULT 'default',
+        page INTEGER NOT NULL,
+        chapter INTEGER NOT NULL DEFAULT 0,
+        status TEXT NOT NULL DEFAULT 'pending',
+        attempt_count INTEGER NOT NULL DEFAULT 0,
+        last_error TEXT,
+        completed_at INTEGER,
+        updated_at INTEGER NOT NULL,
+        PRIMARY KEY(job_id, page)
+      )
+    ''';
+
+  static const String _createKnowledgeJobIndexesSql = '''
+      CREATE INDEX IF NOT EXISTS idx_knowledge_jobs_status
+        ON knowledge_extraction_jobs(profile_id, status, updated_at);
+      CREATE INDEX IF NOT EXISTS idx_knowledge_job_pages_status
+        ON knowledge_extraction_job_pages(job_id, status, page);
+      CREATE INDEX IF NOT EXISTS idx_knowledge_job_pages_book
+        ON knowledge_extraction_job_pages(profile_id, book_id, status);
+    ''';
+
   /// 建表（版本 1~6）。
   static Future<void> _onCreate(Database db, int version) async {
     // 书籍
@@ -105,6 +149,9 @@ class DatabaseProvider {
     await db.execute(
       'CREATE INDEX idx_sessions_scope ON chat_sessions(profile_id, scope, book_id)',
     );
+    await db.execute(_createKnowledgeJobsSql);
+    await db.execute(_createKnowledgeJobPagesSql);
+    await db.execute(_createKnowledgeJobIndexesSql);
     // v8: 幼小衔接知识库种子数据
     await SeedData.populate(db);
   }
@@ -225,6 +272,11 @@ class DatabaseProvider {
               ELSE 'legacy_book_' || profile_id || '_' || book_id END
         WHERE session_id IS NULL OR session_id = ''
       ''');
+    }
+    if (oldVersion < 11) {
+      await db.execute(_createKnowledgeJobsSql);
+      await db.execute(_createKnowledgeJobPagesSql);
+      await db.execute(_createKnowledgeJobIndexesSql);
     }
     if (oldVersion < 9) {
       // v8→v9：补充分句规则版本，并修复已执行但缺少 books 行的种子数据。

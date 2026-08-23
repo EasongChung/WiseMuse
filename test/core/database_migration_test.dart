@@ -187,6 +187,57 @@ void main() {
     }
   });
 
+  test('v10 库升级 v11：知识提取任务表存在且不改导入状态', () async {
+    final dir = await Directory.systemTemp.createTemp('wisemuse_mig_v1011_');
+    final dbPath = p.join(dir.path, DatabaseProvider.dbName);
+    try {
+      final v10 = await databaseFactory.openDatabase(
+        dbPath,
+        options: OpenDatabaseOptions(
+          version: 10,
+          onCreate: (db, version) async {
+            final fresh = await DatabaseProvider.openTest();
+            final tables = await fresh.rawQuery(
+              "SELECT sql FROM sqlite_master WHERE type='table' AND name IN ('books','knowledge_points','sentences') ORDER BY name",
+            );
+            for (final row in tables) {
+              final sql = row['sql'] as String?;
+              if (sql != null) await db.execute(sql);
+            }
+            await fresh.close();
+          },
+        ),
+      );
+      await v10.insert('books', {
+        'id': 'b_import',
+        'title': '导入中',
+        'source': 'pdf',
+        'import_status': 1,
+        'import_progress': '识别中 2/5 页',
+        'created_at': 1,
+        'updated_at': 2,
+      });
+      await v10.close();
+
+      final v11 = await DatabaseProvider.openFile(dbPath);
+      expect(await _tableExists(v11, 'knowledge_extraction_jobs'), true);
+      expect(await _tableExists(v11, 'knowledge_extraction_job_pages'), true);
+      final row =
+          (await v11.query(
+            'books',
+            where: 'id = ?',
+            whereArgs: ['b_import'],
+          )).single;
+      expect(row['import_status'], 1);
+      expect(row['import_progress'], '识别中 2/5 页');
+      await v11.close();
+    } finally {
+      try {
+        await dir.delete(recursive: true);
+      } catch (_) {}
+    }
+  });
+
   test('v2 库升级 v3：knowledge_points / quiz_attempts 存在、旧数据完好', () async {
     final dir = await Directory.systemTemp.createTemp('wisemuse_mig_v23_');
     final dbPath = p.join(dir.path, DatabaseProvider.dbName);

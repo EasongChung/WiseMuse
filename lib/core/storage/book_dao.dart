@@ -2,6 +2,7 @@ import 'package:sqflite/sqflite.dart';
 
 import '../models/book.dart';
 import 'sentence_dao.dart';
+import 'knowledge_extraction_job_dao.dart';
 
 /// [v0.1.0] 书籍（Book）数据访问。
 ///
@@ -105,6 +106,7 @@ class BookDao {
       whereArgs: [id],
     );
     await SentenceDao(db).deleteByBook(id);
+    await KnowledgeExtractionJobDao(db, profileId: profileId).clearBook(id);
     await db.delete('knowledge_points', where: 'book_id = ?', whereArgs: [id]);
     await db.delete('quiz_attempts', where: 'book_id = ?', whereArgs: [id]);
     return db.delete(_table, where: 'id = ?', whereArgs: [id]);

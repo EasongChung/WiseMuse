@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../../core/debug/app_log.dart';
@@ -31,7 +33,8 @@ class KnowledgePage extends StatefulWidget {
   State<KnowledgePage> createState() => _KnowledgePageState();
 }
 
-class _KnowledgePageState extends State<KnowledgePage> {
+class _KnowledgePageState extends State<KnowledgePage>
+    with WidgetsBindingObserver {
   static const _tag = 'knowledge';
 
   KnowledgeType? _filterType;
@@ -45,14 +48,31 @@ class _KnowledgePageState extends State<KnowledgePage> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     KnowledgeExtractionService.instance.addListener(_onProgressUpdate);
     _load();
+    _resumeExtraction();
   }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     KnowledgeExtractionService.instance.removeListener(_onProgressUpdate);
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) _resumeExtraction();
+  }
+
+  Future<void> _resumeExtraction() async {
+    try {
+      await KnowledgeExtractionService.instance.resumePendingJobs();
+      if (mounted) _load();
+    } catch (e, s) {
+      AppLog.e(_tag, '恢复知识提取失败: $e\n$s');
+    }
   }
 
   void _onProgressUpdate(KnowledgeTaskProgress p) {
@@ -275,8 +295,7 @@ class _KnowledgePageState extends State<KnowledgePage> {
     final booksWithPoints = <Book>[];
     for (final b in _books) {
       if (_groupedPoints.containsKey(b.id) ||
-          (_backgroundProgress?.bookId == b.id &&
-              _backgroundProgress!.isRunning)) {
+          (_backgroundProgress?.bookId == b.id)) {
         booksWithPoints.add(b);
       }
     }
@@ -395,15 +414,25 @@ class _KnowledgePageState extends State<KnowledgePage> {
                                   : 'book_id = ?',
                           whereArgs: [book.id],
                         );
+                        await KnowledgeExtractionService.instance
+                            .clearCheckpoint(book.id);
                         _load();
                       }
                     } else if (action == 're_extract') {
-                      KnowledgeExtractionService.instance.extractBook(book);
-                      setState(() {});
+                      _startExtraction(book, restart: true);
+                    } else if (action == 'retry') {
+                      _startExtraction(book);
                     }
                   },
                   itemBuilder:
                       (context) => [
+                        if (isExtracting ||
+                            (_backgroundProgress?.bookId == book.id &&
+                                !_backgroundProgress!.isRunning))
+                          const PopupMenuItem(
+                            value: 'retry',
+                            child: Text('继续/重试当前页'),
+                          ),
                         const PopupMenuItem(
                           value: 're_extract',
                           child: Text('重新提取知识库'),
@@ -589,6 +618,19 @@ class _KnowledgePageState extends State<KnowledgePage> {
     );
   }
 
+  Future<void> _startExtraction(Book book, {bool restart = false}) async {
+    try {
+      await KnowledgeExtractionService.instance.extractBook(
+        book,
+        restart: restart,
+      );
+      if (mounted) await _load();
+    } catch (e, s) {
+      AppLog.e(_tag, '知识提取失败: $e\n$s');
+      if (mounted) TopToast.show(context, '知识提取失败，请稍后重试');
+    }
+  }
+
   Future<void> _showDetail(KnowledgePoint kp) async {
     final result = await KnowledgeDetailSheet.show(context, kp);
     if (result == true) _load();
@@ -664,7 +706,7 @@ class _KnowledgePageState extends State<KnowledgePage> {
     );
     if (book == null || !mounted) return;
 
-    KnowledgeExtractionService.instance.extractBook(book);
+    unawaited(_startExtraction(book));
     TopToast.show(context, '已启动《${book.title}》后台提取知识点');
   }
 
