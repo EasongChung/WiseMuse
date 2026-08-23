@@ -56,5 +56,17 @@ void main() {
       final result = await LlmService.instance.chat('测试问题');
       expect(result, '正式回答');
     });
+
+    test('短原文清洗为空时安全记录日志，不抛 RangeError', () async {
+      messenger.setMockMethodCallHandler(llmChannel, (call) async {
+        if (call.method == 'send') {
+          return '<s>';
+        }
+        return null;
+      });
+
+      final result = await LlmService.instance.chat('测试问题');
+      expect(result, isEmpty);
+    });
   });
 }

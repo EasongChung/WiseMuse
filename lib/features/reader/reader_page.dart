@@ -16,6 +16,7 @@ import '../../core/storage/database.dart';
 import '../../core/storage/sentence_dao.dart';
 import '../../core/storage/word_entry_dao.dart';
 import '../../core/theme/app_theme.dart';
+import '../../services/book_import_service.dart';
 import '../../services/docx_html_converter.dart';
 import '../../services/native_tts_service.dart';
 import '../../services/ocr_geometry_service.dart';
@@ -174,6 +175,7 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
   }
 
   Future<void> _loadSentences() async {
+    await BookImportService().rebuildSentencesIfNeeded(widget.book);
     final db = await DatabaseProvider.database;
     final list = await SentenceDao(db).getByBook(widget.book.id);
     if (mounted) {

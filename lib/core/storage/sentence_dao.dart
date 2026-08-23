@@ -34,6 +34,20 @@ class SentenceDao {
     return db.delete(_table, where: 'book_id = ?', whereArgs: [bookId]);
   }
 
+  /// 原子替换某书籍的全部句子，供分句规则升级使用。
+  Future<void> replaceByBook(String bookId, List<Sentence> rows) async {
+    await db.transaction((txn) async {
+      await txn.delete(_table, where: 'book_id = ?', whereArgs: [bookId]);
+      for (final s in rows) {
+        await txn.insert(
+          _table,
+          s.toMap(),
+          conflictAlgorithm: ConflictAlgorithm.replace,
+        );
+      }
+    });
+  }
+
   /// 按书籍取全部句子（页序、句序）。
   Future<List<Sentence>> getByBook(String bookId) async {
     final rows = await db.query(

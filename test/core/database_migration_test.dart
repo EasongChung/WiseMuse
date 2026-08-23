@@ -4,6 +4,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:path/path.dart' as p;
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 import 'package:wisemuse/core/storage/database.dart';
+import 'package:wisemuse/core/storage/seed_data.dart';
 
 void main() {
   setUpAll(() {
@@ -84,6 +85,15 @@ void main() {
       expect(rows.length, 1);
       expect(rows.first['title'], '老书籍');
       expect(rows.first['page_count'], 3);
+      expect(
+        await v2.query(
+          'knowledge_points',
+          where: 'book_id = ?',
+          whereArgs: ['builtin_kindergarten_bridge'],
+        ),
+        hasLength(113),
+        reason: 'v1-v7 跨级升 v9 也必须执行首次种子迁移',
+      );
 
       final idx = await v2.rawQuery(
         "SELECT name FROM sqlite_master WHERE type='index' AND name='idx_sentences_book'",
@@ -92,6 +102,85 @@ void main() {
       await v2.close();
     } finally {
       // 清理临时目录
+      try {
+        await dir.delete(recursive: true);
+      } catch (_) {}
+    }
+  });
+
+  test('v8 库升级 v9：补写内置书籍并保留 113 条孤儿知识点', () async {
+    final dir = await Directory.systemTemp.createTemp('wisemuse_mig_v89_');
+    final dbPath = p.join(dir.path, DatabaseProvider.dbName);
+    try {
+      final v8 = await databaseFactory.openDatabase(
+        dbPath,
+        options: OpenDatabaseOptions(
+          version: 8,
+          onCreate: (db, version) async {
+            final fresh = await DatabaseProvider.openTest();
+            final schema = await fresh.rawQuery(
+              "SELECT sql FROM sqlite_master WHERE type='table' AND name IN ('books','knowledge_points') ORDER BY name",
+            );
+            for (final row in schema) {
+              var sql = row['sql'] as String?;
+              if (sql != null && sql.contains('CREATE TABLE books')) {
+                sql = sql.replaceFirst(
+                  RegExp(
+                    r',\s*sentence_split_version INTEGER NOT NULL DEFAULT 0',
+                  ),
+                  '',
+                );
+              }
+              if (sql != null) await db.execute(sql);
+            }
+            await fresh.close();
+          },
+        ),
+      );
+
+      final seeded = await DatabaseProvider.openTest();
+      final points = await seeded.query('knowledge_points');
+      await seeded.close();
+      final batch = v8.batch();
+      for (final point in points) {
+        batch.insert('knowledge_points', point);
+      }
+      await batch.commit(noResult: true);
+      expect(await v8.query('books'), isEmpty);
+      expect(await v8.query('knowledge_points'), hasLength(113));
+      await v8.close();
+
+      final v9 = await DatabaseProvider.openFile(dbPath);
+      final books = await v9.query(
+        'books',
+        where: 'id = ?',
+        whereArgs: ['builtin_kindergarten_bridge'],
+      );
+      expect(books, hasLength(1));
+      expect(books.single['title'], '幼小衔接基础知识');
+      expect(await v9.query('knowledge_points'), hasLength(113));
+      // v9 repair is non-destructive: a user-deleted/customized point is not restored.
+      await v9.delete(
+        'knowledge_points',
+        where: 'book_id = ? AND text = ?',
+        whereArgs: ['builtin_kindergarten_bridge', 'b'],
+      );
+      await SeedData.repairBuiltinBook(v9);
+      expect(
+        await v9.query(
+          'knowledge_points',
+          where: 'book_id = ? AND text = ?',
+          whereArgs: ['builtin_kindergarten_bridge', 'b'],
+        ),
+        isEmpty,
+      );
+      final columns = await v9.rawQuery('PRAGMA table_info(books)');
+      expect(
+        columns.map((row) => row['name']),
+        contains('sentence_split_version'),
+      );
+      await v9.close();
+    } finally {
       try {
         await dir.delete(recursive: true);
       } catch (_) {}

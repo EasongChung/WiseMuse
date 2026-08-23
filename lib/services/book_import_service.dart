@@ -12,6 +12,7 @@ import 'import_service.dart';
 import 'ocr_geometry_service.dart';
 import 'ocr_service.dart';
 import 'pdf_service.dart';
+import 'rag/vector_index.dart';
 import 'sentence_splitter.dart';
 
 /// [v0.2.0] [v0.1.48] 书籍导入编排：支持流式后台进度更新与拼音智能过滤。
@@ -68,12 +69,20 @@ class BookImportService {
       final sentences = <Sentence>[];
       if (result.pageTexts != null) {
         for (var i = 0; i < result.pageTexts!.length; i++) {
-          final cleaned = PinyinFilterUtil.clean(result.pageTexts![i]);
-          _appendSentences(sentences, cleaned, page: i, bookId: initialBook.id);
+          _appendSentences(
+            sentences,
+            result.pageTexts![i],
+            page: i,
+            bookId: initialBook.id,
+          );
         }
       } else {
-        final cleaned = PinyinFilterUtil.clean(result.content);
-        _appendSentences(sentences, cleaned, page: 0, bookId: initialBook.id);
+        _appendSentences(
+          sentences,
+          result.content,
+          page: 0,
+          bookId: initialBook.id,
+        );
       }
 
       final pageCount =
@@ -92,6 +101,7 @@ class BookImportService {
       initialBook.pageCount = pageCount;
       initialBook.importStatus = 0;
       initialBook.importProgress = null;
+      initialBook.sentenceSplitVersion = currentSentenceSplitVersion;
       initialBook.title = result.title;
       await bookDao.update(initialBook);
 
@@ -125,6 +135,8 @@ class BookImportService {
         initialBook.pageCount = pageCount;
         initialBook.importStatus = 0;
         initialBook.importProgress = null;
+        // 扫描 PDF 的句子来自当前 OCR 规则，不需要首开时再次兼容检查。
+        initialBook.sentenceSplitVersion = currentSentenceSplitVersion;
         await bookDao.update(initialBook);
         return initialBook;
       } catch (e, s) {
@@ -202,8 +214,12 @@ class BookImportService {
         }
       } else {
         AppLog.w(_tag, 'OCR 未返回图片尺寸，退化为纯文本切句');
-        final cleaned = PinyinFilterUtil.clean(result.text);
-        _appendSentences(sentences, cleaned, page: 0, bookId: initialBook.id);
+        _appendSentences(
+          sentences,
+          result.text,
+          page: 0,
+          bookId: initialBook.id,
+        );
       }
 
       await SentenceDao(db).insertAll(sentences);
@@ -217,6 +233,7 @@ class BookImportService {
       initialBook.pageCount = 1;
       initialBook.importStatus = 0;
       initialBook.importProgress = null;
+      initialBook.sentenceSplitVersion = currentSentenceSplitVersion;
       await bookDao.update(initialBook);
       return initialBook;
     } catch (e, s) {
@@ -227,6 +244,81 @@ class BookImportService {
         progress: '识别失败',
       );
       rethrow;
+    }
+  }
+
+  /// 按当前规则重建已有书籍的纯文本句子。
+  ///
+  /// 仅处理 TXT、DOCX 和带文本层 PDF；图片/扫描 PDF 不自动重跑 OCR。
+  /// 解析完成后才原子替换旧句子，失败不会破坏现有数据。
+  Future<bool> rebuildSentencesIfNeeded(Book book) async {
+    if (book.sentenceSplitVersion >= currentSentenceSplitVersion) return false;
+    final path = book.originalFilePath;
+    if (path == null || path.isEmpty || !await File(path).exists()) {
+      final db = await DatabaseProvider.database;
+      await BookDao(
+        db,
+      ).updateSentenceSplitVersion(book.id, currentSentenceSplitVersion);
+      book.sentenceSplitVersion = currentSentenceSplitVersion;
+      return false;
+    }
+    if (book.source == BookSource.camera || book.source == BookSource.gallery) {
+      final db = await DatabaseProvider.database;
+      await BookDao(
+        db,
+      ).updateSentenceSplitVersion(book.id, currentSentenceSplitVersion);
+      book.sentenceSplitVersion = currentSentenceSplitVersion;
+      return false;
+    }
+
+    try {
+      final result = await _import.importFile(
+        path,
+        pdfExtractor: _extractPdfText,
+      );
+      final rebuilt = <Sentence>[];
+      if (result.pageTexts != null) {
+        for (var i = 0; i < result.pageTexts!.length; i++) {
+          _appendSentences(
+            rebuilt,
+            result.pageTexts![i],
+            page: i,
+            bookId: book.id,
+          );
+        }
+      } else {
+        _appendSentences(rebuilt, result.content, page: 0, bookId: book.id);
+      }
+      final db = await DatabaseProvider.database;
+      if (rebuilt.isEmpty) {
+        await BookDao(
+          db,
+        ).updateSentenceSplitVersion(book.id, currentSentenceSplitVersion);
+        book.sentenceSplitVersion = currentSentenceSplitVersion;
+        return false;
+      }
+
+      await SentenceDao(db).replaceByBook(book.id, rebuilt);
+      // 先失效旧索引，再标记规则版本。索引删除失败时下次打开仍会重试，
+      // 不会留下引用旧 sentence id 的永久陈旧索引。
+      await VectorIndex.instance.deleteIndex(book.id);
+      await BookDao(
+        db,
+      ).updateSentenceSplitVersion(book.id, currentSentenceSplitVersion);
+      book.sentenceSplitVersion = currentSentenceSplitVersion;
+      AppLog.d(_tag, '按新规则重建句子完成: book=${book.id} count=${rebuilt.length}');
+      return true;
+    } on PdfHasNoTextLayerException {
+      final db = await DatabaseProvider.database;
+      await BookDao(
+        db,
+      ).updateSentenceSplitVersion(book.id, currentSentenceSplitVersion);
+      book.sentenceSplitVersion = currentSentenceSplitVersion;
+      AppLog.d(_tag, '扫描 PDF 保留原 OCR 句子: book=${book.id}');
+      return false;
+    } catch (e, s) {
+      AppLog.e(_tag, '重建句子失败，保留旧数据: $e\n$s');
+      return false;
     }
   }
 
@@ -262,6 +354,10 @@ class BookImportService {
         status: 0,
         progress: null,
         pageCount: pageCount,
+      );
+      await bookDao.updateSentenceSplitVersion(
+        bookId,
+        currentSentenceSplitVersion,
       );
       AppLog.d(_tag, '恢复导入完成: bookId=$bookId');
     } catch (e, s) {
@@ -300,8 +396,7 @@ class BookImportService {
       try {
         final result = await _ocr.recognizeFile(tmp);
         if (result != null && result.text.trim().isNotEmpty) {
-          final cleaned = PinyinFilterUtil.clean(result.text);
-          _appendSentences(sentences, cleaned, page: i, bookId: bookId);
+          _appendSentences(sentences, result.text, page: i, bookId: bookId);
         }
       } finally {
         try {

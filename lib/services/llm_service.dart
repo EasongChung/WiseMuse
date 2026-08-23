@@ -72,10 +72,8 @@ class LlmService {
           'raw=$rawLen clean=$outLen',
     );
     if (rawLen > 0 && outLen == 0) {
-      AppLog.w(
-        'llm',
-        'chat 清洗后为空！raw=$rawLen raw_head="${text?.substring(0, 80)}"',
-      );
+      final rawHead = text!.substring(0, rawLen < 80 ? rawLen : 80);
+      AppLog.w('llm', 'chat 清洗后为空！raw=$rawLen raw_head="$rawHead"');
     }
     return result;
   }

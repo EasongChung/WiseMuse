@@ -5,6 +5,7 @@ import android.util.Log
 import com.arm.aichat.AiChat
 import com.arm.aichat.InferenceEngine
 import com.arm.aichat.isModelLoaded
+import dalvik.system.BaseDexClassLoader
 import io.flutter.embedding.engine.plugins.FlutterPlugin
 import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
@@ -98,15 +99,16 @@ class LlamaBridge : FlutterPlugin, MethodChannel.MethodCallHandler {
     }
 
     /**
-     * 引擎是否在当前设备可用。判定放 Kotlin 侧（与 System.loadLibrary / System.load 同址，
+     * 引擎是否在当前设备可用。判定放 Kotlin 侧（与实际 native 加载同址，
      * 避免 Dart 侧版本判断漂移）。
      *
-     * 判定条件：
-     * 1. Android 系统版本 >= 30 (Android 11+)
-     * 2. 检查应用私有目录是否已下载引擎 (models/engine/libai-chat.so) 或内置 nativeLibraryDir 中是否存在 libai-chat.so
+     * 已加载模型是最高可信信号：bundled native 库可能由 Android 从 APK 中直接
+     * 加载，并不一定以普通文件形式出现在 nativeLibraryDir。未加载时仍检查动态
+     * 引擎目录与内置库实体，避免 Standard APK 误报引擎已就绪。
      */
     private fun isAvailable(): Boolean {
         if (android.os.Build.VERSION.SDK_INT < 30) return false
+        if (isLoaded()) return true
         val customDir = getCustomEngineDir()
         if (customDir != null && java.io.File(customDir, "libai-chat.so").exists()) {
             return true
@@ -115,12 +117,17 @@ class LlamaBridge : FlutterPlugin, MethodChannel.MethodCallHandler {
         if (libDir != null && java.io.File(libDir, "libai-chat.so").exists()) {
             return true
         }
-        return false
+        val loader = appContext?.classLoader as? BaseDexClassLoader
+        return loader?.findLibrary("ai-chat") != null
     }
 
     private fun initModel(modelPath: String?, result: MethodChannel.Result) {
         if (modelPath.isNullOrEmpty()) {
             result.error("bad_arg", "modelPath 不能为空", null)
+            return
+        }
+        if (!isAvailable()) {
+            result.error("engine_unavailable", "本地推理引擎未装配", null)
             return
         }
         scope.launch {
@@ -184,6 +191,10 @@ class LlamaBridge : FlutterPlugin, MethodChannel.MethodCallHandler {
         predictLength: Int,
         result: MethodChannel.Result,
     ) {
+        if (!isAvailable()) {
+            result.error("engine_unavailable", "本地推理引擎未装配", null)
+            return
+        }
         if (prompt.isNullOrEmpty()) {
             result.error("bad_arg", "prompt 不能为空", null)
             return

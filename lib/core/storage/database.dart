@@ -12,7 +12,7 @@ class DatabaseProvider {
   DatabaseProvider._();
 
   static const String dbName = 'wisemuse.db';
-  static const int dbVersion = 8;
+  static const int dbVersion = 9;
 
   static Database? _db;
 
@@ -62,7 +62,7 @@ class DatabaseProvider {
     // 书籍
     await db.execute(
       '''
-      CREATE TABLE books (\n        id TEXT PRIMARY KEY,\n        profile_id TEXT NOT NULL DEFAULT 'default',\n        title TEXT NOT NULL,\n        source TEXT NOT NULL,\n        original_file_path TEXT,\n        page_count INTEGER,\n        last_read_page INTEGER NOT NULL DEFAULT 0,\n        import_status INTEGER NOT NULL DEFAULT 0,\n        import_progress TEXT,\n        created_at INTEGER NOT NULL,\n        updated_at INTEGER NOT NULL\n      )\n    ''',
+      CREATE TABLE books (\n        id TEXT PRIMARY KEY,\n        profile_id TEXT NOT NULL DEFAULT 'default',\n        title TEXT NOT NULL,\n        source TEXT NOT NULL,\n        original_file_path TEXT,\n        page_count INTEGER,\n        last_read_page INTEGER NOT NULL DEFAULT 0,\n        import_status INTEGER NOT NULL DEFAULT 0,\n        import_progress TEXT,\n        sentence_split_version INTEGER NOT NULL DEFAULT 0,\n        created_at INTEGER NOT NULL,\n        updated_at INTEGER NOT NULL\n      )\n    ''',
     );
     // 生词本
     await db.execute(
@@ -174,9 +174,20 @@ class DatabaseProvider {
         );
       } catch (_) {}
     }
-    if (oldVersion < 8) {
-      // v7→v8: 幼小衔接知识库种子数据
-      await SeedData.populate(db);
+    if (oldVersion < 9) {
+      // v8→v9：补充分句规则版本，并修复已执行但缺少 books 行的种子数据。
+      try {
+        await db.execute(
+          'ALTER TABLE books ADD COLUMN sentence_split_version INTEGER NOT NULL DEFAULT 0',
+        );
+      } catch (_) {}
+      if (oldVersion < 8) {
+        // 从未执行过种子迁移的旧安装，首次升级时完整写入内置数据。
+        await SeedData.populate(db);
+      } else {
+        // v8 用户只修复孤儿知识点对应的缺失书籍，不复活主动删除的数据。
+        await SeedData.repairBuiltinBook(db);
+      }
     }
   }
 

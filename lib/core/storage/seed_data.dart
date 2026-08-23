@@ -12,6 +12,35 @@ class SeedData {
   static const String builtinBookId = 'builtin_kindergarten_bridge';
   static const String builtinBookTitle = '幼小衔接基础知识';
 
+  /// 只补写内置书籍记录，不改动知识点。
+  ///
+  /// 用于修复 v0.1.55 已写入 113 条知识点、但缺少 books 行的升级用户。
+  static Future<void> repairBuiltinBook(Database db) async {
+    final pointCount =
+        Sqflite.firstIntValue(
+          await db.rawQuery(
+            'SELECT COUNT(*) FROM knowledge_points WHERE book_id = ?',
+            [builtinBookId],
+          ),
+        ) ??
+        0;
+    if (pointCount == 0) return;
+    final bookDao = BookDao(db);
+    if (await bookDao.getById(builtinBookId) != null) return;
+    final now = DateTime.now().microsecondsSinceEpoch;
+    await bookDao.insert(
+      Book(
+        id: builtinBookId,
+        title: builtinBookTitle,
+        source: BookSource.txt,
+        pageCount: 5,
+        importStatus: 0,
+        createdAt: now,
+        updatedAt: now,
+      ),
+    );
+  }
+
   /// 插入内置种子数据。
   static Future<void> populate(Database db) async {
     final dao = KnowledgePointDao(db);

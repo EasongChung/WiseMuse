@@ -53,5 +53,25 @@ void main() {
       final out = splitTextToSentences('今天天气真好！我们一起去公园吧。');
       expect(out, ['今天天气真好！', '我们一起去公园吧。']);
     });
+
+    test('包含连续空格的多列行在换行处断开', () {
+      final out = splitTextToSentences('苹果    梨子\n香蕉    葡萄');
+      expect(out, ['苹果', '梨子', '香蕉', '葡萄']);
+    });
+
+    test('双语表格中的英文列不被当作拼音删除', () {
+      final out = splitTextToSentences('苹果    apple\n香蕉    banana');
+      expect(out, ['苹果', 'apple', '香蕉', 'banana']);
+    });
+
+    test('贴近版心右侧的普通换行视为自动折行，中文不补空格', () {
+      final out = splitTextToSentences('这是一个因为版心宽度而\n自动换行的完整句子。');
+      expect(out, ['这是一个因为版心宽度而自动换行的完整句子。']);
+    });
+
+    test('短标题行不与正文合并', () {
+      final out = splitTextToSentences('标题\n这是正文开始的第一句话。');
+      expect(out, ['标题', '这是正文开始的第一句话。']);
+    });
   });
 }

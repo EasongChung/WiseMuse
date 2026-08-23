@@ -6,6 +6,7 @@ import '../../core/models/knowledge_point.dart';
 import '../../core/storage/book_dao.dart';
 import '../../core/storage/database.dart';
 import '../../core/storage/knowledge_point_dao.dart';
+import '../../core/storage/seed_data.dart';
 import '../../core/storage/sentence_dao.dart';
 import '../../core/theme/app_theme.dart';
 import '../../services/knowledge_extraction_service.dart';
@@ -281,10 +282,18 @@ class _KnowledgePageState extends State<KnowledgePage> {
     }
     for (final entry in _groupedPoints.entries) {
       if (!booksWithPoints.any((b) => b.id == entry.key)) {
+        final orphanId = entry.key;
+        final isBuiltin = orphanId == SeedData.builtinBookId;
         booksWithPoints.add(
-          Book.create(
-            title: entry.key.isEmpty ? '自定义录入' : '已删除书籍',
+          Book(
+            id: orphanId,
+            title:
+                isBuiltin
+                    ? SeedData.builtinBookTitle
+                    : (orphanId.isEmpty ? '自定义录入' : '已删除书籍'),
             source: BookSource.txt,
+            createdAt: 0,
+            updatedAt: 0,
           ),
         );
       }
@@ -380,7 +389,10 @@ class _KnowledgePageState extends State<KnowledgePage> {
                         final db = await DatabaseProvider.database;
                         await db.delete(
                           'knowledge_points',
-                          where: 'book_id = ?',
+                          where:
+                              book.id.isEmpty
+                                  ? 'book_id IS NULL OR book_id = ?'
+                                  : 'book_id = ?',
                           whereArgs: [book.id],
                         );
                         _load();

@@ -68,6 +68,16 @@ class BookDao {
     );
   }
 
+  /// 更新某书使用的分句规则版本。
+  Future<int> updateSentenceSplitVersion(String bookId, int version) {
+    return db.update(
+      _table,
+      {'sentence_split_version': version},
+      where: 'id = ?',
+      whereArgs: [bookId],
+    );
+  }
+
   /// [v0.1.48] 更新导入进度
   Future<int> updateImportStatus(
     String bookId, {

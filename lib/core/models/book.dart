@@ -35,6 +35,7 @@ class Book {
     this.lastReadPage = 0,
     this.importStatus = 0,
     this.importProgress,
+    this.sentenceSplitVersion = 0,
     required this.createdAt,
     required this.updatedAt,
   });
@@ -48,6 +49,7 @@ class Book {
     int lastReadPage = 0,
     int importStatus = 0,
     String? importProgress,
+    int sentenceSplitVersion = 0,
   }) {
     final now = DateTime.now().microsecondsSinceEpoch;
     return Book(
@@ -59,6 +61,7 @@ class Book {
       lastReadPage: lastReadPage,
       importStatus: importStatus,
       importProgress: importProgress,
+      sentenceSplitVersion: sentenceSplitVersion,
       createdAt: now,
       updatedAt: now,
     );
@@ -83,6 +86,9 @@ class Book {
   /// [v0.1.48] 导入进度文字（如 `识别中 3/10 页`）。
   String? importProgress;
 
+  /// 该书最近一次使用的纯文本分句规则版本。
+  int sentenceSplitVersion;
+
   final int createdAt;
   int updatedAt;
 
@@ -95,6 +101,7 @@ class Book {
     'last_read_page': lastReadPage,
     'import_status': importStatus,
     'import_progress': importProgress,
+    'sentence_split_version': sentenceSplitVersion,
     'created_at': createdAt,
     'updated_at': updatedAt,
   };
@@ -108,6 +115,7 @@ class Book {
     lastReadPage: (map['last_read_page'] as int?) ?? 0,
     importStatus: (map['import_status'] as int?) ?? 0,
     importProgress: map['import_progress'] as String?,
+    sentenceSplitVersion: (map['sentence_split_version'] as int?) ?? 0,
     createdAt: (map['created_at'] as int?) ?? 0,
     updatedAt: (map['updated_at'] as int?) ?? 0,
   );
