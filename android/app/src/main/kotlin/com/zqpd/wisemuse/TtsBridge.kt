@@ -1,6 +1,7 @@
 package com.zqpd.wisemuse
 
 import android.content.Context
+import android.media.MediaPlayer
 import android.os.Handler
 import android.os.Looper
 import android.speech.tts.TextToSpeech
@@ -9,6 +10,7 @@ import android.util.Log
 import io.flutter.embedding.engine.plugins.FlutterPlugin
 import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
+import java.io.File
 import java.util.Locale
 
 /**
@@ -48,6 +50,7 @@ class TtsBridge : FlutterPlugin, MethodChannel.MethodCallHandler {
     private var channel: MethodChannel? = null
     private var context: Context? = null
     private var tts: TextToSpeech? = null
+    private var mediaPlayer: MediaPlayer? = null
     private val handler = Handler(Looper.getMainLooper())
 
     // 引擎代次用于丢弃已 shutdown 引擎的迟到 onInit。
@@ -94,6 +97,8 @@ class TtsBridge : FlutterPlugin, MethodChannel.MethodCallHandler {
             "stop" -> handleStop(result)
             "setVoice" -> handleSetVoice(call, result)
             "setRate" -> handleSetRate(call, result)
+            "getVoices" -> handleGetVoices(result)
+            "playFile" -> handlePlayFile(call, result)
             else -> result.notImplemented()
         }
     }
@@ -294,6 +299,18 @@ class TtsBridge : FlutterPlugin, MethodChannel.MethodCallHandler {
      */
     private fun cancelCurrentPlayback(stopEngine: Boolean): Boolean {
         cancelSpeakWatchdog()
+        try {
+            mediaPlayer?.let { player ->
+                if (player.isPlaying) {
+                    player.stop()
+                }
+                player.release()
+            }
+        } catch (t: Throwable) {
+            Log.w(TAG, "MediaPlayer release 异常: ${t.message}")
+        }
+        mediaPlayer = null
+
         val hadActiveSpeak = activeSpeak != null
         pendingSpeak?.let { completeSpeak(it, false) }
         pendingSpeak = null
@@ -507,6 +524,103 @@ class TtsBridge : FlutterPlugin, MethodChannel.MethodCallHandler {
         } catch (t: Throwable) {
             Log.e(TAG, "setVoice 异常", t)
             result.success(false)
+        }
+    }
+
+    /** 获取当前系统 TTS 已安装的全部真实音色列表。 */
+    private fun handleGetVoices(result: MethodChannel.Result) {
+        val engine = tts
+        if (engine == null) {
+            result.success(emptyList<Map<String, Any>>())
+            return
+        }
+        try {
+            val voices = engine.voices ?: emptySet()
+            val list = ArrayList<Map<String, Any>>()
+            for (voice in voices) {
+                val locale = voice.locale
+                val item = HashMap<String, Any>()
+                item["name"] = voice.name
+                item["locale"] = locale.toLanguageTag()
+                item["language"] = locale.language
+                item["country"] = locale.country
+                item["displayLanguage"] = locale.displayLanguage
+                item["displayName"] = "${locale.displayName} (${voice.name})"
+                item["isNetworkConnectionRequired"] = voice.isNetworkConnectionRequired
+                item["quality"] = voice.quality
+                list.add(item)
+            }
+            result.success(list)
+        } catch (t: Throwable) {
+            Log.e(TAG, "getVoices 异常", t)
+            result.success(emptyList<Map<String, Any>>())
+        }
+    }
+
+    /** 播放本地音频文件（用于播放云端大模型生成的 MP3/WAV）。 */
+    private fun handlePlayFile(call: MethodCall, result: MethodChannel.Result) {
+        val path = call.argument<String>("path")?.trim()
+        if (path.isNullOrEmpty()) {
+            result.error("bad_arg", "path 不能为空", null)
+            return
+        }
+        val file = File(path)
+        if (!file.exists()) {
+            result.error("file_not_found", "音频文件不存在: $path", null)
+            return
+        }
+
+        val generation = ++requestGeneration
+        if (!cancelCurrentPlayback(stopEngine = true)) {
+            result.error("tts_stop_failed", "无法停止上一条播放请求", null)
+            return
+        }
+
+        val request = SpeakRequest(generation, path, result)
+        activeSpeak = request
+
+        try {
+            val player = MediaPlayer()
+            mediaPlayer = player
+            player.setDataSource(file.absolutePath)
+            player.setOnCompletionListener {
+                handler.post {
+                    if (request.generation == requestGeneration && !request.completed) {
+                        try {
+                            player.release()
+                        } catch (_: Throwable) {}
+                        if (mediaPlayer === player) mediaPlayer = null
+                        activeSpeak = null
+                        completeSpeak(request, true)
+                    }
+                }
+            }
+            player.setOnErrorListener { _, what, extra ->
+                handler.post {
+                    if (request.generation == requestGeneration && !request.completed) {
+                        try {
+                            player.release()
+                        } catch (_: Throwable) {}
+                        if (mediaPlayer === player) mediaPlayer = null
+                        activeSpeak = null
+                        Log.e(TAG, "MediaPlayer 错误: what=$what extra=$extra")
+                        completeSpeak(request, false)
+                    }
+                }
+                true
+            }
+            player.prepare()
+            player.start()
+            scheduleSpeakWatchdog(request)
+            Log.i(TAG, "音频文件播放已开始: generation=$generation path=$path")
+        } catch (t: Throwable) {
+            Log.e(TAG, "MediaPlayer 播放异常", t)
+            activeSpeak = null
+            try {
+                mediaPlayer?.release()
+            } catch (_: Throwable) {}
+            mediaPlayer = null
+            completeSpeak(request, false)
         }
     }
 

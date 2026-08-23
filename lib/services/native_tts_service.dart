@@ -2,6 +2,7 @@ import 'package:flutter/services.dart';
 
 import '../core/debug/app_log.dart';
 import 'tts_service.dart';
+import 'tts_voice_info.dart';
 
 /// [v0.4.1] 系统 TextToSpeech 实现（MethodChannel → TtsBridge.kt）。
 ///
@@ -78,6 +79,34 @@ class NativeTtsService implements TtsService {
       await _channel.invokeMethod<void>('setRate', {'rate': rate});
     } catch (e) {
       AppLog.e(_tag, 'setRate 失败: $e');
+    }
+  }
+
+  /// [v0.1.61] 获取系统已安装的全部真实 TTS 音色。
+  Future<List<TtsVoiceInfo>> getVoices() async {
+    try {
+      final raw = await _channel.invokeMethod<List<dynamic>>('getVoices');
+      if (raw == null || raw.isEmpty) return const [];
+      return raw
+          .map((item) => TtsVoiceInfo.fromMap(item as Map<dynamic, dynamic>))
+          .toList();
+    } catch (e) {
+      AppLog.e(_tag, 'getVoices 失败: $e');
+      return const [];
+    }
+  }
+
+  /// [v0.1.61] 播放本地音频文件（用于播放云端大模型生成的语音）。
+  Future<bool> playFile(String path) async {
+    try {
+      final ok = await _channel.invokeMethod<bool>('playFile', {'path': path});
+      return ok ?? false;
+    } on PlatformException catch (e) {
+      AppLog.e(_tag, 'playFile 失败: ${e.message}');
+      return false;
+    } catch (e) {
+      AppLog.e(_tag, 'playFile 异常: $e');
+      return false;
     }
   }
 }

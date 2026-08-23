@@ -217,6 +217,55 @@ class SettingsService {
   Future<void> setTtsVoice(String v) async =>
       (await SharedPreferences.getInstance()).setString(kTtsVoice, v);
 
+  // ---- [v0.1.61] TTS 引擎与云端大模型语音 ----
+  static const kTtsEngine = 'tts_engine';
+  static const kTtsCloudModel = 'tts_cloud_model';
+  static const kTtsCloudVoice = 'tts_cloud_voice';
+  static const kTtsCloudBaseUrl = 'tts_cloud_base_url';
+  static const kTtsCloudApiKey = 'tts_cloud_api_key';
+
+  /// TTS 引擎模式：auto（大模型优先/回退系统）/ cloud（仅云端大模型）/ system（系统原生）。默认 auto。
+  Future<String> getTtsEngine() async =>
+      (await SharedPreferences.getInstance()).getString(kTtsEngine) ?? 'auto';
+  Future<void> setTtsEngine(String v) async =>
+      (await SharedPreferences.getInstance()).setString(kTtsEngine, v);
+
+  /// 云端大模型 TTS 模型名称（默认 tts-1）。
+  Future<String> getTtsCloudModel() async =>
+      (await SharedPreferences.getInstance()).getString(kTtsCloudModel) ??
+      'tts-1';
+  Future<void> setTtsCloudModel(String v) async =>
+      (await SharedPreferences.getInstance()).setString(kTtsCloudModel, v);
+
+  /// 云端大模型 TTS 音色（默认 alloy）。
+  Future<String> getTtsCloudVoice() async =>
+      (await SharedPreferences.getInstance()).getString(kTtsCloudVoice) ??
+      'alloy';
+  Future<void> setTtsCloudVoice(String v) async =>
+      (await SharedPreferences.getInstance()).setString(kTtsCloudVoice, v);
+
+  /// 云端大模型 TTS BaseUrl（若为空则回退通用 API BaseUrl）。
+  Future<String> getTtsCloudBaseUrl() async {
+    final prefs = await SharedPreferences.getInstance();
+    final custom = prefs.getString(kTtsCloudBaseUrl)?.trim();
+    if (custom != null && custom.isNotEmpty) return custom;
+    return (await getApiBaseUrl())?.trim() ?? '';
+  }
+
+  Future<void> setTtsCloudBaseUrl(String v) async =>
+      (await SharedPreferences.getInstance()).setString(kTtsCloudBaseUrl, v);
+
+  /// 云端大模型 TTS ApiKey（若为空则回退通用 API Key）。
+  Future<String> getTtsCloudApiKey() async {
+    final prefs = await SharedPreferences.getInstance();
+    final custom = prefs.getString(kTtsCloudApiKey)?.trim();
+    if (custom != null && custom.isNotEmpty) return custom;
+    return (await getApiKey())?.trim() ?? '';
+  }
+
+  Future<void> setTtsCloudApiKey(String v) async =>
+      (await SharedPreferences.getInstance()).setString(kTtsCloudApiKey, v);
+
   // ---- 离线开关 ----
   /// 是否优先离线（AI 助教/识别），默认 false（在线优先）。
   Future<bool> getPreferOffline() async =>

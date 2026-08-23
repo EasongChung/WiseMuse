@@ -16,12 +16,14 @@ import '../../core/settings/settings_service.dart';
 import '../../core/storage/book_dao.dart';
 import '../../core/storage/database.dart';
 import '../../core/theme/app_theme.dart';
+import '../../services/hybrid_tts_service.dart';
 import '../../services/mlkit_translation_service.dart';
 import '../../services/model_store.dart';
 import '../../services/native_tts_service.dart';
 import '../../services/openai_client.dart';
 import '../../services/rag/embedding_service.dart';
 import '../../services/rag/rag_retrieval_service.dart';
+import '../../services/tts_voice_info.dart';
 import '../../services/vosk_asr_service.dart';
 import '../../services/llm_service.dart';
 import '../../widgets/top_toast.dart';
@@ -58,6 +60,16 @@ class _SettingsPageState extends State<SettingsPage> {
   int _ttsRepeatCount = 1;
   int _ttsPauseMs = 300;
   String _ttsVoice = '';
+  String _ttsEngine = 'auto';
+  String _ttsCloudModel = 'tts-1';
+  String _ttsCloudVoice = 'alloy';
+  final _ttsCloudBaseUrlCtrl = TextEditingController();
+  final _ttsCloudApiKeyCtrl = TextEditingController();
+  final _ttsCloudModelCtrl = TextEditingController();
+  final _ttsCloudVoiceCtrl = TextEditingController();
+  List<TtsVoiceInfo> _systemVoices = const [];
+  bool _systemPreviewing = false;
+  bool _cloudPreviewing = false;
 
   // AI 离线优先
   bool _preferOffline = false;
@@ -128,6 +140,10 @@ class _SettingsPageState extends State<SettingsPage> {
     _baseUrlCtrl.dispose();
     _apiKeyCtrl.dispose();
     _customModelCtrl.dispose();
+    _ttsCloudBaseUrlCtrl.dispose();
+    _ttsCloudApiKeyCtrl.dispose();
+    _ttsCloudModelCtrl.dispose();
+    _ttsCloudVoiceCtrl.dispose();
     super.dispose();
   }
 
@@ -140,7 +156,19 @@ class _SettingsPageState extends State<SettingsPage> {
     _ttsRepeatCount = await _settings.getTtsRepeatCount();
     _ttsPauseMs = await _settings.getTtsPauseMs();
     _ttsVoice = await _settings.getTtsVoice();
+    _ttsEngine = await _settings.getTtsEngine();
+    _ttsCloudModel = await _settings.getTtsCloudModel();
+    _ttsCloudVoice = await _settings.getTtsCloudVoice();
+    _ttsCloudBaseUrlCtrl.text = await _settings.getTtsCloudBaseUrl();
+    _ttsCloudApiKeyCtrl.text = await _settings.getTtsCloudApiKey();
+    _ttsCloudModelCtrl.text = _ttsCloudModel;
+    _ttsCloudVoiceCtrl.text = _ttsCloudVoice;
     _preferOffline = await _settings.getPreferOffline();
+
+    // 加载系统真实音色
+    try {
+      _systemVoices = await _tts.getVoices();
+    } catch (_) {}
 
     // 供应商管理加载
     _providers = await _settings.getProviders();
@@ -640,13 +668,62 @@ class _SettingsPageState extends State<SettingsPage> {
 
   // ===== 4. 朗读参数（迁移至此，彻底打通） =====
 
+  // ===== 4. 朗读参数与 TTS 引擎（系统真实音色 + 云端大模型 API） =====
+
   Widget _buildTtsParams() {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final showCloudConfig = _ttsEngine == 'cloud' || _ttsEngine == 'auto';
+
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(12),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            // 引擎模式选择
+            Row(
+              children: [
+                const Icon(
+                  Icons.settings_voice_outlined,
+                  size: 20,
+                  color: StudyPalette.ink,
+                ),
+                const SizedBox(width: 8),
+                Text('TTS 引擎模式', style: titleStyle(fontSize: 14)),
+              ],
+            ),
+            const SizedBox(height: 8),
+            SizedBox(
+              width: double.infinity,
+              child: SegmentedButton<String>(
+                segments: const [
+                  ButtonSegment(
+                    value: 'auto',
+                    label: Text('自动推荐', style: TextStyle(fontSize: 12)),
+                    icon: Icon(Icons.auto_awesome, size: 16),
+                  ),
+                  ButtonSegment(
+                    value: 'system',
+                    label: Text('系统原生', style: TextStyle(fontSize: 12)),
+                    icon: Icon(Icons.phone_android, size: 16),
+                  ),
+                  ButtonSegment(
+                    value: 'cloud',
+                    label: Text('大模型 API', style: TextStyle(fontSize: 12)),
+                    icon: Icon(Icons.cloud_outlined, size: 16),
+                  ),
+                ],
+                selected: {_ttsEngine},
+                onSelectionChanged: (s) {
+                  final v = s.first;
+                  setState(() => _ttsEngine = v);
+                  _settings.setTtsEngine(v);
+                },
+              ),
+            ),
+            const SizedBox(height: 12),
+            const Divider(height: 8),
+
             // 语速
             Row(
               children: [
@@ -753,65 +830,304 @@ class _SettingsPageState extends State<SettingsPage> {
             ),
             const Divider(height: 8),
 
-            // 音色选择
-            Row(
-              children: [
-                const Icon(
-                  Icons.record_voice_over,
-                  size: 20,
-                  color: StudyPalette.ink,
-                ),
-                const SizedBox(width: 8),
-                Text('朗读音色', style: titleStyle(fontSize: 14)),
-                const Spacer(),
-                DropdownButton<String>(
-                  value: _ttsVoice.isEmpty ? 'default' : _ttsVoice,
-                  underline: const SizedBox(),
-                  items: const [
-                    DropdownMenuItem(value: 'default', child: Text('系统默认')),
-                    DropdownMenuItem(value: 'zh-CN', child: Text('中文女声')),
-                    DropdownMenuItem(
-                      value: 'zh-CN-x-xiaoxuan',
-                      child: Text('晓萱'),
-                    ),
-                    DropdownMenuItem(
-                      value: 'zh-CN-x-xiaochen',
-                      child: Text('晓辰'),
-                    ),
-                    DropdownMenuItem(
-                      value: 'zh-CN-x-xiaohan',
-                      child: Text('晓涵'),
-                    ),
-                    DropdownMenuItem(
-                      value: 'zh-CN-x-xiaomo',
-                      child: Text('晓墨'),
-                    ),
-                    DropdownMenuItem(
-                      value: 'zh-CN-x-xiaorui',
-                      child: Text('晓睿'),
-                    ),
-                    DropdownMenuItem(
-                      value: 'zh-CN-x-xiaoyou',
-                      child: Text('晓悠'),
-                    ),
-                    DropdownMenuItem(value: 'zh-HK', child: Text('粤语女声')),
-                    DropdownMenuItem(value: 'en-US', child: Text('英语美音')),
-                    DropdownMenuItem(value: 'en-GB', child: Text('英语英音')),
-                  ],
-                  onChanged: (v) {
-                    if (v == null) return;
-                    final voice = v == 'default' ? '' : v;
-                    setState(() => _ttsVoice = voice);
-                    _settings.setTtsVoice(voice);
-                    _tts.setVoice(voice);
-                  },
-                ),
-              ],
-            ),
+            // 系统原生真实音色选择与试听
+            _buildSystemVoiceSelector(),
+
+            // 云端大模型 TTS API 配置卡片（展开）
+            if (showCloudConfig) ...[
+              const Divider(height: 16),
+              _buildCloudTtsSettingsCard(isDark),
+            ],
           ],
         ),
       ),
     );
+  }
+
+  Widget _buildSystemVoiceSelector() {
+    final items = <DropdownMenuItem<String>>[
+      const DropdownMenuItem(value: 'default', child: Text('系统默认音色')),
+    ];
+
+    final sortedVoices = List<TtsVoiceInfo>.from(_systemVoices)..sort((a, b) {
+      if (a.isChinese && !b.isChinese) return -1;
+      if (!a.isChinese && b.isChinese) return 1;
+      return a.name.compareTo(b.name);
+    });
+
+    for (final v in sortedVoices) {
+      items.add(
+        DropdownMenuItem(
+          value: v.name,
+          child: Text(
+            v.readableLabel,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
+        ),
+      );
+    }
+
+    final effectiveValue =
+        items.any(
+              (it) => it.value == (_ttsVoice.isEmpty ? 'default' : _ttsVoice),
+            )
+            ? (_ttsVoice.isEmpty ? 'default' : _ttsVoice)
+            : 'default';
+
+    return Row(
+      children: [
+        const Icon(Icons.record_voice_over, size: 20, color: StudyPalette.ink),
+        const SizedBox(width: 8),
+        Text('系统原生音色', style: titleStyle(fontSize: 14)),
+        const SizedBox(width: 12),
+        Expanded(
+          child: DropdownButtonHideUnderline(
+            child: DropdownButton<String>(
+              isExpanded: true,
+              value: effectiveValue,
+              items: items,
+              onChanged: (v) {
+                if (v == null) return;
+                final voice = v == 'default' ? '' : v;
+                setState(() => _ttsVoice = voice);
+                _settings.setTtsVoice(voice);
+                _tts.setVoice(voice);
+              },
+            ),
+          ),
+        ),
+        const SizedBox(width: 6),
+        IconButton(
+          icon: Icon(
+            _systemPreviewing ? Icons.hourglass_top : Icons.volume_up,
+            color: StudyPalette.ember,
+            size: 20,
+          ),
+          tooltip: '试听系统音色',
+          onPressed: _systemPreviewing ? null : _previewSystemVoice,
+        ),
+      ],
+    );
+  }
+
+  Future<void> _previewSystemVoice() async {
+    setState(() => _systemPreviewing = true);
+    try {
+      final ok = await HybridTtsService.instance.previewSystemVoice(
+        _ttsVoice,
+        '你好！我是 WiseMuse 智能伴读书童，很高兴和你一起学习。',
+      );
+      if (mounted) {
+        TopToast.show(context, ok ? '系统音色试听完成' : '系统音色播放失败');
+      }
+    } finally {
+      if (mounted) setState(() => _systemPreviewing = false);
+    }
+  }
+
+  Widget _buildCloudTtsSettingsCard(bool isDark) {
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: isDark ? StudyPalette.darkCard : StudyPalette.parchmentDeep,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: StudyPalette.linen),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(
+                Icons.cloud_outlined,
+                size: 18,
+                color: StudyPalette.ember,
+              ),
+              const SizedBox(width: 6),
+              Text(
+                '云端大模型 TTS API (OpenAI 兼容)',
+                style: titleStyle(fontSize: 13),
+              ),
+              const Spacer(),
+              IconButton(
+                icon: Icon(
+                  _cloudPreviewing
+                      ? Icons.hourglass_top
+                      : Icons.play_circle_outline,
+                  color: StudyPalette.ember,
+                  size: 22,
+                ),
+                tooltip: '试听云端大模型语音',
+                onPressed: _cloudPreviewing ? null : _previewCloudVoice,
+              ),
+            ],
+          ),
+          const SizedBox(height: 4),
+          const Text(
+            '支持标准 /v1/audio/speech 接口（如 OpenAI tts-1、硅基流动 CosyVoice2、FishSpeech 等）',
+            style: TextStyle(fontSize: 11, color: StudyPalette.inkSoft),
+          ),
+          const SizedBox(height: 10),
+
+          // 模型选择
+          TextField(
+            controller: _ttsCloudModelCtrl,
+            decoration: InputDecoration(
+              labelText: 'TTS 模型名称',
+              hintText: '如 tts-1 / FunAudioLLM/CosyVoice2-0.5B',
+              isDense: true,
+              filled: true,
+              fillColor: isDark ? StudyPalette.darkBorder : Colors.white,
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(10),
+              ),
+              suffixIcon: PopupMenuButton<String>(
+                icon: const Icon(Icons.arrow_drop_down),
+                onSelected: (model) {
+                  _ttsCloudModelCtrl.text = model;
+                  _settings.setTtsCloudModel(model);
+                },
+                itemBuilder:
+                    (_) => [
+                      const PopupMenuItem(
+                        value: 'tts-1',
+                        child: Text('OpenAI · tts-1'),
+                      ),
+                      const PopupMenuItem(
+                        value: 'tts-1-hd',
+                        child: Text('OpenAI · tts-1-hd'),
+                      ),
+                      const PopupMenuItem(
+                        value: 'FunAudioLLM/CosyVoice2-0.5B',
+                        child: Text('硅基流动 · CosyVoice2-0.5B'),
+                      ),
+                      const PopupMenuItem(
+                        value: 'fishaudio/fish-speech-1.5',
+                        child: Text('硅基流动 · FishSpeech-1.5'),
+                      ),
+                      const PopupMenuItem(
+                        value: 'speech-01',
+                        child: Text('01.AI · speech-01'),
+                      ),
+                    ],
+              ),
+            ),
+            onChanged: (v) => _settings.setTtsCloudModel(v.trim()),
+          ),
+          const SizedBox(height: 10),
+
+          // 音色选择
+          TextField(
+            controller: _ttsCloudVoiceCtrl,
+            decoration: InputDecoration(
+              labelText: 'TTS 音色 (Voice)',
+              hintText: '如 alloy / shimmer / nova / echo',
+              isDense: true,
+              filled: true,
+              fillColor: isDark ? StudyPalette.darkBorder : Colors.white,
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(10),
+              ),
+              suffixIcon: PopupMenuButton<String>(
+                icon: const Icon(Icons.arrow_drop_down),
+                onSelected: (voice) {
+                  _ttsCloudVoiceCtrl.text = voice;
+                  _settings.setTtsCloudVoice(voice);
+                },
+                itemBuilder:
+                    (_) => [
+                      const PopupMenuItem(
+                        value: 'alloy',
+                        child: Text('alloy (通用清脆)'),
+                      ),
+                      const PopupMenuItem(
+                        value: 'echo',
+                        child: Text('echo (浑厚男声)'),
+                      ),
+                      const PopupMenuItem(
+                        value: 'fable',
+                        child: Text('fable (英伦故事音)'),
+                      ),
+                      const PopupMenuItem(
+                        value: 'onyx',
+                        child: Text('onyx (低沉男声)'),
+                      ),
+                      const PopupMenuItem(
+                        value: 'nova',
+                        child: Text('nova (明亮女声)'),
+                      ),
+                      const PopupMenuItem(
+                        value: 'shimmer',
+                        child: Text('shimmer (温柔甜美)'),
+                      ),
+                    ],
+              ),
+            ),
+            onChanged: (v) => _settings.setTtsCloudVoice(v.trim()),
+          ),
+          const SizedBox(height: 10),
+
+          // 独立接口地址（可选）
+          TextField(
+            controller: _ttsCloudBaseUrlCtrl,
+            decoration: InputDecoration(
+              labelText: '接口地址 Base URL（可选）',
+              hintText: '留空则自动复用上方云端 API 供应商地址',
+              isDense: true,
+              filled: true,
+              fillColor: isDark ? StudyPalette.darkBorder : Colors.white,
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(10),
+              ),
+            ),
+            onChanged: (v) => _settings.setTtsCloudBaseUrl(v.trim()),
+          ),
+          const SizedBox(height: 10),
+
+          // 独立 API Key（可选）
+          TextField(
+            controller: _ttsCloudApiKeyCtrl,
+            obscureText: true,
+            decoration: InputDecoration(
+              labelText: 'API Key（可选）',
+              hintText: '留空则自动复用上方云端 API 供应商 Key',
+              isDense: true,
+              filled: true,
+              fillColor: isDark ? StudyPalette.darkBorder : Colors.white,
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(10),
+              ),
+            ),
+            onChanged: (v) => _settings.setTtsCloudApiKey(v.trim()),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _previewCloudVoice() async {
+    setState(() => _cloudPreviewing = true);
+    try {
+      final ok = await HybridTtsService.instance.previewCloudVoice(
+        sampleText: '你好！我是智能少儿伴读书童，很高兴和你一起练习朗读。',
+        model: _ttsCloudModelCtrl.text.trim(),
+        voice: _ttsCloudVoiceCtrl.text.trim(),
+        baseUrl:
+            _ttsCloudBaseUrlCtrl.text.trim().isNotEmpty
+                ? _ttsCloudBaseUrlCtrl.text.trim()
+                : null,
+        apiKey:
+            _ttsCloudApiKeyCtrl.text.trim().isNotEmpty
+                ? _ttsCloudApiKeyCtrl.text.trim()
+                : null,
+      );
+      if (mounted) {
+        TopToast.show(context, ok ? '大模型语音试听播放成功' : '大模型语音生成或播放失败，请检查 API 配置');
+      }
+    } finally {
+      if (mounted) setState(() => _cloudPreviewing = false);
+    }
   }
 
   // ===== 5. Vosk 语音模型（模型名称 + 删除按钮，不展示冗余绝对路径） =====

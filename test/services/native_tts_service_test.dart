@@ -1,6 +1,7 @@
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:wisemuse/services/native_tts_service.dart';
+import 'package:wisemuse/services/tts_voice_info.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -11,6 +12,77 @@ void main() {
 
   tearDown(() {
     messenger.setMockMethodCallHandler(channel, null);
+  });
+
+  test('TtsVoiceInfo 语言判定与展示标签', () {
+    const zh = TtsVoiceInfo(
+      name: 'cmn-cn-x-ccc-local',
+      locale: 'zh-CN',
+      language: 'zh',
+      country: 'CN',
+      displayLanguage: 'Chinese',
+      displayName: 'Chinese (China)',
+    );
+    expect(zh.isChinese, isTrue);
+    expect(zh.readableLabel, contains('中文'));
+
+    const en = TtsVoiceInfo(
+      name: 'en-us-x-sfg-local',
+      locale: 'en-US',
+      language: 'en',
+      country: 'US',
+      displayLanguage: 'English',
+      displayName: 'English (United States)',
+    );
+    expect(en.isEnglish, isTrue);
+    expect(en.readableLabel, contains('英文'));
+  });
+
+  test('getVoices 解析系统音色列表', () async {
+    messenger.setMockMethodCallHandler(channel, (call) async {
+      expect(call.method, 'getVoices');
+      return [
+        {
+          'name': 'cmn-cn-x-ccc-local',
+          'locale': 'zh-CN',
+          'language': 'zh',
+          'country': 'CN',
+          'displayLanguage': 'Chinese',
+          'displayName': 'Chinese (China) (cmn-cn-x-ccc-local)',
+          'isNetworkConnectionRequired': false,
+          'quality': 400,
+        },
+        {
+          'name': 'en-us-x-sfg-local',
+          'locale': 'en-US',
+          'language': 'en',
+          'country': 'US',
+          'displayLanguage': 'English',
+          'displayName': 'English (United States) (en-us-x-sfg-local)',
+          'isNetworkConnectionRequired': false,
+          'quality': 300,
+        },
+      ];
+    });
+
+    final service = NativeTtsService(channel: channel);
+    final voices = await service.getVoices();
+    expect(voices, hasLength(2));
+    expect(voices[0].isChinese, isTrue);
+    expect(voices[0].readableLabel, contains('中文'));
+    expect(voices[1].isEnglish, isTrue);
+    expect(voices[1].readableLabel, contains('英文'));
+  });
+
+  test('playFile 成功调用原生', () async {
+    messenger.setMockMethodCallHandler(channel, (call) async {
+      expect(call.method, 'playFile');
+      expect(call.arguments, {'path': '/test/audio.mp3'});
+      return true;
+    });
+
+    final service = NativeTtsService(channel: channel);
+    expect(await service.playFile('/test/audio.mp3'), isTrue);
   });
 
   test('init 返回原生引擎真实状态', () async {
