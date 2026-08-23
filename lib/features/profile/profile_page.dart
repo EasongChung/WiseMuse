@@ -3,7 +3,6 @@ import 'package:flutter/material.dart';
 import '../../core/models/profile.dart';
 import '../../core/theme/app_theme.dart';
 import '../../services/profile_service.dart';
-import '../debug/log_page.dart';
 import '../rag/rag_management_page.dart';
 import '../settings/settings_page.dart';
 import '../wordbook/wordbook_page.dart';
@@ -179,19 +178,7 @@ class _ProfilePageState extends State<ProfilePage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('我的'),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.bug_report_outlined),
-            tooltip: '运行日志',
-            onPressed:
-                () => Navigator.of(
-                  context,
-                ).push(MaterialPageRoute(builder: (_) => const LogPage())),
-          ),
-        ],
-      ),
+      appBar: AppBar(title: const Text('我的')),
       body:
           _loaded
               ? _buildBody()
@@ -283,17 +270,6 @@ class _ProfilePageState extends State<ProfilePage> {
                       onTap: () {
                         TopToast.show(context, '学习统计即将推出');
                       },
-                    ),
-                    const Divider(height: 1, indent: 56),
-                    _buildEntry(
-                      context,
-                      icon: Icons.bug_report_outlined,
-                      title: '运行日志',
-                      subtitle: '查看应用运行日志',
-                      onTap:
-                          () => Navigator.of(context).push(
-                            MaterialPageRoute(builder: (_) => const LogPage()),
-                          ),
                     ),
                     const Divider(height: 1, indent: 56),
                     _buildEntry(

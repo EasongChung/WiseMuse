@@ -25,6 +25,7 @@ import '../../services/rag/rag_retrieval_service.dart';
 import '../../services/vosk_asr_service.dart';
 import '../../services/llm_service.dart';
 import '../../widgets/top_toast.dart';
+import '../debug/log_page.dart';
 
 /// [v0.3.0] [v0.1.44] 设置页：翻译引擎配置 + 供应商管理 + 模型管理 + 朗读参数。
 ///
@@ -266,7 +267,19 @@ class _SettingsPageState extends State<SettingsPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('设置')),
+      appBar: AppBar(
+        title: const Text('设置'),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.bug_report_outlined),
+            tooltip: '运行日志',
+            onPressed:
+                () => Navigator.of(
+                  context,
+                ).push(MaterialPageRoute(builder: (_) => const LogPage())),
+          ),
+        ],
+      ),
       body:
           _initDone
               ? ListView(
