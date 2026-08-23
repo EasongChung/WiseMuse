@@ -4,11 +4,11 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:permission_handler/permission_handler.dart';
+import 'package:pinyin/pinyin.dart';
 
 import '../../core/debug/app_log.dart';
 import '../../core/models/knowledge_point.dart';
 import '../../core/models/learning_record.dart';
-import '../../core/models/sentence.dart';
 import '../../core/models/word_entry.dart';
 import '../../core/settings/settings_service.dart';
 import '../../core/storage/database.dart';
@@ -21,31 +21,52 @@ import '../../services/asr_service.dart';
 import '../../services/native_tts_service.dart';
 import '../../services/tts_service.dart';
 import '../../services/vosk_asr_service.dart';
-import '../settings/settings_page.dart';
 import '../../widgets/knowledge_scope_picker.dart';
-import 'scoring.dart';
 import '../../widgets/top_toast.dart';
+import '../settings/settings_page.dart';
+import 'scoring.dart';
 
-/// [v0.1.0] [v0.1.35] 跟读练习页（核心链路：放音 → 录音 → 识别 → 评分 → 生词落库）。
-///
-/// v2.9.0 增强：
-/// - 慢速示范播放
-/// - 录音波形动画
-/// - 星级 + 友好评语
-/// - 音节相似度指标
+/// 单个跟读条目（句子或词语）。
+class FollowItem {
+  const FollowItem({
+    required this.text,
+    this.pinyin,
+    this.sourceTitle,
+    this.bookId,
+    this.page,
+    this.chapter,
+  });
+
+  final String text;
+  final String? pinyin;
+  final String? sourceTitle;
+  final String? bookId;
+  final int? page;
+  final int? chapter;
+}
+
+/// [v0.1.61] 儿童化跟读练习页：列表关卡式流转、大字拼音卡片、慢速领读、声波反馈、逐字正误高亮与成绩汇总。
 class FollowPage extends StatefulWidget {
   const FollowPage({
     super.key,
     this.initialSentence,
+    this.sentences,
+    this.items,
+    this.title,
     this.bookId,
     this.bookTitle,
     this.pageNumber,
+    this.initialIndex = 0,
   });
 
   final String? initialSentence;
+  final List<String>? sentences;
+  final List<FollowItem>? items;
+  final String? title;
   final String? bookId;
   final String? bookTitle;
   final int? pageNumber;
+  final int initialIndex;
 
   @override
   State<FollowPage> createState() => _FollowPageState();
@@ -57,26 +78,28 @@ class _FollowPageState extends State<FollowPage>
 
   final AsrService _asr = VoskAsrService();
   final TtsService _tts = NativeTtsService();
-  final _sentenceController = TextEditingController();
 
+  List<FollowItem> _items = const [];
+  int _currentIndex = 0;
+  final Map<int, FollowScore> _scores = {};
+  final Map<int, String> _recognizedMap = {};
+
+  bool _loading = true;
   bool _listening = false;
   bool _playing = false;
+  bool _slowPlaying = false;
   bool _operationBusy = false;
   bool _appActive = true;
   int _playRequest = 0;
   int _lifecycleRequest = 0;
-  FollowScore? _lastScore;
-  String _recognized = '';
-  String _status = '选择句子，点播放跟读';
+
+  String _status = '先听老师读，再点麦克风跟读哦！';
   late final AnimationController _waveAnimCtrl;
   final List<double> _waveBars = List.generate(16, (_) => 0.3);
   bool _waveActive = false;
 
-  // [v0.1.38] 从阅读页传入的当前页句子列表
-  List<Sentence> _pageSentences = const [];
-
-  // [v0.1.38] 知识库选择范围标签
-  String? _scopeLabel;
+  Timer? _autoNextTimer;
+  int _autoNextCountdown = 0;
 
   @override
   void initState() {
@@ -84,30 +107,105 @@ class _FollowPageState extends State<FollowPage>
     WidgetsBinding.instance.addObserver(this);
     _waveAnimCtrl = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 500),
+      duration: const Duration(milliseconds: 450),
     )..addListener(_onWaveTick);
-    // [v0.1.38] 加载当前页句子（从阅读页进入时）
-    _loadPageSentences();
-    // [v0.1.38] 从设置中自动加载 Vosk 模型
+
+    _initData();
     _autoLoadVosk();
   }
 
-  /// [v0.1.38] 从阅读页加载当前页的句子列表。
-  Future<void> _loadPageSentences() async {
-    if (widget.bookId == null || widget.pageNumber == null) return;
-    try {
-      final db = await DatabaseProvider.database;
-      final dao = SentenceDao(db);
-      final pageSentences = await dao.getByPage(
-        widget.bookId!,
-        widget.pageNumber!,
-      );
-      if (mounted && pageSentences.isNotEmpty) {
-        setState(() => _pageSentences = pageSentences);
+  void _onWaveTick() {
+    if (!_waveActive) return;
+    setState(() {
+      for (var i = 0; i < _waveBars.length; i++) {
+        _waveBars[i] =
+            0.2 +
+            (i.isEven ? 0.35 : 0.2) +
+            (0.45 * (_waveAnimCtrl.value * (i % 4 + 1) % 1.0)).abs();
       }
-    } catch (e) {
-      AppLog.w(_tag, '加载阅读页句子失败: $e');
+    });
+  }
+
+  Future<void> _initData() async {
+    final list = <FollowItem>[];
+    if (widget.items != null && widget.items!.isNotEmpty) {
+      list.addAll(widget.items!);
+    } else if (widget.sentences != null && widget.sentences!.isNotEmpty) {
+      for (final s in widget.sentences!) {
+        list.add(_buildItem(s, sourceTitle: widget.title ?? widget.bookTitle));
+      }
+    } else if (widget.initialSentence != null &&
+        widget.initialSentence!.trim().isNotEmpty) {
+      list.add(
+        _buildItem(
+          widget.initialSentence!,
+          sourceTitle: widget.title ?? widget.bookTitle,
+        ),
+      );
     }
+
+    if (list.isEmpty && widget.bookId != null && widget.pageNumber != null) {
+      try {
+        final db = await DatabaseProvider.database;
+        final dao = SentenceDao(db);
+        final pageSentences = await dao.getByPage(
+          widget.bookId!,
+          widget.pageNumber!,
+        );
+        for (final s in pageSentences) {
+          list.add(
+            _buildItem(
+              s.text,
+              sourceTitle: widget.bookTitle,
+              page: s.page,
+              chapter: s.chapter,
+            ),
+          );
+        }
+      } catch (e) {
+        AppLog.w(_tag, '从页加载句子失败: $e');
+      }
+    }
+
+    if (!mounted) return;
+    setState(() {
+      _items = list;
+      _currentIndex = widget.initialIndex.clamp(
+        0,
+        list.isEmpty ? 0 : list.length - 1,
+      );
+      _loading = false;
+    });
+
+    if (list.isEmpty) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _showSourceDialog();
+      });
+    }
+  }
+
+  FollowItem _buildItem(
+    String text, {
+    String? sourceTitle,
+    int? page,
+    int? chapter,
+  }) {
+    String? pinyin;
+    try {
+      pinyin = PinyinHelper.getPinyinE(
+        text,
+        separator: ' ',
+        format: PinyinFormat.WITH_TONE_MARK,
+      );
+    } catch (_) {}
+    return FollowItem(
+      text: text.trim(),
+      pinyin: pinyin,
+      sourceTitle: sourceTitle,
+      bookId: widget.bookId,
+      page: page ?? widget.pageNumber,
+      chapter: chapter,
+    );
   }
 
   Future<void> _autoLoadVosk() async {
@@ -115,49 +213,38 @@ class _FollowPageState extends State<FollowPage>
     final modelPath = await settings.getVoskModelPath();
     if (modelPath == null || modelPath.isEmpty) {
       if (mounted) {
-        setState(() => _status = '请先在设置中配置 Vosk 语音识别模型');
+        setState(() => _status = '⚠️ 语音识别模型未配置，请先到「设置」中下载或配置');
       }
       return;
     }
-    // 检查文件是否仍存在
     final modelDir = Directory(modelPath);
     if (!await modelDir.exists()) {
-      AppLog.w(_tag, 'Vosk 模型目录已不存在，需重新配置');
       if (mounted) {
-        setState(() => _status = '模型文件已丢失，请在设置中重新配置');
+        setState(() => _status = '⚠️ 模型文件已丢失，请在「设置」中重新下载');
       }
       return;
     }
-    setState(() => _status = '正在加载语音模型…');
     try {
       final ok = await _asr.init(modelPath);
       if (mounted) {
         setState(() {
-          _status = ok ? '模型已加载 ✓ 选择句子跟读' : '模型加载失败';
+          _status = ok ? '先听老师读，再点麦克风跟读哦！' : '❌ 语音识别模型加载失败';
         });
       }
     } catch (e) {
       AppLog.e(_tag, 'Vosk 自动加载失败: $e');
       if (mounted) {
-        setState(() => _status = '模型加载失败: $e');
+        setState(() => _status = '❌ 语音模型加载失败: $e');
       }
     }
   }
 
-  /// [v0.1.38] 检查模型是否已就绪
   bool get _modelReady => _asr.isLoaded;
-
-  void _onWaveTick() {
-    if (!_waveActive) return;
-    setState(() {
-      for (var i = 0; i < _waveBars.length; i++) {
-        _waveBars[i] =
-            0.15 +
-            (i.isEven ? 0.35 : 0.25) +
-            (0.5 * (_waveAnimCtrl.value * (i % 3 + 1) % 1.0)).abs();
-      }
-    });
-  }
+  FollowItem? get _currentItem =>
+      _items.isNotEmpty && _currentIndex < _items.length
+          ? _items[_currentIndex]
+          : null;
+  FollowScore? get _currentScore => _scores[_currentIndex];
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
@@ -167,13 +254,11 @@ class _FollowPageState extends State<FollowPage>
     if (!_appActive) {
       final request = ++_lifecycleRequest;
       _playRequest++;
+      _cancelAutoNext();
       setState(() => _operationBusy = true);
       unawaited(_suspendPractice(request));
     } else {
-      // [v0.1.38] 返回前台时自动重新加载模型
-      if (!_modelReady) {
-        _autoLoadVosk();
-      }
+      if (!_modelReady) _autoLoadVosk();
     }
   }
 
@@ -182,162 +267,156 @@ class _FollowPageState extends State<FollowPage>
     if (_listening) {
       try {
         await _asr.stop();
-      } catch (e) {
-        AppLog.w(_tag, '后台切换时停止录音失败: $e');
-      }
+      } catch (_) {}
     }
     if (!mounted || request != _lifecycleRequest) return;
     setState(() {
       _playing = false;
+      _slowPlaying = false;
       _listening = false;
       _operationBusy = false;
-      _status =
-          stopped
-              ? (_appActive ? '语音已停止，可继续练习' : '已暂停，返回应用后可继续')
-              : '语音停止失败，请重新进入页面';
+      _waveActive = false;
+      _waveAnimCtrl.stop();
+      _status = stopped ? '已暂停，回来后点击继续练习' : '语音停止失败，请重新尝试';
     });
   }
 
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    _cancelAutoNext();
     _waveAnimCtrl.dispose();
     _appActive = false;
     _lifecycleRequest++;
     _playRequest++;
     unawaited(_tts.stop());
-    unawaited(_disposeAsr());
-    _sentenceController.dispose();
+    unawaited(_asr.dispose());
     super.dispose();
   }
 
-  Future<void> _play() async {
-    if (!_appActive || _playing || _listening || _operationBusy) {
-      return;
-    }
-    final text = _sentenceController.text.trim();
-    if (text.isEmpty) {
-      _setStatus('请先输入要跟读的句子');
-      return;
-    }
-    final request = ++_playRequest;
-    AppLog.d(_tag, '播放: "$text"');
-    setState(() {
-      _playing = true;
-      _status = '播放中...';
-    });
-
-    final ready = await _tts.init();
-    if (!mounted || request != _playRequest) return;
-    if (!ready) {
-      AppLog.w(_tag, 'TTS 初始化失败');
-      setState(() {
-        _playing = false;
-        _status = '朗读失败：语音引擎不可用';
-      });
-      return;
-    }
-    final ok = await _tts.speak(text);
-    if (!mounted || request != _playRequest) return;
-    setState(() {
-      _playing = false;
-      _status = ok ? '播放完成，点麦克风跟读' : '朗读已停止或失败';
-    });
-    if (!ok) AppLog.w(_tag, 'TTS speak 未正常完成');
+  void _cancelAutoNext() {
+    _autoNextTimer?.cancel();
+    _autoNextTimer = null;
+    _autoNextCountdown = 0;
   }
 
-  /// 慢速示范播放（用于儿童跟读前聆听）。
-  Future<void> _slowPlay() async {
-    if (!_appActive || _playing || _listening || _operationBusy) {
+  // ===== 播放控制 =====
+
+  Future<void> _playNormal() async {
+    final item = _currentItem;
+    if (item == null ||
+        !_appActive ||
+        _playing ||
+        _listening ||
+        _operationBusy) {
       return;
     }
-    final text = _sentenceController.text.trim();
-    if (text.isEmpty) {
-      _setStatus('请先输入要跟读的句子');
-      return;
-    }
+    _cancelAutoNext();
     final request = ++_playRequest;
     setState(() {
       _playing = true;
-      _status = '慢速示范播放中...';
+      _slowPlaying = false;
+      _status = '🔊 正在标准范读…';
     });
     final ready = await _tts.init();
     if (!mounted || request != _playRequest) return;
     if (!ready) {
       setState(() {
         _playing = false;
-        _status = '语音引擎不可用';
+        _status = '❌ 朗读失败：语音引擎不可用';
       });
       return;
     }
-    final ok = await _tts.speak(text);
+    final ok = await _tts.speak(item.text);
     if (!mounted || request != _playRequest) return;
     setState(() {
       _playing = false;
-      _status = ok ? '示范结束，点跟读开始练习' : '播放已停止';
+      _status = ok ? '示范完毕！现在轮到你跟读啦 🎙️' : '朗读已停止';
     });
   }
 
-  bool _isLifecycleCurrent(int request) {
-    return mounted && _appActive && request == _lifecycleRequest;
+  Future<void> _playSlow() async {
+    final item = _currentItem;
+    if (item == null ||
+        !_appActive ||
+        _playing ||
+        _listening ||
+        _operationBusy) {
+      return;
+    }
+    _cancelAutoNext();
+    final request = ++_playRequest;
+    setState(() {
+      _playing = true;
+      _slowPlaying = true;
+      _status = '🐢 慢速领读中，请仔细听…';
+    });
+    final ready = await _tts.init();
+    if (!mounted || request != _playRequest) return;
+    if (!ready) {
+      setState(() {
+        _playing = false;
+        _status = '❌ 语音引擎不可用';
+      });
+      return;
+    }
+    final ok = await _tts.speak(item.text);
+    if (!mounted || request != _playRequest) return;
+    setState(() {
+      _playing = false;
+      _slowPlaying = false;
+      _status = ok ? '慢速示范结束，点击麦克风跟着读！' : '播放已停止';
+    });
   }
+
+  // ===== 录音与评分 =====
 
   Future<void> _toggleListen() async {
     if (!_appActive || _playing || _operationBusy) return;
+    _cancelAutoNext();
     final lifecycleRequest = _lifecycleRequest;
     setState(() => _operationBusy = true);
     try {
       if (_listening) {
-        AppLog.d(_tag, '停止录音');
+        AppLog.d(_tag, '停止跟读录音');
         _waveActive = false;
         _waveAnimCtrl.stop();
-        setState(() => _listening = false);
+        setState(() {
+          _listening = false;
+          _status = '正在智能评分中… ✨';
+        });
         final text = await _asr.stop();
         AppLog.d(_tag, '识别结果: "$text"');
-        if (!_isLifecycleCurrent(lifecycleRequest)) return;
+        if (!mounted || lifecycleRequest != _lifecycleRequest) return;
         setState(() {
-          _recognized = text;
-          _status = '识别完成';
+          _recognizedMap[_currentIndex] = text;
         });
         await _scoreAndPersist(text);
       } else {
         _playRequest++;
-        final stopped = await _tts.stop();
-        if (!_isLifecycleCurrent(lifecycleRequest)) return;
-        if (!stopped) {
-          _setStatus('无法停止朗读，请重新进入页面后再试');
-          return;
-        }
+        await _tts.stop();
+        if (!mounted || lifecycleRequest != _lifecycleRequest) return;
 
         final perm = await Permission.microphone.request();
-        if (!_isLifecycleCurrent(lifecycleRequest)) return;
+        if (!mounted || lifecycleRequest != _lifecycleRequest) return;
         if (!perm.isGranted) {
-          _setStatus('麦克风权限被拒绝');
+          setState(() => _status = '⚠️ 需要麦克风权限才能进行语音跟读');
+          TopToast.show(context, '请允许麦克风权限');
           return;
         }
 
-        AppLog.d(_tag, '开始录音');
         final ok = await _asr.start();
-        if (!_isLifecycleCurrent(lifecycleRequest)) {
-          if (ok) {
-            try {
-              await _asr.stop();
-            } catch (e) {
-              AppLog.w(_tag, '页面失活后回收录音失败: $e');
-            }
-          }
+        if (!mounted || lifecycleRequest != _lifecycleRequest) {
+          if (ok) unawaited(_asr.stop());
           return;
         }
         setState(() {
           _listening = ok;
-          _status = ok ? '录音中... 说完点停止' : '启动录音失败';
+          _status = ok ? '🎙️ 正在聆听，请大声朗读…（读完再次点击停止）' : '启动录音失败，请重试';
         });
         if (ok) {
           _waveActive = true;
           _waveAnimCtrl.repeat(reverse: true);
-        } else {
-          _waveActive = false;
-          _waveAnimCtrl.stop();
         }
       }
     } finally {
@@ -348,199 +427,512 @@ class _FollowPageState extends State<FollowPage>
   }
 
   Future<void> _scoreAndPersist(String recognized) async {
-    final target = _sentenceController.text.trim();
-    if (target.isEmpty) return;
+    final item = _currentItem;
+    if (item == null) return;
+    final target = item.text;
     final score = FollowScorer.scoreFollow(target, recognized);
     if (!mounted) return;
-    setState(() => _lastScore = score);
 
-    if (!score.passed) {
-      AppLog.d(_tag, '分=${score.score}，写入生词本');
-      try {
-        await _persistWord(target);
-        await _persistRecord(target, recognized, score);
-        if (!mounted) return;
-        TopToast.show(context, '已加入生词本，稍后可复习');
-      } catch (e, s) {
-        AppLog.e(_tag, '落库失败: $e\n$s');
-      }
-    } else {
-      AppLog.d(_tag, '分=${score.score}，通过');
-    }
-  }
+    setState(() {
+      _scores[_currentIndex] = score;
+      _status =
+          score.passed
+              ? '🌟 ${score.comment} (${score.score.toStringAsFixed(0)}分)'
+              : '💪 ${score.comment} (${score.score.toStringAsFixed(0)}分)';
+    });
 
-  /// [v0.1.38] 跟读时自动将词语同步到知识点库（按书/页分类，已存在则跳过）。
-  Future<void> _syncToKnowledgeBase(String word) async {
-    if (widget.bookId == null) return;
     try {
       final db = await DatabaseProvider.database;
-      final dao = KnowledgePointDao(db);
-      // 已存在则跳过
-      final existing = await dao.findByBookTypeText(
-        widget.bookId!,
-        KnowledgeType.word,
-        word,
-      );
-      if (existing != null) return;
-      await dao.upsertByText(
-        widget.bookId!,
-        KnowledgeType.word,
-        word,
-        page: widget.pageNumber,
-        source: 'follow',
-      );
-      AppLog.d(_tag, '已同步到知识点库: $word');
-    } catch (e) {
-      AppLog.w(_tag, '同步知识点库失败: $e');
-    }
-  }
-
-  Future<void> _persistWord(String target) async {
-    final db = await DatabaseProvider.database;
-    final dao = WordEntryDao(db);
-    final existing = await dao.findByWord(target, lang: 'zh');
-    if (existing != null) {
-      existing.wrongCount++;
-      existing.lastReviewAt = DateTime.now().microsecondsSinceEpoch;
-      await dao.update(existing);
-    } else {
-      await dao.upsert(WordEntry.create(word: target, lang: 'zh'));
-    }
-    // [v0.1.38] 同步到知识点库（按书/页分类）
-    unawaited(_syncToKnowledgeBase(target));
-  }
-
-  Future<void> _persistRecord(
-    String target,
-    String recognized,
-    FollowScore score,
-  ) async {
-    final db = await DatabaseProvider.database;
-    await LearningRecordDao(db).insert(
-      LearningRecord.create(
-        type: LearningType.follow,
-        target: target,
-        result: score.score,
-        detail: jsonEncode({'recognized': recognized, 'score': score.toJson()}),
-      ),
-    );
-  }
-
-  void _setStatus(String s) {
-    if (mounted) setState(() => _status = s);
-  }
-
-  Future<void> _disposeAsr() async {
-    try {
-      await _asr.dispose();
-    } catch (e) {
-      AppLog.w(_tag, 'ASR dispose 失败: $e');
-    }
-  }
-
-  /// [v0.1.38] 模型状态卡片 + 设置入口。
-  Widget _buildModelStatus() {
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(12),
-        child: Row(
-          children: [
-            Icon(
-              _modelReady ? Icons.check_circle : Icons.settings,
-              color: _modelReady ? StudyPalette.moss : StudyPalette.inkSoft,
-              size: 28,
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    _modelReady ? '语音模型已就绪' : '语音识别模型未配置',
-                    style: const TextStyle(
-                      fontWeight: FontWeight.w600,
-                      color: StudyPalette.ink,
-                    ),
-                  ),
-                  Text(
-                    _status,
-                    style: const TextStyle(
-                      fontSize: 12,
-                      color: StudyPalette.inkSoft,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            if (!_modelReady)
-              TextButton.icon(
-                icon: const Icon(Icons.open_in_new, size: 16),
-                label: const Text('去设置', style: TextStyle(fontSize: 12)),
-                onPressed: _openSettings,
-              ),
-          ],
+      await LearningRecordDao(db).insert(
+        LearningRecord.create(
+          type: LearningType.follow,
+          target: target,
+          result: score.score,
+          detail: jsonEncode({
+            'recognized': recognized,
+            'score': score.toJson(),
+            'itemIndex': _currentIndex,
+          }),
         ),
-      ),
-    );
+      );
+
+      if (!score.passed) {
+        await _persistUnmasteredWord(target, item);
+      }
+    } catch (e, s) {
+      AppLog.e(_tag, '跟读落库失败: $e\n$s');
+    }
+
+    // 若通过（≥80 分），且不是最后一题，启动 2.5 秒倒计时自动进入下一题
+    if (score.passed && _currentIndex < _items.length - 1) {
+      _startAutoNext();
+    }
   }
 
-  /// [v0.1.38] 当前页句子列表（从阅读页传入时显示）。
-  Widget _buildPageSentenceList() {
-    if (_pageSentences.isEmpty) return const SizedBox();
-    return Card(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(12, 10, 12, 4),
-            child: Text('当前页句子', style: titleStyle(fontSize: 14)),
+  Future<void> _persistUnmasteredWord(String target, FollowItem item) async {
+    try {
+      final db = await DatabaseProvider.database;
+      final dao = WordEntryDao(db);
+      final existing = await dao.findByWord(target, lang: 'zh');
+      if (existing != null) {
+        existing.wrongCount++;
+        existing.lastReviewAt = DateTime.now().microsecondsSinceEpoch;
+        await dao.update(existing);
+      } else {
+        await dao.upsert(
+          WordEntry.create(word: target, lang: 'zh', fromBookId: item.bookId),
+        );
+      }
+
+      if (item.bookId != null) {
+        final kpDao = KnowledgePointDao(db);
+        await kpDao.upsertByText(
+          item.bookId!,
+          KnowledgeType.word,
+          target,
+          page: item.page,
+          chapter: item.chapter,
+          source: 'follow',
+        );
+      }
+    } catch (_) {}
+  }
+
+  void _startAutoNext() {
+    _cancelAutoNext();
+    setState(() => _autoNextCountdown = 2);
+    _autoNextTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+      if (!mounted) {
+        timer.cancel();
+        return;
+      }
+      if (_autoNextCountdown <= 1) {
+        _cancelAutoNext();
+        _goToNext();
+      } else {
+        setState(() => _autoNextCountdown--);
+      }
+    });
+  }
+
+  void _goToIndex(int index) {
+    if (index < 0 || index >= _items.length) return;
+    _cancelAutoNext();
+    _tts.stop();
+    setState(() {
+      _currentIndex = index;
+      _status =
+          _scores[index] != null
+              ? '已跟读（${_scores[index]!.score.toStringAsFixed(0)}分），可继续重读'
+              : '先听老师读，再点麦克风跟读哦！';
+    });
+  }
+
+  void _goToNext() {
+    if (_currentIndex < _items.length - 1) {
+      _goToIndex(_currentIndex + 1);
+    } else {
+      _showFinishSummary();
+    }
+  }
+
+  void _goToPrev() {
+    if (_currentIndex > 0) {
+      _goToIndex(_currentIndex - 1);
+    }
+  }
+
+  // ===== 词源选择对话框 =====
+
+  Future<void> _showSourceDialog() async {
+    final choice = await showDialog<String>(
+      context: context,
+      builder:
+          (ctx) => AlertDialog(
+            title: const Text('选择跟读内容'),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                ListTile(
+                  leading: const Icon(
+                    Icons.menu_book,
+                    color: StudyPalette.ember,
+                  ),
+                  title: const Text('课文/章节跟读'),
+                  subtitle: const Text('从已导入的教材中选课全篇跟读'),
+                  onTap: () => Navigator.pop(ctx, 'book'),
+                ),
+                ListTile(
+                  leading: const Icon(
+                    Icons.bookmark_outline,
+                    color: StudyPalette.moss,
+                  ),
+                  title: const Text('重点生词跟读'),
+                  subtitle: const Text('练习生词本中未掌握的发音'),
+                  onTap: () => Navigator.pop(ctx, 'wordbook'),
+                ),
+                ListTile(
+                  leading: const Icon(
+                    Icons.psychology_outlined,
+                    color: StudyPalette.spinePdf,
+                  ),
+                  title: const Text('知识库词句跟读'),
+                  subtitle: const Text('按诗词、成语、重点句进行练习'),
+                  onTap: () => Navigator.pop(ctx, 'knowledge'),
+                ),
+              ],
+            ),
           ),
-          const Divider(height: 1),
-          ...List.generate(_pageSentences.length, (i) {
-            final s = _pageSentences[i];
-            final selected = _sentenceController.text == s.text;
-            return ListTile(
-              dense: true,
-              selected: selected,
-              selectedTileColor: StudyPalette.emberSoft.withValues(alpha: 0.3),
-              leading: Text(
-                '${i + 1}',
-                style: const TextStyle(
-                  fontSize: 12,
-                  fontWeight: FontWeight.w600,
-                  color: StudyPalette.inkSoft,
+    );
+    if (choice == null || !mounted) return;
+
+    if (choice == 'book') {
+      await _loadFromBookScope();
+    } else if (choice == 'wordbook') {
+      await _loadFromWordbook();
+    } else if (choice == 'knowledge') {
+      await _loadFromKnowledge();
+    }
+  }
+
+  Future<void> _loadFromBookScope() async {
+    final scope = await KnowledgeScopePicker.show(context);
+    if (scope == null || !mounted) return;
+    try {
+      final db = await DatabaseProvider.database;
+      final dao = SentenceDao(db);
+      var sentences = await dao.getByBook(scope.bookId);
+      if (scope.page != null && scope.page! > 0) {
+        sentences = sentences.where((s) => s.page == scope.page).toList();
+      }
+      if (scope.chapter != null && scope.chapter! > 0) {
+        sentences = sentences.where((s) => s.chapter == scope.chapter).toList();
+      }
+
+      final items =
+          sentences
+              .map(
+                (s) => _buildItem(
+                  s.text,
+                  sourceTitle: scope.bookTitle,
+                  page: s.page,
+                  chapter: s.chapter,
+                ),
+              )
+              .toList();
+
+      if (items.isEmpty) {
+        if (mounted) TopToast.show(context, '所选范围暂无可用句子');
+        return;
+      }
+      setState(() {
+        _items = items;
+        _currentIndex = 0;
+        _scores.clear();
+        _recognizedMap.clear();
+        _status = '先听老师读，再点麦克风跟读哦！';
+      });
+    } catch (e) {
+      AppLog.e(_tag, '加载课文失败: $e');
+    }
+  }
+
+  Future<void> _loadFromWordbook() async {
+    try {
+      final db = await DatabaseProvider.database;
+      final unmastered = await WordEntryDao(db).getUnmastered(threshold: 3);
+      var words = unmastered.map((w) => w.word).toList();
+      if (words.isEmpty) {
+        words = const ['苹果', '春天', '认真', '美丽', '学习', '太阳', '温暖', '快乐'];
+        if (mounted) TopToast.show(context, '生词本暂无未掌握生词，已加载常用字词');
+      }
+      final items =
+          words.map((w) => _buildItem(w, sourceTitle: '重点生词')).toList();
+      setState(() {
+        _items = items;
+        _currentIndex = 0;
+        _scores.clear();
+        _recognizedMap.clear();
+        _status = '重点生词已就绪，开始跟读吧！';
+      });
+    } catch (e) {
+      AppLog.e(_tag, '加载生词本失败: $e');
+    }
+  }
+
+  Future<void> _loadFromKnowledge() async {
+    try {
+      final db = await DatabaseProvider.database;
+      final points = await KnowledgePointDao(db).getAll();
+      if (points.isEmpty) {
+        if (mounted) TopToast.show(context, '知识库暂无内容');
+        return;
+      }
+      final items =
+          points
+              .take(20)
+              .map(
+                (kp) =>
+                    _buildItem(kp.text, sourceTitle: '知识库 · ${kp.type.label}'),
+              )
+              .toList();
+      setState(() {
+        _items = items;
+        _currentIndex = 0;
+        _scores.clear();
+        _recognizedMap.clear();
+        _status = '知识库重点词句已就绪！';
+      });
+    } catch (e) {
+      AppLog.e(_tag, '加载知识库失败: $e');
+    }
+  }
+
+  // ===== 句子清单与结算 =====
+
+  void _showSentenceListSheet() {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor:
+          Theme.of(context).brightness == Brightness.dark
+              ? StudyPalette.darkCard
+              : StudyPalette.parchment,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) {
+        return SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 36,
+                height: 4,
+                margin: const EdgeInsets.only(top: 12, bottom: 8),
+                decoration: BoxDecoration(
+                  color: StudyPalette.linen,
+                  borderRadius: BorderRadius.circular(2),
                 ),
               ),
-              title: Text(
-                s.text,
-                style: const TextStyle(fontSize: 14, color: StudyPalette.ink),
+              Padding(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 8,
+                ),
+                child: Row(
+                  children: [
+                    const Icon(
+                      Icons.format_list_bulleted,
+                      color: StudyPalette.ember,
+                      size: 20,
+                    ),
+                    const SizedBox(width: 8),
+                    Text(
+                      '跟读清单 (${_items.length} 句)',
+                      style: titleStyle(fontSize: 16),
+                    ),
+                    const Spacer(),
+                    Text(
+                      '已完成 ${_scores.length} / ${_items.length}',
+                      style: const TextStyle(
+                        fontSize: 12,
+                        color: StudyPalette.inkSoft,
+                      ),
+                    ),
+                  ],
+                ),
               ),
-              trailing: IconButton(
-                icon: Icon(
-                  selected
-                      ? Icons.play_circle_filled
-                      : Icons.play_circle_outline,
-                  size: 20,
-                  color: selected ? StudyPalette.ember : StudyPalette.inkSoft,
+              const Divider(height: 1),
+              Flexible(
+                child: ListView.separated(
+                  shrinkWrap: true,
+                  padding: const EdgeInsets.all(12),
+                  itemCount: _items.length,
+                  separatorBuilder: (_, _) => const Divider(height: 1),
+                  itemBuilder: (c, i) {
+                    final item = _items[i];
+                    final isCurrent = i == _currentIndex;
+                    final score = _scores[i];
+                    return ListTile(
+                      dense: true,
+                      selected: isCurrent,
+                      selectedTileColor: StudyPalette.emberSoft.withValues(
+                        alpha: 0.35,
+                      ),
+                      leading: CircleAvatar(
+                        radius: 13,
+                        backgroundColor:
+                            score != null
+                                ? (score.passed
+                                    ? StudyPalette.moss
+                                    : StudyPalette.ember)
+                                : StudyPalette.linen,
+                        child: Text(
+                          '${i + 1}',
+                          style: TextStyle(
+                            fontSize: 11,
+                            fontWeight: FontWeight.bold,
+                            color:
+                                score != null
+                                    ? Colors.white
+                                    : StudyPalette.inkSoft,
+                          ),
+                        ),
+                      ),
+                      title: Text(
+                        item.text,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: 13,
+                          fontWeight:
+                              isCurrent ? FontWeight.bold : FontWeight.normal,
+                        ),
+                      ),
+                      trailing:
+                          score != null
+                              ? Text(
+                                '${score.score.toStringAsFixed(0)}分',
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.bold,
+                                  color:
+                                      score.passed
+                                          ? StudyPalette.moss
+                                          : StudyPalette.ember,
+                                ),
+                              )
+                              : const Text(
+                                '未跟读',
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  color: StudyPalette.inkSoft,
+                                ),
+                              ),
+                      onTap: () {
+                        Navigator.pop(ctx);
+                        _goToIndex(i);
+                      },
+                    );
+                  },
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  void _showFinishSummary() {
+    final total = _items.length;
+    final completed = _scores.length;
+    var totalScore = 0.0;
+    var totalStars = 0;
+    var passedCount = 0;
+    for (final s in _scores.values) {
+      totalScore += s.score;
+      totalStars += s.starCount;
+      if (s.passed) passedCount++;
+    }
+    final avgScore = completed > 0 ? (totalScore / completed).round() : 0;
+
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder:
+          (ctx) => AlertDialog(
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(20),
+            ),
+            title: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                const Icon(
+                  Icons.emoji_events,
+                  color: StudyPalette.ember,
+                  size: 26,
+                ),
+                const SizedBox(width: 8),
+                Text('跟读挑战完成！', style: titleStyle(fontSize: 20)),
+              ],
+            ),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: StudyPalette.parchmentDeep,
+                    borderRadius: BorderRadius.circular(16),
+                  ),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceAround,
+                    children: [
+                      _buildSummaryCol('总计获得', '⭐ $totalStars 颗'),
+                      _buildSummaryCol('平均分', '$avgScore 分'),
+                      _buildSummaryCol('通过率', '$passedCount / $total'),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 12),
+                Text(
+                  avgScore >= 80
+                      ? '🎉 表现太出色了，发音字正腔圆！'
+                      : '👍 很棒的尝试，不熟练的词已加入生词本，继续加油！',
+                  style: const TextStyle(
+                    fontSize: 13,
+                    color: StudyPalette.inkSoft,
+                  ),
+                  textAlign: TextAlign.center,
+                ),
+              ],
+            ),
+            actions: [
+              TextButton(
+                onPressed: () {
+                  Navigator.pop(ctx);
+                  setState(() {
+                    _currentIndex = 0;
+                    _scores.clear();
+                    _recognizedMap.clear();
+                    _status = '先听老师读，再点麦克风跟读哦！';
+                  });
+                },
+                child: const Text('再练一遍'),
+              ),
+              FilledButton(
+                style: FilledButton.styleFrom(
+                  backgroundColor: StudyPalette.ember,
                 ),
                 onPressed: () {
-                  setState(() {
-                    _sentenceController.text = s.text;
-                    _lastScore = null;
-                  });
-                  _play();
+                  Navigator.pop(ctx);
+                  Navigator.pop(context);
                 },
+                child: const Text('完成练习'),
               ),
-              onTap: () {
-                setState(() {
-                  _sentenceController.text = s.text;
-                  _lastScore = null;
-                });
-              },
-            );
-          }),
-        ],
-      ),
+            ],
+          ),
+    );
+  }
+
+  Widget _buildSummaryCol(String label, String value) {
+    return Column(
+      children: [
+        Text(
+          label,
+          style: const TextStyle(fontSize: 11, color: StudyPalette.inkSoft),
+        ),
+        const SizedBox(height: 4),
+        Text(
+          value,
+          style: const TextStyle(
+            fontSize: 15,
+            fontWeight: FontWeight.bold,
+            color: StudyPalette.ink,
+          ),
+        ),
+      ],
     );
   }
 
@@ -550,320 +942,536 @@ class _FollowPageState extends State<FollowPage>
     ).push(MaterialPageRoute(builder: (_) => const SettingsPage()));
   }
 
-  /// [v0.1.38] 打开知识库范围选择器，选中后加载对应知识点作为跟读句子。
-  Future<void> _openKnowledgeScope() async {
-    final scope = await KnowledgeScopePicker.show(context);
-    if (scope == null || !mounted) return;
-    setState(() {
-      _scopeLabel =
-          '${scope.bookTitle}'
-          '${scope.chapter != null && scope.chapter! > 0 ? ' · 第${scope.chapter}单元' : ''}'
-          '${scope.page != null && scope.page! > 0 ? ' · 第${scope.page}课' : ''}';
-      _pageSentences = const [];
-    });
-    try {
-      final db = await DatabaseProvider.database;
-      final dao = KnowledgePointDao(db);
-      final points = await dao.getByBook(scope.bookId);
-      var filtered = points;
-      if (scope.chapter != null && scope.chapter! > 0) {
-        filtered = filtered.where((p) => p.chapter == scope.chapter).toList();
-      }
-      if (scope.page != null && scope.page! > 0) {
-        filtered = filtered.where((p) => p.page == scope.page).toList();
-      }
-      if (!mounted) return;
-      setState(() {
-        _pageSentences =
-            filtered
-                .map(
-                  (kp) => Sentence(
-                    id: kp.id,
-                    bookId: scope.bookId,
-                    page: kp.page ?? 0,
-                    chapter: kp.chapter ?? 0,
-                    index: 0,
-                    text: kp.text,
-                  ),
-                )
-                .toList();
-      });
-    } catch (e) {
-      AppLog.e(_tag, '加载知识库句子失败: $e');
-    }
-  }
+  // ===== UI 构建 =====
 
   @override
   Widget build(BuildContext context) {
-    final canPractice = _modelReady;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final item = _currentItem;
+    final score = _currentScore;
+
     return Scaffold(
-      appBar: AppBar(title: const Text('跟读练习')),
-      body: ListView(
-        padding: const EdgeInsets.all(16),
-        children: [
-          // [v0.1.38] 模型就绪状态 + 配置入口
-          _buildModelStatus(),
-          // [v0.1.38] 从知识库选择练习范围
-          Card(
-            child: ListTile(
-              leading: const Icon(
-                Icons.auto_stories,
-                size: 20,
-                color: StudyPalette.spinePdf,
-              ),
-              title: const Text('从知识库选择', style: TextStyle(fontSize: 14)),
-              subtitle: Text(
-                _scopeLabel ?? '选书籍→单元→课，从中跟读',
-                style: const TextStyle(
-                  fontSize: 12,
-                  color: StudyPalette.inkSoft,
-                ),
-              ),
-              trailing: const Icon(
-                Icons.chevron_right,
-                size: 18,
-                color: StudyPalette.inkSoft,
-              ),
-              onTap: () => _openKnowledgeScope(),
+      appBar: AppBar(
+        title: Text(widget.title ?? (item?.sourceTitle ?? '跟读练习')),
+        actions: [
+          if (_items.isNotEmpty)
+            IconButton(
+              icon: const Icon(Icons.format_list_bulleted),
+              tooltip: '句子清单',
+              onPressed: _showSentenceListSheet,
             ),
+          IconButton(
+            icon: const Icon(Icons.change_circle_outlined),
+            tooltip: '切换内容',
+            onPressed: _showSourceDialog,
           ),
-          // [v0.1.38] 当前页句子列表（从阅读页进入时）
-          if (_pageSentences.isNotEmpty) ...[
-            const SizedBox(height: 12),
-            _buildPageSentenceList(),
-          ],
-          const SizedBox(height: 16),
-          TextField(
-            controller: _sentenceController,
-            enabled: !_playing && !_listening && !_operationBusy,
-            decoration: const InputDecoration(
-              labelText: '跟读句子',
-              border: OutlineInputBorder(),
-            ),
-          ),
-          const SizedBox(height: 16),
-          Row(
-            children: [
-              Expanded(
-                child: FilledButton.icon(
-                  onPressed:
-                      canPractice && !_playing && !_listening && !_operationBusy
-                          ? _play
-                          : null,
-                  icon: const Icon(Icons.volume_up),
-                  label: Text(_playing ? '播放中...' : '播放'),
-                ),
-              ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: FilledButton.icon(
-                  onPressed:
-                      canPractice && !_playing && !_listening && !_operationBusy
-                          ? _slowPlay
-                          : null,
-                  icon: const Icon(Icons.hearing),
-                  label: Text(_playing ? '播放中...' : '慢速'),
-                  style: FilledButton.styleFrom(
-                    backgroundColor: StudyPalette.spinePdf,
+        ],
+      ),
+      body:
+          _loading
+              ? const Center(child: CircularProgressIndicator())
+              : _items.isEmpty
+              ? _buildEmptyState()
+              : Column(
+                children: [
+                  // 顶部总进度条
+                  LinearProgressIndicator(
+                    value:
+                        _items.isNotEmpty
+                            ? ((_currentIndex + 1) / _items.length).clamp(
+                              0.0,
+                              1.0,
+                            )
+                            : 0,
+                    backgroundColor: StudyPalette.linen,
+                    color: StudyPalette.ember,
+                    minHeight: 4,
                   ),
-                ),
-              ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: FilledButton.icon(
-                  onPressed:
-                      canPractice && !_playing && !_operationBusy
-                          ? _toggleListen
-                          : null,
-                  icon: Icon(_listening ? Icons.stop : Icons.mic),
-                  label: Text(_listening ? '停止' : '跟读'),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 8),
-          if (_listening)
-            SizedBox(
-              height: 48,
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: List.generate(_waveBars.length, (i) {
-                  final h = _waveBars[i].clamp(0.2, 1.0);
-                  return Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 2),
-                    child: AnimatedContainer(
-                      duration: const Duration(milliseconds: 100),
-                      width: 4,
-                      height: 48 * h,
-                      decoration: BoxDecoration(
-                        color: StudyPalette.ember.withValues(alpha: 0.7),
-                        borderRadius: BorderRadius.circular(2),
+                  if (!_modelReady) _buildModelWarningBanner(),
+                  Expanded(
+                    child: SingleChildScrollView(
+                      padding: const EdgeInsets.fromLTRB(16, 12, 16, 20),
+                      child: Column(
+                        children: [
+                          // 题号与卡片
+                          _buildMainCard(item!, score, isDark),
+                          const SizedBox(height: 16),
+                          // 状态与声波
+                          _buildVoiceWaveSection(),
+                          const SizedBox(height: 16),
+                          // 播放与跟读大按钮
+                          _buildControlButtons(),
+                          if (score != null) ...[
+                            const SizedBox(height: 16),
+                            _buildScoreResultCard(score, isDark),
+                          ],
+                        ],
                       ),
                     ),
-                  );
-                }),
+                  ),
+                  _buildBottomNavBar(),
+                ],
               ),
-            ),
-          const SizedBox(height: 8),
-          Center(
-            child: Text(
-              _status,
-              style: const TextStyle(fontSize: 12, color: StudyPalette.inkSoft),
-            ),
+    );
+  }
+
+  Widget _buildEmptyState() {
+    return Center(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const Icon(
+            Icons.record_voice_over_outlined,
+            size: 56,
+            color: StudyPalette.inkSoft,
           ),
           const SizedBox(height: 16),
-          if (_lastScore != null) ..._buildScoreCard(),
+          Text('暂无跟读内容', style: titleStyle(fontSize: 18)),
+          const SizedBox(height: 8),
+          const Text(
+            '点击下方按钮选择课文或生词进行跟读练习',
+            style: TextStyle(color: StudyPalette.inkSoft, fontSize: 13),
+          ),
+          const SizedBox(height: 20),
+          FilledButton.icon(
+            style: FilledButton.styleFrom(backgroundColor: StudyPalette.ember),
+            onPressed: _showSourceDialog,
+            icon: const Icon(Icons.add),
+            label: const Text('选择跟读内容'),
+          ),
         ],
       ),
     );
   }
 
-  /// 构建星级行（1-5 星）。
-  Widget _buildStarRating(int stars) {
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: List.generate(5, (i) {
-        return Icon(
-          i < stars ? Icons.star : Icons.star_border,
-          size: 28,
-          color: i < stars ? StudyPalette.ember : StudyPalette.inkSoft,
-        );
-      }),
+  Widget _buildModelWarningBanner() {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      color: StudyPalette.emberSoft.withValues(alpha: 0.5),
+      child: Row(
+        children: [
+          const Icon(
+            Icons.warning_amber_rounded,
+            color: StudyPalette.ember,
+            size: 20,
+          ),
+          const SizedBox(width: 8),
+          const Expanded(
+            child: Text(
+              '语音模型未就绪，录音评分将不可用',
+              style: TextStyle(
+                fontSize: 12,
+                color: StudyPalette.ember,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          ),
+          TextButton(
+            onPressed: _openSettings,
+            child: const Text(
+              '去配置',
+              style: TextStyle(fontSize: 12, color: StudyPalette.ember),
+            ),
+          ),
+        ],
+      ),
     );
   }
 
-  List<Widget> _buildScoreCard() {
-    final s = _lastScore!;
-    final color = s.passed ? StudyPalette.moss : StudyPalette.ember;
-    return [
-      Card(
-        child: Padding(
-          padding: const EdgeInsets.all(14),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  Text(
-                    '${s.score.toStringAsFixed(0)} 分',
-                    style: TextStyle(
-                      fontSize: 32,
+  Widget _buildMainCard(FollowItem item, FollowScore? score, bool isDark) {
+    return Card(
+      elevation: 0,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(18),
+        side: const BorderSide(color: StudyPalette.linen),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(18, 16, 18, 20),
+        child: Column(
+          children: [
+            Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 4,
+                  ),
+                  decoration: BoxDecoration(
+                    color: StudyPalette.emberSoft,
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Text(
+                    '第 ${_currentIndex + 1} / ${_items.length} 句',
+                    style: const TextStyle(
+                      fontSize: 12,
                       fontWeight: FontWeight.bold,
-                      color: color,
-                      fontFamily: 'ZCOOLKuaiLe',
+                      color: StudyPalette.ember,
                     ),
                   ),
-                  const SizedBox(width: 14),
-                  _buildStarRating(s.starCount),
-                  const Spacer(),
-                  Icon(
-                    s.passed ? Icons.check_circle : Icons.replay,
-                    color: color,
-                    size: 28,
+                ),
+                const Spacer(),
+                if (score != null)
+                  Row(
+                    children: List.generate(5, (i) {
+                      return Icon(
+                        i < score.starCount
+                            ? Icons.star_rounded
+                            : Icons.star_outline_rounded,
+                        color: StudyPalette.ember,
+                        size: 20,
+                      );
+                    }),
                   ),
-                ],
-              ),
-              const SizedBox(height: 6),
-              Text(
-                s.comment,
-                style: TextStyle(
-                  fontSize: 15,
-                  fontWeight: FontWeight.w600,
-                  color: color,
+              ],
+            ),
+            const SizedBox(height: 16),
+            // 拼音行
+            if (item.pinyin != null && item.pinyin!.isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 6),
+                child: Text(
+                  item.pinyin!,
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(
+                    fontSize: 14,
+                    letterSpacing: 1.5,
+                    color: StudyPalette.inkSoft,
+                    fontFamily: 'monospace',
+                  ),
                 ),
               ),
-              const SizedBox(height: 10),
-              Row(
-                children: [
-                  const Icon(Icons.mic, size: 14, color: StudyPalette.inkSoft),
-                  const SizedBox(width: 4),
-                  Expanded(
-                    child: Text(
-                      '你说的是：$_recognized',
-                      style: const TextStyle(
-                        fontSize: 13,
-                        color: StudyPalette.inkSoft,
-                      ),
-                    ),
-                  ),
-                  Text(
-                    '音节相似 ${(s.syllableSim * 100).round()}%',
-                    style: const TextStyle(
-                      fontSize: 11,
-                      color: StudyPalette.spinePdf,
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 10),
-              Text.rich(_buildDiffSpans()),
-            ],
-          ),
+            // 汉字主卡片
+            if (score == null)
+              Text(
+                item.text,
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  fontSize: item.text.length > 20 ? 20 : 24,
+                  height: 1.6,
+                  fontWeight: FontWeight.w600,
+                  color: StudyPalette.onSurfaceResolved(context),
+                ),
+              )
+            else
+              _buildDiffRichText(score),
+          ],
         ),
       ),
-    ];
+    );
   }
 
-  /// 逐字标色：对=苔绿 / 同音=靛蓝 / 错=砖红 / 漏=暖灰划线 / 多=橙划线。
-  InlineSpan _buildDiffSpans() {
-    final spans = <InlineSpan>[];
-    for (final d in _lastScore!.diffs) {
-      switch (d.status) {
-        case CharStatus.match:
-          spans.add(
-            TextSpan(
-              text: d.target,
-              style: const TextStyle(
-                color: StudyPalette.moss,
-                fontWeight: FontWeight.bold,
-              ),
+  Widget _buildDiffRichText(FollowScore score) {
+    final spans = <TextSpan>[];
+    for (final diff in score.diffs) {
+      if (diff.status == CharStatus.match ||
+          diff.status == CharStatus.homophone) {
+        spans.add(
+          TextSpan(
+            text: diff.target ?? '',
+            style: const TextStyle(
+              color: StudyPalette.moss,
+              fontWeight: FontWeight.bold,
+              fontSize: 22,
             ),
-          );
-        case CharStatus.homophone:
-          spans.add(
-            TextSpan(
-              text: d.target,
-              style: const TextStyle(
-                color: StudyPalette.spinePdf,
-                decoration: TextDecoration.underline,
-              ),
+          ),
+        );
+      } else if (diff.status == CharStatus.wrong) {
+        spans.add(
+          TextSpan(
+            text: diff.target ?? '',
+            style: const TextStyle(
+              color: StudyPalette.ember,
+              fontWeight: FontWeight.bold,
+              decoration: TextDecoration.underline,
+              fontSize: 22,
             ),
-          );
-        case CharStatus.wrong:
-          spans.add(
-            TextSpan(
-              text: '${d.target}(${d.actual})',
-              style: const TextStyle(
-                color: Color(0xFFB6482E),
-                fontWeight: FontWeight.bold,
-              ),
+          ),
+        );
+      } else if (diff.status == CharStatus.missing) {
+        spans.add(
+          TextSpan(
+            text: diff.target ?? '（漏）',
+            style: TextStyle(
+              color: StudyPalette.ember.withValues(alpha: 0.7),
+              fontSize: 20,
+              decoration: TextDecoration.underline,
             ),
-          );
-        case CharStatus.missing:
-          spans.add(
-            TextSpan(
-              text: d.target ?? '',
-              style: const TextStyle(
-                color: StudyPalette.inkSoft,
-                decoration: TextDecoration.lineThrough,
-              ),
-            ),
-          );
-        case CharStatus.extra:
-          spans.add(
-            TextSpan(
-              text: '+${d.actual}',
-              style: const TextStyle(
-                color: StudyPalette.ember,
-                decoration: TextDecoration.lineThrough,
-              ),
-            ),
-          );
+          ),
+        );
+      } else if (diff.status == CharStatus.extra) {
+        spans.add(
+          TextSpan(
+            text: '(${diff.actual ?? ''})',
+            style: const TextStyle(color: StudyPalette.inkSoft, fontSize: 16),
+          ),
+        );
       }
     }
-    return TextSpan(
-      style: const TextStyle(fontSize: 20, height: 1.4),
-      children: spans,
+
+    return Text.rich(
+      TextSpan(children: spans),
+      textAlign: TextAlign.center,
+      style: const TextStyle(height: 1.6),
+    );
+  }
+
+  Widget _buildVoiceWaveSection() {
+    return Column(
+      children: [
+        if (_listening)
+          SizedBox(
+            height: 40,
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: List.generate(_waveBars.length, (i) {
+                final h = _waveBars[i].clamp(0.2, 1.0);
+                return Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 2.5),
+                  child: AnimatedContainer(
+                    duration: const Duration(milliseconds: 90),
+                    width: 5,
+                    height: 40 * h,
+                    decoration: BoxDecoration(
+                      color: StudyPalette.ember,
+                      borderRadius: BorderRadius.circular(3),
+                    ),
+                  ),
+                );
+              }),
+            ),
+          ),
+        const SizedBox(height: 4),
+        Text(
+          _status,
+          textAlign: TextAlign.center,
+          style: TextStyle(
+            fontSize: 13,
+            color: _listening ? StudyPalette.ember : StudyPalette.inkSoft,
+            fontWeight: _listening ? FontWeight.w600 : FontWeight.normal,
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildControlButtons() {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        // 标准范读
+        _buildActionBtn(
+          icon:
+              _playing && !_slowPlaying
+                  ? Icons.pause_circle_filled
+                  : Icons.volume_up_outlined,
+          label: '标准范读',
+          color: StudyPalette.emberSoft,
+          textColor: StudyPalette.ember,
+          onTap: _playing || _listening ? null : _playNormal,
+        ),
+        const SizedBox(width: 14),
+        // 慢速领读
+        _buildActionBtn(
+          icon:
+              _slowPlaying
+                  ? Icons.pause_circle_filled
+                  : Icons.slow_motion_video,
+          label: '慢速领读',
+          color: StudyPalette.spinePdf.withValues(alpha: 0.15),
+          textColor: StudyPalette.spinePdf,
+          onTap: _playing || _listening ? null : _playSlow,
+        ),
+        const SizedBox(width: 14),
+        // 大号麦克风跟读
+        GestureDetector(
+          onTap: _modelReady && !_playing ? _toggleListen : null,
+          child: Container(
+            width: 72,
+            height: 72,
+            decoration: BoxDecoration(
+              color: _listening ? Colors.red : StudyPalette.ember,
+              shape: BoxShape.circle,
+              boxShadow: [
+                BoxShadow(
+                  color: (_listening ? Colors.red : StudyPalette.ember)
+                      .withValues(alpha: 0.35),
+                  blurRadius: 16,
+                  offset: const Offset(0, 6),
+                ),
+              ],
+            ),
+            child: Icon(
+              _listening ? Icons.stop_rounded : Icons.mic_rounded,
+              color: Colors.white,
+              size: 38,
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildActionBtn({
+    required IconData icon,
+    required String label,
+    required Color color,
+    required Color textColor,
+    required VoidCallback? onTap,
+  }) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(16),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+        decoration: BoxDecoration(
+          color: color,
+          borderRadius: BorderRadius.circular(16),
+        ),
+        child: Column(
+          children: [
+            Icon(icon, color: textColor, size: 22),
+            const SizedBox(height: 4),
+            Text(
+              label,
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+                color: textColor,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildScoreResultCard(FollowScore score, bool isDark) {
+    final recognized = _recognizedMap[_currentIndex] ?? '';
+    return Card(
+      elevation: 0,
+      color: isDark ? StudyPalette.darkCard : StudyPalette.parchmentDeep,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(16),
+        side: BorderSide(
+          color:
+              score.passed
+                  ? StudyPalette.moss.withValues(alpha: 0.5)
+                  : StudyPalette.ember.withValues(alpha: 0.5),
+        ),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          children: [
+            Row(
+              children: [
+                Text(
+                  '${score.score.toStringAsFixed(0)} 分',
+                  style: TextStyle(
+                    fontSize: 26,
+                    fontWeight: FontWeight.bold,
+                    color:
+                        score.passed ? StudyPalette.moss : StudyPalette.ember,
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Text(
+                    score.comment,
+                    style: TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w600,
+                      color:
+                          score.passed ? StudyPalette.moss : StudyPalette.ember,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            if (recognized.isNotEmpty) ...[
+              const SizedBox(height: 8),
+              Align(
+                alignment: Alignment.centerLeft,
+                child: Text(
+                  '我读的：$recognized',
+                  style: const TextStyle(
+                    fontSize: 12,
+                    color: StudyPalette.inkSoft,
+                  ),
+                ),
+              ),
+            ],
+            if (!score.passed) ...[
+              const SizedBox(height: 6),
+              const Align(
+                alignment: Alignment.centerLeft,
+                child: Text(
+                  '💡 已将该句子记录到生词本，稍后可在生词本专项练习',
+                  style: TextStyle(fontSize: 11, color: StudyPalette.ember),
+                ),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildBottomNavBar() {
+    final isLast = _currentIndex >= _items.length - 1;
+    final score = _currentScore;
+
+    return Container(
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 20),
+      decoration: BoxDecoration(
+        color: Theme.of(context).cardColor,
+        border: const Border(top: BorderSide(color: StudyPalette.linen)),
+      ),
+      child: Row(
+        children: [
+          if (_currentIndex > 0)
+            OutlinedButton.icon(
+              onPressed: _goToPrev,
+              icon: const Icon(Icons.arrow_back_ios, size: 14),
+              label: const Text('上一句'),
+            )
+          else
+            const SizedBox(width: 80),
+          const Spacer(),
+          if (score != null && _autoNextCountdown > 0)
+            Padding(
+              padding: const EdgeInsets.only(right: 8),
+              child: ActionChip(
+                label: Text('$_autoNextCountdown 秒后自动下一句 (取消)'),
+                onPressed: _cancelAutoNext,
+              ),
+            ),
+          FilledButton.icon(
+            style: FilledButton.styleFrom(
+              backgroundColor:
+                  score != null && score.passed
+                      ? StudyPalette.moss
+                      : StudyPalette.ember,
+              padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
+            ),
+            onPressed: () {
+              if (isLast && score != null) {
+                _showFinishSummary();
+              } else {
+                _goToNext();
+              }
+            },
+            icon: Icon(
+              isLast ? Icons.emoji_events : Icons.arrow_forward_ios,
+              size: 16,
+            ),
+            label: Text(
+              isLast ? (score != null ? '查看总成绩' : '跳过') : '下一句',
+              style: const TextStyle(fontWeight: FontWeight.bold),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
