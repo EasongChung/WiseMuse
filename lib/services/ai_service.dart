@@ -77,13 +77,8 @@ class AiService {
           if (jsonObject) {
             localPrompt = '$prompt\n\nOutput ONLY valid JSON, no explanation.';
           }
-          final available = await _llm.isAvailable();
-          if (!available) {
-            AppLog.d(_tag, '本地 llama 不可用，跳过');
-            break;
-          }
-          if (!_llm.isLoaded) {
-            AppLog.d(_tag, '本地 llama 未加载模型，跳过');
+          if (!await _llm.ensureReady()) {
+            AppLog.d(_tag, '本地 llama 未就绪，回落下一引擎');
             break;
           }
           final text = await _llm.chat(
@@ -125,10 +120,10 @@ class AiService {
   /// 云端是否已配置可用。
   Future<bool> isCloudReady() => SettingsService.instance.isApiConfigured();
 
-  /// 本地引擎是否可用且模型已加载。
+  /// 本地引擎是否可用；按设置允许时会自动加载默认模型。
   Future<bool> isLocalReady() async {
     try {
-      return await _llm.isAvailable() && _llm.isLoaded;
+      return await _llm.ensureReady();
     } catch (_) {
       return false;
     }

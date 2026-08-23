@@ -39,9 +39,9 @@ class AiTutorService {
         return b.wrongCount.compareTo(a.wrongCount);
       });
 
-      // 若 AI 可用，让 AI 从候选集中精排
+      // 云端或本地任一引擎可用时，让 AI 从候选集中精排。
       final ai = AiService();
-      if (await ai.isCloudReady()) {
+      if (await ai.isCloudReady() || await ai.isLocalReady()) {
         final candidateTexts = points
             .take(count * 2)
             .map((p) => p.text)

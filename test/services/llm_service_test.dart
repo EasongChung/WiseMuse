@@ -1,5 +1,6 @@
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:wisemuse/services/llm_service.dart';
 
 void main() {
@@ -11,9 +12,13 @@ void main() {
   setUp(() {
     messenger =
         TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+    SharedPreferences.setMockInitialValues({});
   });
 
-  tearDown(() {
+  tearDown(() async {
+    try {
+      await LlmService.instance.unload();
+    } catch (_) {}
     messenger.setMockMethodCallHandler(llmChannel, null);
   });
 
@@ -67,6 +72,85 @@ void main() {
 
       final result = await LlmService.instance.chat('测试问题');
       expect(result, isEmpty);
+    });
+
+    test('ensureReady 自动加载默认模型', () async {
+      var initCount = 0;
+      messenger.setMockMethodCallHandler(llmChannel, (call) async {
+        if (call.method == 'isAvailable') return true;
+        if (call.method == 'init') {
+          initCount++;
+          expect(call.arguments['modelPath'], '/models/default.gguf');
+          return true;
+        }
+        return null;
+      });
+      SharedPreferences.setMockInitialValues({
+        'default_local_model': '/models/default.gguf',
+        'auto_load_local_model': true,
+      });
+
+      expect(await LlmService.instance.ensureReady(), isTrue);
+      expect(initCount, 1);
+      expect(LlmService.instance.isLoaded, isTrue);
+    });
+
+    test('ensureReady 兼容旧 local_model_path', () async {
+      var initPath = '';
+      messenger.setMockMethodCallHandler(llmChannel, (call) async {
+        if (call.method == 'isAvailable') return true;
+        if (call.method == 'init') {
+          initPath = call.arguments['modelPath'] as String;
+          return true;
+        }
+        return null;
+      });
+      SharedPreferences.setMockInitialValues({
+        'local_model_path': '/models/legacy.gguf',
+      });
+
+      expect(await LlmService.instance.ensureReady(), isTrue);
+      expect(initPath, '/models/legacy.gguf');
+    });
+
+    test('ensureReady 关闭自动加载时不初始化', () async {
+      var initCount = 0;
+      messenger.setMockMethodCallHandler(llmChannel, (call) async {
+        if (call.method == 'isAvailable') return true;
+        if (call.method == 'init') initCount++;
+        return true;
+      });
+      SharedPreferences.setMockInitialValues({
+        'default_local_model': '/models/default.gguf',
+        'auto_load_local_model': false,
+      });
+
+      expect(await LlmService.instance.ensureReady(), isFalse);
+      expect(initCount, 0);
+    });
+
+    test('并发 ensureReady 只初始化一次', () async {
+      var initCount = 0;
+      messenger.setMockMethodCallHandler(llmChannel, (call) async {
+        if (call.method == 'isAvailable') return true;
+        if (call.method == 'init') {
+          initCount++;
+          await Future<void>.delayed(const Duration(milliseconds: 10));
+          return true;
+        }
+        return null;
+      });
+      SharedPreferences.setMockInitialValues({
+        'default_local_model': '/models/default.gguf',
+      });
+
+      final results = await Future.wait([
+        LlmService.instance.ensureReady(),
+        LlmService.instance.ensureReady(),
+        LlmService.instance.ensureReady(),
+      ]);
+      expect(results, [true, true, true]);
+      expect(initCount, 1);
     });
   });
 }

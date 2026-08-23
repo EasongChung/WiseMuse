@@ -166,13 +166,8 @@ class TranslationEngine {
   Future<String?> _tryLlm(String text, String source, String target) async {
     AppLog.d(_tag, '尝试 llama 翻译');
     try {
-      final available = await _llm.isAvailable();
-      if (!available) {
-        AppLog.d(_tag, 'llama 不可用（SDK 版本不足），跳过');
-        return null;
-      }
-      if (!_llm.isLoaded) {
-        AppLog.d(_tag, 'llama 未加载模型，跳过');
+      if (!await _llm.ensureReady()) {
+        AppLog.d(_tag, 'llama 未就绪，跳过');
         return null;
       }
       final prompt = _buildLlmPrompt(text, source, target);

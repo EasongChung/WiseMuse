@@ -1,6 +1,7 @@
 import 'package:flutter/services.dart';
 
 import '../core/debug/app_log.dart';
+import '../core/settings/settings_service.dart';
 
 /// [v0.1.0] llama.android 本地 LLM 服务（MethodChannel → LlamaBridge.kt）。
 ///
@@ -22,6 +23,7 @@ class LlmService {
 
   static const _channel = MethodChannel('com.zqpd.wisemuse/llm');
   bool _loaded = false;
+  Future<bool>? _loadingFuture;
 
   /// 引擎是否在当前设备可用（SDK_INT>=30；判定在 Kotlin 侧，与 loadLibrary 同址）。
   Future<bool> isAvailable() async {
@@ -40,6 +42,64 @@ class LlmService {
 
   /// 模型是否已加载。
   bool get isLoaded => _loaded;
+
+  /// 确保默认本地模型已就绪。
+  ///
+  /// 所有 AI 功能统一从这里执行冷启动；并发请求共享同一个加载 Future，避免
+  /// 重复初始化原生单例。返回 false 时由上层按策略回落云端或确定性结果。
+  Future<bool> ensureReady() async {
+    if (_loaded) return true;
+    final inFlight = _loadingFuture;
+    if (inFlight != null) return inFlight;
+
+    final future = _loadConfiguredModel();
+    _loadingFuture = future;
+    try {
+      return await future;
+    } finally {
+      if (identical(_loadingFuture, future)) {
+        _loadingFuture = null;
+      }
+    }
+  }
+
+  Future<bool> _loadConfiguredModel() async {
+    final settings = SettingsService.instance;
+    if (await settings.isLlamaEngineDisabled()) {
+      AppLog.d('llm', 'route_skip: 本地引擎已被用户禁用');
+      return false;
+    }
+    if (!await isAvailable()) {
+      AppLog.d('llm', 'route_skip: 本地推理引擎不可用');
+      return false;
+    }
+    if (!await settings.getAutoLoadLocalModel()) {
+      AppLog.d('llm', 'route_skip: 自动加载本地模型已关闭');
+      return false;
+    }
+
+    var modelPath = (await settings.getDefaultLocalModel())?.trim() ?? '';
+    if (modelPath.isEmpty) {
+      modelPath = (await settings.getLocalModelPath())?.trim() ?? '';
+    }
+    if (modelPath.isEmpty) {
+      AppLog.d('llm', 'route_skip: 未配置默认本地模型');
+      return false;
+    }
+
+    AppLog.d('llm', 'route_load: 自动加载默认本地模型');
+    try {
+      final ok = await init(modelPath);
+      AppLog.d(
+        'llm',
+        ok ? 'route_ready: 本地模型加载完成' : 'route_fail: 本地模型加载返回 false',
+      );
+      return ok;
+    } catch (e, s) {
+      AppLog.e('llm', 'route_fail: 本地模型加载异常: $e\n$s');
+      return false;
+    }
+  }
 
   /// 发送用户 prompt，返回完整生成文本。
   ///

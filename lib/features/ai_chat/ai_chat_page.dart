@@ -15,7 +15,6 @@ import '../../core/storage/database.dart';
 import '../../core/theme/app_theme.dart';
 import '../../services/ai_service.dart';
 import '../../services/asr_service.dart';
-import '../../services/llm_service.dart';
 import '../../services/native_tts_service.dart';
 import '../../services/picker_service.dart';
 import '../../services/rag/rag_qa_service.dart';
@@ -113,25 +112,6 @@ class _AiChatPageState extends State<AiChatPage> {
     });
   }
 
-  /// [v0.1.53] 确保本地模型已加载。
-  ///
-  /// 与 [AiService] 不同，本方法**不**判断 `preferOffline`/`isApiConfigured`，
-  /// 而是直接去加载本地模型。调用时机：云端 + 本地首次双失败后的回落重试。
-  Future<bool> _ensureLocalModel() async {
-    final modelPath = await SettingsService.instance.getLocalModelPath();
-    if (modelPath == null || modelPath.isEmpty) return false;
-
-    final llm = LlmService.instance;
-    if (llm.isLoaded) return true;
-    try {
-      AppLog.d(_tag, '自动加载本地模型: $modelPath');
-      return await llm.init(modelPath);
-    } catch (e) {
-      AppLog.e(_tag, '自动加载本地模型失败: $e');
-      return false;
-    }
-  }
-
   Future<void> _sendMessage([String? presetText]) async {
     final query = (presetText ?? _textController.text).trim();
     final hasImages = _pendingImagePaths.isNotEmpty;
@@ -188,23 +168,8 @@ class _AiChatPageState extends State<AiChatPage> {
         final aiResult = await AiService().complete(prompt);
 
         if (aiResult == null) {
-          // [v0.1.53] 云端+本地首次双失败 → 真正加载本地模型，直接用本地引擎重试
-          final localReady = await _ensureLocalModel();
-          if (localReady) {
-            try {
-              final localPrompt = _buildChatPrompt(query, isLocal: true);
-              final localText = await LlmService.instance.chat(localPrompt);
-              answer =
-                  localText.isNotEmpty
-                      ? localText
-                      : '抱歉，本地模型这次没有产出回答，请换个问题再试试。';
-            } catch (e) {
-              AppLog.e(_tag, '本地模型对话失败: $e');
-              answer = '抱歉，本地模型对话失败：$e';
-            }
-          } else {
-            answer = '抱歉，我现在无法回答这个问题。云端模型不可用，且未配置或未能加载本地模型。请检查「设置」中的大模型配置。';
-          }
+          answer =
+              '抱歉，我现在无法回答这个问题。云端模型不可用，且本地模型未配置、未能加载或没有产出回答。请检查「设置」中的大模型配置。';
         } else {
           answer = aiResult.text;
         }
