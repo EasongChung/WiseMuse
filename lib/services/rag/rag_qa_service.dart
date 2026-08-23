@@ -1,4 +1,5 @@
 import '../../core/debug/app_log.dart';
+import '../../core/models/chat_message.dart';
 import '../ai_service.dart';
 import '../profile_service.dart';
 import 'rag_retrieval_service.dart';
@@ -22,7 +23,11 @@ class RagQaService {
   ///
   /// [bookId] 书籍 ID；[question] 儿童提问原文。
   /// 返回 Markdown 格式回答（带书籍引用）。失败/无索引返回 null。
-  Future<String?> ask(String bookId, String question) async {
+  Future<String?> ask(
+    String bookId,
+    String question, {
+    List<ChatMessage>? history,
+  }) async {
     if (question.trim().isEmpty) return null;
 
     // 检查索引
@@ -48,7 +53,11 @@ class RagQaService {
 
     // 调用 AI 双引擎
     final ai = AiService();
-    final result = await ai.complete(prompt, predictLength: 1024);
+    final result = await ai.complete(
+      prompt,
+      predictLength: 1024,
+      history: history,
+    );
     if (result != null && result.text.isNotEmpty) {
       var answer = result.text.trim();
       // 去掉可能的代码围栏

@@ -8,6 +8,7 @@ import 'package:flutter_markdown/flutter_markdown.dart';
 import '../../core/debug/app_log.dart';
 import '../../core/models/book.dart';
 import '../../core/models/chat_message.dart';
+import '../../core/models/chat_session.dart';
 import '../../core/settings/settings_service.dart';
 import '../../core/storage/book_dao.dart';
 import '../../core/storage/chat_dao.dart';
@@ -17,6 +18,7 @@ import '../../services/ai_service.dart';
 import '../../services/asr_service.dart';
 import '../../services/native_tts_service.dart';
 import '../../services/picker_service.dart';
+import '../../services/profile_service.dart';
 import '../../services/rag/rag_qa_service.dart';
 import '../../services/vosk_asr_service.dart';
 import '../../widgets/import_sheet.dart';
@@ -47,6 +49,7 @@ class _AiChatPageState extends State<AiChatPage> {
   final AsrService _asr = VoskAsrService();
 
   List<ChatMessage> _messages = [];
+  ChatSession? _currentSession;
   List<Book> _books = [];
   String? _selectedBookId; // null = 通用助教，非空 = 指定书籍知识库
   bool _loading = true;
@@ -74,12 +77,31 @@ class _AiChatPageState extends State<AiChatPage> {
 
   Future<void> _init() async {
     try {
+      await ProfileService.instance.ensureInitialized();
+      final profileId = ProfileService.instance.currentProfileId ?? 'default';
       final db = await DatabaseProvider.database;
-      final books = await BookDao(db).getAll();
-      final msgs = await ChatDao(db).getMessages(bookId: _selectedBookId);
+      final books = await BookDao(db, profileId: profileId).getAll();
+      final chatDao = ChatDao(db, profileId: profileId);
+      final scope = _selectedBookId == null ? ChatScope.normal : ChatScope.book;
+      var sessions = await chatDao.getSessions(
+        scope: scope,
+        bookId: _selectedBookId,
+      );
+      if (sessions.isEmpty) {
+        final session = ChatSession.create(
+          profileId: profileId,
+          scope: scope,
+          bookId: _selectedBookId,
+        );
+        await chatDao.insertSession(session);
+        sessions = [session];
+      }
+      final current = sessions.first;
+      final msgs = await chatDao.getMessages(sessionId: current.id);
       if (!mounted) return;
       setState(() {
         _books = books;
+        _currentSession = current;
         _messages = msgs;
         _loading = false;
       });
@@ -90,14 +112,32 @@ class _AiChatPageState extends State<AiChatPage> {
     }
   }
 
-  Future<void> _loadMessages() async {
-    try {
-      final db = await DatabaseProvider.database;
-      final msgs = await ChatDao(db).getMessages(bookId: _selectedBookId);
-      if (!mounted) return;
-      setState(() => _messages = msgs);
-      _scrollToBottom();
-    } catch (_) {}
+  Future<void> _changeScope(String? bookId) async {
+    final profileId = _currentSession?.profileId ?? 'default';
+    final scope = bookId == null ? ChatScope.normal : ChatScope.book;
+    final db = await DatabaseProvider.database;
+    final dao = ChatDao(db, profileId: profileId);
+    var sessions = await dao.getSessions(scope: scope, bookId: bookId);
+    if (sessions.isEmpty) {
+      final session = ChatSession.create(
+        profileId: profileId,
+        scope: scope,
+        bookId: bookId,
+        title: bookId == null ? '通用对话' : '书籍问答',
+      );
+      await dao.insertSession(session);
+      sessions = [session];
+    }
+    final session = sessions.first;
+    final messages = await dao.getMessages(sessionId: session.id);
+    if (!mounted) return;
+    setState(() {
+      _selectedBookId = bookId;
+      _currentSession = session;
+      _messages = messages;
+      _pendingImagePaths = [];
+    });
+    _scrollToBottom();
   }
 
   void _scrollToBottom() {
@@ -131,15 +171,21 @@ class _AiChatPageState extends State<AiChatPage> {
     }
 
     _textController.clear();
+    final session = _currentSession;
+    if (session == null) return;
     final db = await DatabaseProvider.database;
-    final chatDao = ChatDao(db);
+    final chatDao = ChatDao(db, profileId: session.profileId);
 
     Book? currentBook;
     if (_selectedBookId != null) {
       currentBook = _books.where((b) => b.id == _selectedBookId).firstOrNull;
     }
 
+    final history = List<ChatMessage>.from(_messages);
     final userMsg = ChatMessage.create(
+      sessionId: session.id,
+      profileId: session.profileId,
+      scope: session.scope,
       role: 'user',
       content: query,
       bookId: _selectedBookId,
@@ -160,12 +206,13 @@ class _AiChatPageState extends State<AiChatPage> {
         final ragAnswer = await RagQaService.instance.ask(
           _selectedBookId!,
           query,
+          history: history,
         );
         answer = ragAnswer ?? '在知识库中未找到相关内容，建议换个问题提问。';
       } else {
         final preferOffline = await SettingsService.instance.getPreferOffline();
         final prompt = _buildChatPrompt(query, isLocal: preferOffline);
-        final aiResult = await AiService().complete(prompt);
+        final aiResult = await AiService().complete(prompt, history: history);
 
         if (aiResult == null) {
           answer =
@@ -182,6 +229,9 @@ class _AiChatPageState extends State<AiChatPage> {
     answer = _cleanSpecialTokens(answer);
 
     final assistantMsg = ChatMessage.create(
+      sessionId: session.id,
+      profileId: session.profileId,
+      scope: session.scope,
       role: 'assistant',
       content: answer,
       bookId: _selectedBookId,
@@ -200,15 +250,21 @@ class _AiChatPageState extends State<AiChatPage> {
 
   /// [v0.1.52] 发送图片消息（多模态云端，本地引擎不支持图片）。
   Future<void> _sendImageMessage(String query, List<String> imagePaths) async {
+    final session = _currentSession;
+    if (session == null) return;
     final db = await DatabaseProvider.database;
-    final chatDao = ChatDao(db);
+    final chatDao = ChatDao(db, profileId: session.profileId);
 
     Book? currentBook;
     if (_selectedBookId != null) {
       currentBook = _books.where((b) => b.id == _selectedBookId).firstOrNull;
     }
 
+    final history = List<ChatMessage>.from(_messages);
     final userMsg = ChatMessage.create(
+      sessionId: session.id,
+      profileId: session.profileId,
+      scope: session.scope,
       role: 'user',
       content: query.isEmpty ? '请描述这张图片' : query,
       imagePaths: imagePaths,
@@ -230,6 +286,7 @@ class _AiChatPageState extends State<AiChatPage> {
         imagePaths,
         prompt: query.isNotEmpty ? query : '请详细描述这张图片里的内容',
         predictLength: 1024,
+        history: history,
       );
 
       if (visionResult == '__MODEL_NOT_VISION__') {
@@ -239,7 +296,10 @@ class _AiChatPageState extends State<AiChatPage> {
       } else {
         if (query.isNotEmpty) {
           final prompt = _buildChatPrompt(query);
-          final textResult = await AiService().complete(prompt);
+          final textResult = await AiService().complete(
+            prompt,
+            history: history,
+          );
           answer = textResult?.text ?? '抱歉，图片分析失败，请检查模型或网络设置。';
         } else {
           answer = '抱歉，图片分析失败，请检查模型或网络设置。';
@@ -253,6 +313,9 @@ class _AiChatPageState extends State<AiChatPage> {
     answer = _cleanSpecialTokens(answer);
 
     final assistantMsg = ChatMessage.create(
+      sessionId: session.id,
+      profileId: session.profileId,
+      scope: session.scope,
       role: 'assistant',
       content: answer,
       bookId: _selectedBookId,
@@ -379,7 +442,7 @@ class _AiChatPageState extends State<AiChatPage> {
   }
 
   Future<void> _startNewChat() async {
-    if (_messages.isEmpty) return;
+    if (_currentSession == null) return;
     final ok = await showDialog<bool>(
       context: context,
       builder:
@@ -399,19 +462,50 @@ class _AiChatPageState extends State<AiChatPage> {
           ),
     );
     if (ok == true && mounted) {
+      final current = _currentSession!;
+      final db = await DatabaseProvider.database;
+      final chatDao = ChatDao(db, profileId: current.profileId);
+      final session = ChatSession.create(
+        profileId: current.profileId,
+        scope: current.scope,
+        bookId: current.bookId,
+      );
+      await chatDao.insertSession(session);
+      if (!mounted) return;
       setState(() {
+        _currentSession = session;
         _messages = [];
         _pendingImagePaths = [];
       });
       _textController.clear();
-      TopToast.show(context, '已开启全新对话');
+      TopToast.show(context, '已开启全新对话，历史记录已保留');
     }
   }
 
-  Future<void> _showHistorySheet() async {
+  Future<void> _switchSession(ChatSession session) async {
     final db = await DatabaseProvider.database;
-    final chatDao = ChatDao(db);
-    final allMsgs = await chatDao.getMessages(bookId: _selectedBookId);
+    final messages = await ChatDao(
+      db,
+      profileId: session.profileId,
+    ).getMessages(sessionId: session.id);
+    if (!mounted) return;
+    setState(() {
+      _currentSession = session;
+      _messages = messages;
+      _pendingImagePaths = [];
+    });
+    _scrollToBottom();
+  }
+
+  Future<void> _showHistorySheet() async {
+    final current = _currentSession;
+    if (current == null) return;
+    final db = await DatabaseProvider.database;
+    final chatDao = ChatDao(db, profileId: current.profileId);
+    final sessions = await chatDao.getSessions(
+      scope: current.scope,
+      bookId: current.bookId,
+    );
 
     if (!mounted) return;
     showModalBottomSheet(
@@ -457,7 +551,7 @@ class _AiChatPageState extends State<AiChatPage> {
                           const SizedBox(width: 8),
                           Text('会话历史记录', style: titleStyle(fontSize: 16)),
                           const Spacer(),
-                          if (allMsgs.isNotEmpty)
+                          if (sessions.isNotEmpty)
                             TextButton.icon(
                               icon: const Icon(
                                 Icons.delete_sweep,
@@ -499,10 +593,22 @@ class _AiChatPageState extends State<AiChatPage> {
                                       ),
                                 );
                                 if (confirm == true) {
-                                  await chatDao.clearMessages(
-                                    bookId: _selectedBookId,
+                                  await chatDao.deleteSessions(
+                                    scope: current.scope,
+                                    bookId: current.bookId,
                                   );
-                                  await _loadMessages();
+                                  final replacement = ChatSession.create(
+                                    profileId: current.profileId,
+                                    scope: current.scope,
+                                    bookId: current.bookId,
+                                  );
+                                  await chatDao.insertSession(replacement);
+                                  if (mounted) {
+                                    setState(() {
+                                      _currentSession = replacement;
+                                      _messages = [];
+                                    });
+                                  }
                                   if (ctx.mounted) Navigator.pop(ctx);
                                 }
                               },
@@ -513,7 +619,7 @@ class _AiChatPageState extends State<AiChatPage> {
                     const Divider(height: 1),
                     Expanded(
                       child:
-                          allMsgs.isEmpty
+                          sessions.isEmpty
                               ? const Center(
                                 child: Text(
                                   '暂无历史对话记录',
@@ -522,46 +628,83 @@ class _AiChatPageState extends State<AiChatPage> {
                               )
                               : ListView.separated(
                                 padding: const EdgeInsets.all(12),
-                                itemCount: allMsgs.length,
+                                itemCount: sessions.length,
                                 separatorBuilder:
                                     (_, _) => const Divider(height: 1),
                                 itemBuilder: (c, i) {
-                                  final m = allMsgs[i];
-                                  final isUser = m.role == 'user';
+                                  final session = sessions[i];
+                                  final selected =
+                                      session.id == _currentSession?.id;
+                                  final title =
+                                      session.title?.trim().isNotEmpty == true
+                                          ? session.title!.trim()
+                                          : '新会话';
+                                  final time =
+                                      DateTime.fromMicrosecondsSinceEpoch(
+                                        session.updatedAt,
+                                      );
                                   return ListTile(
                                     dense: true,
+                                    selected: selected,
                                     leading: CircleAvatar(
                                       radius: 14,
                                       backgroundColor:
-                                          isUser
+                                          selected
                                               ? StudyPalette.ember
                                               : StudyPalette.moss,
-                                      child: Icon(
-                                        isUser
-                                            ? Icons.person
-                                            : Icons.auto_awesome,
+                                      child: const Icon(
+                                        Icons.forum_outlined,
                                         size: 14,
                                         color: Colors.white,
                                       ),
                                     ),
                                     title: Text(
-                                      m.content,
-                                      maxLines: 2,
+                                      title,
+                                      maxLines: 1,
                                       overflow: TextOverflow.ellipsis,
                                       style: const TextStyle(fontSize: 13),
                                     ),
                                     subtitle: Text(
-                                      isUser ? '提问' : '回答',
+                                      '${time.month}月${time.day}日 ${time.hour.toString().padLeft(2, '0')}:${time.minute.toString().padLeft(2, '0')}',
                                       style: const TextStyle(
                                         fontSize: 11,
                                         color: StudyPalette.inkSoft,
                                       ),
                                     ),
-                                    onTap: () {
-                                      Clipboard.setData(
-                                        ClipboardData(text: m.content),
-                                      );
-                                      TopToast.show(context, '已复制内容到剪贴板');
+                                    trailing: IconButton(
+                                      icon: const Icon(
+                                        Icons.delete_outline,
+                                        size: 18,
+                                      ),
+                                      tooltip: '删除会话',
+                                      onPressed: () async {
+                                        await chatDao.deleteSession(session.id);
+                                        sessions.removeAt(i);
+                                        setSheetState(() {});
+                                        if (selected) {
+                                          if (sessions.isNotEmpty) {
+                                            await _switchSession(
+                                              sessions.first,
+                                            );
+                                          } else {
+                                            final replacement =
+                                                ChatSession.create(
+                                                  profileId: current.profileId,
+                                                  scope: current.scope,
+                                                  bookId: current.bookId,
+                                                );
+                                            await chatDao.insertSession(
+                                              replacement,
+                                            );
+                                            sessions.add(replacement);
+                                            await _switchSession(replacement);
+                                          }
+                                        }
+                                      },
+                                    ),
+                                    onTap: () async {
+                                      await _switchSession(session);
+                                      if (ctx.mounted) Navigator.pop(ctx);
                                     },
                                   );
                                 },
@@ -651,10 +794,7 @@ class _AiChatPageState extends State<AiChatPage> {
                     ),
                   ),
                 ],
-                onChanged: (v) {
-                  setState(() => _selectedBookId = v);
-                  _loadMessages();
-                },
+                onChanged: _changeScope,
               ),
             ),
           ),

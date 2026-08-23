@@ -12,7 +12,7 @@ class DatabaseProvider {
   DatabaseProvider._();
 
   static const String dbName = 'wisemuse.db';
-  static const int dbVersion = 9;
+  static const int dbVersion = 10;
 
   static Database? _db;
 
@@ -53,9 +53,12 @@ class DatabaseProvider {
   static const String _createQuizAttemptIndexesSql = '''
       CREATE INDEX idx_quiz_book ON quiz_attempts(book_id);\n      CREATE INDEX idx_quiz_book_chapter ON quiz_attempts(book_id, chapter);\n    ''';
 
-  // ===== chat_messages 表 SQL（v5 新增，v6 补 session_id, v7 补 image_paths）=====
+  // ===== chat_messages / chat_sessions 表 SQL =====
+  static const String _createChatSessionsSql = '''
+      CREATE TABLE IF NOT EXISTS chat_sessions (\n        id TEXT PRIMARY KEY,\n        profile_id TEXT NOT NULL DEFAULT 'default',\n        scope TEXT NOT NULL DEFAULT 'normal',\n        book_id TEXT,\n        title TEXT,\n        created_at INTEGER NOT NULL,\n        updated_at INTEGER NOT NULL\n      )\n    ''';
+
   static const String _createChatMessagesSql = '''
-      CREATE TABLE chat_messages (\n        id TEXT PRIMARY KEY,\n        session_id TEXT,\n        image_paths TEXT,\n        profile_id TEXT NOT NULL DEFAULT 'default',\n        role TEXT NOT NULL,\n        content TEXT NOT NULL,\n        book_id TEXT,\n        book_title TEXT,\n        sources TEXT,\n        created_at INTEGER NOT NULL\n      )\n    ''';
+      CREATE TABLE IF NOT EXISTS chat_messages (\n        id TEXT PRIMARY KEY,\n        session_id TEXT,\n        image_paths TEXT,\n        profile_id TEXT NOT NULL DEFAULT 'default',\n        scope TEXT NOT NULL DEFAULT 'normal',\n        role TEXT NOT NULL,\n        content TEXT NOT NULL,\n        book_id TEXT,\n        book_title TEXT,\n        sources TEXT,\n        created_at INTEGER NOT NULL\n      )\n    ''';
 
   /// 建表（版本 1~6）。
   static Future<void> _onCreate(Database db, int version) async {
@@ -90,10 +93,17 @@ class DatabaseProvider {
     await db.execute(_createQuizAttemptIndexesSql);
     // v4：档案（多孩子模式）
     await db.execute(_createProfilesSql);
-    // v5：会话记录
+    // v10：会话与消息记录
+    await db.execute(_createChatSessionsSql);
     await db.execute(_createChatMessagesSql);
     await db.execute(
       'CREATE INDEX idx_chat_profile ON chat_messages(profile_id)',
+    );
+    await db.execute(
+      'CREATE INDEX idx_chat_session ON chat_messages(session_id)',
+    );
+    await db.execute(
+      'CREATE INDEX idx_sessions_scope ON chat_sessions(profile_id, scope, book_id)',
     );
     // v8: 幼小衔接知识库种子数据
     await SeedData.populate(db);
@@ -173,6 +183,48 @@ class DatabaseProvider {
           'ALTER TABLE chat_messages ADD COLUMN image_paths TEXT',
         );
       } catch (_) {}
+    }
+    if (oldVersion < 10) {
+      // v9→v10：增加会话范围，并将旧消息迁移到稳定 legacy 会话。
+      await db.execute(_createChatSessionsSql);
+      // 少数旧库可能在 v8 迁移中断后缺少消息表；先幂等补建，再继续增量迁移。
+      try {
+        await db.execute(_createChatMessagesSql);
+      } catch (_) {}
+      try {
+        await db.execute(
+          "ALTER TABLE chat_messages ADD COLUMN scope TEXT NOT NULL DEFAULT 'normal'",
+        );
+      } catch (_) {}
+      await db.execute(
+        'CREATE INDEX IF NOT EXISTS idx_chat_session ON chat_messages(session_id)',
+      );
+      await db.execute(
+        'CREATE INDEX IF NOT EXISTS idx_sessions_scope ON chat_sessions(profile_id, scope, book_id)',
+      );
+      await db.execute('''
+        INSERT OR IGNORE INTO chat_sessions
+          (id, profile_id, scope, book_id, title, created_at, updated_at)
+        SELECT
+          CASE WHEN book_id IS NULL THEN 'legacy_normal_' || profile_id
+               ELSE 'legacy_book_' || profile_id || '_' || book_id END,
+          profile_id,
+          CASE WHEN book_id IS NULL THEN 'normal' ELSE 'book' END,
+          book_id,
+          MAX(book_title),
+          MIN(created_at),
+          MAX(created_at)
+        FROM chat_messages
+        GROUP BY profile_id, book_id
+      ''');
+      await db.execute('''
+        UPDATE chat_messages
+        SET scope = CASE WHEN book_id IS NULL THEN 'normal' ELSE 'book' END,
+            session_id = CASE WHEN book_id IS NULL
+              THEN 'legacy_normal_' || profile_id
+              ELSE 'legacy_book_' || profile_id || '_' || book_id END
+        WHERE session_id IS NULL OR session_id = ''
+      ''');
     }
     if (oldVersion < 9) {
       // v8→v9：补充分句规则版本，并修复已执行但缺少 books 行的种子数据。

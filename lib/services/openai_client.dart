@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:http/http.dart' as http;
 
 import '../core/debug/app_log.dart';
+import '../core/models/chat_message.dart';
 import '../core/settings/settings_service.dart';
 
 /// [v0.3.0] OpenAI 兼容 API 客户端（通用云端 LLM 调用）。
@@ -34,6 +35,7 @@ class OpenAiClient {
     String? baseUrl,
     String? apiKey,
     String? model,
+    List<ChatMessage>? history,
   }) async {
     // 从 SettingsService 读取未显式传入的参数
     final settings = SettingsService.instance;
@@ -48,11 +50,12 @@ class OpenAiClient {
 
     final fullUrl = '${url.endsWith('/') ? url : '$url/'}chat/completions';
 
-    // 构建 messages
+    // 历史只保留纯文本 user/assistant 消息，并从末尾按字符预算裁剪。
     final messages = <Map<String, String>>[];
     if (system != null && system.isNotEmpty) {
       messages.add({'role': 'system', 'content': system});
     }
+    messages.addAll(buildTextHistory(history ?? const []));
     messages.add({'role': 'user', 'content': user});
 
     // 构建请求体
@@ -98,6 +101,39 @@ class OpenAiClient {
     return null;
   }
 
+  /// 将历史消息按时间顺序裁剪为 OpenAI 文本消息。
+  ///
+  /// 图片本体不重复上传；带图片的旧消息只保留其文字内容，避免请求体膨胀。
+  static List<Map<String, String>> buildTextHistory(
+    List<ChatMessage> history, {
+    int maxChars = 8000,
+  }) {
+    final selected = <ChatMessage>[];
+    var chars = 0;
+    for (final message in history.reversed) {
+      if (message.role != 'user' && message.role != 'assistant') continue;
+      final content = message.content.trim();
+      if (content.isEmpty) continue;
+      if (chars + content.length > maxChars) {
+        if (selected.isEmpty) {
+          selected.add(message);
+        }
+        break;
+      }
+      selected.add(message);
+      chars += content.length;
+      if (chars >= maxChars) break;
+    }
+    return selected.reversed
+        .map(
+          (message) => {
+            'role': message.role,
+            'content': message.content.trim(),
+          },
+        )
+        .toList();
+  }
+
   /// [v0.1.52] 多模态（视觉）对话：发送文本 + 图片到云端，返回回答。
   ///
   /// [user] 用户提问文本（可选，空串时只有图片）；[imagePaths] 本地图片路径列表。
@@ -112,6 +148,7 @@ class OpenAiClient {
     String? baseUrl,
     String? apiKey,
     String? model,
+    List<ChatMessage>? history,
   }) async {
     if (imagePaths.isEmpty) {
       return chat(user: user ?? '');
@@ -154,7 +191,8 @@ class OpenAiClient {
       return null;
     }
 
-    final messages = [
+    final messages = <Map<String, dynamic>>[
+      ...buildTextHistory(history ?? const []),
       {'role': 'user', 'content': contentParts},
     ];
 

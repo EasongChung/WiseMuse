@@ -5,6 +5,7 @@ import 'package:http/testing.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'package:wisemuse/core/models/chat_message.dart';
 import 'package:wisemuse/services/openai_client.dart';
 
 void main() {
@@ -103,6 +104,49 @@ void main() {
       final client = OpenAiClient(httpClient: mock);
       final result = await client.chat(user: 'Hi');
       expect(result, isNull);
+    });
+
+    test('历史消息按顺序插入当前问题之前', () async {
+      List<dynamic>? capturedMessages;
+      final history = [
+        ChatMessage.create(role: 'user', content: '第一问'),
+        ChatMessage.create(role: 'assistant', content: '第一答'),
+      ];
+      final mock = MockClient((request) async {
+        final body = jsonDecode(request.body) as Map<String, dynamic>;
+        capturedMessages = body['messages'] as List?;
+        return http.Response(
+          jsonEncode({
+            'choices': [
+              {
+                'message': {'content': 'ok'},
+              },
+            ],
+          }),
+          200,
+        );
+      });
+
+      await OpenAiClient(
+        httpClient: mock,
+      ).chat(system: '系统', user: '第二问', history: history);
+
+      expect(capturedMessages!.map((m) => m['content']), [
+        '系统',
+        '第一问',
+        '第一答',
+        '第二问',
+      ]);
+    });
+
+    test('历史消息按字符预算从最新消息保留', () {
+      final history = [
+        ChatMessage.create(role: 'user', content: '旧问题'),
+        ChatMessage.create(role: 'assistant', content: '旧回答'),
+        ChatMessage.create(role: 'user', content: '新问题'),
+      ];
+      final messages = OpenAiClient.buildTextHistory(history, maxChars: 5);
+      expect(messages.map((m) => m['content']), ['新问题']);
     });
 
     test('system prompt 出现在 messages 中', () async {

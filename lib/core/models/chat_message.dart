@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import 'model_ids.dart';
+import 'chat_session.dart';
 
 /// [v0.1.48] AI 会话消息模型。
 ///
@@ -10,6 +11,7 @@ class ChatMessage {
     required this.id,
     this.sessionId,
     this.profileId = 'default',
+    this.scope = ChatScope.normal,
     required this.role,
     required this.content,
     this.imagePaths,
@@ -22,6 +24,7 @@ class ChatMessage {
   factory ChatMessage.create({
     String? sessionId,
     String profileId = 'default',
+    ChatScope scope = ChatScope.normal,
     required String role,
     required String content,
     List<String>? imagePaths,
@@ -33,6 +36,7 @@ class ChatMessage {
       id: newModelId('chat'),
       sessionId: sessionId,
       profileId: profileId,
+      scope: scope,
       role: role,
       content: content,
       imagePaths: imagePaths,
@@ -46,6 +50,7 @@ class ChatMessage {
   final String id;
   String? sessionId;
   final String profileId;
+  final ChatScope scope;
 
   /// 'user' | 'assistant' | 'system'
   final String role;
@@ -68,6 +73,7 @@ class ChatMessage {
     'id': id,
     'session_id': sessionId,
     'profile_id': profileId,
+    'scope': scope.name,
     'role': role,
     'content': content,
     'image_paths': imagePaths != null ? jsonEncode(imagePaths) : null,
@@ -81,6 +87,7 @@ class ChatMessage {
     id: map['id'] as String,
     sessionId: map['session_id'] as String?,
     profileId: (map['profile_id'] as String?) ?? 'default',
+    scope: ChatScope.fromName(map['scope'] as String?),
     role: (map['role'] as String?) ?? 'user',
     content: (map['content'] as String?) ?? '',
     imagePaths: _parseImagePaths(map['image_paths'] as String?),
