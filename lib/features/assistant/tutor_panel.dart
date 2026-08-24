@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../core/theme/app_theme.dart';
 import '../../services/ai_tutor_service.dart';
-import 'knowledge_explain_sheet.dart';
+import 'tutor_interactive_sheet.dart';
 
 /// [v0.1.28] AI 助教推荐面板：显示今日推荐复习知识点列表。
 ///
@@ -119,15 +119,12 @@ class _TutorPanelState extends State<TutorPanel> {
                 text,
                 style: const TextStyle(fontSize: 14, color: StudyPalette.ink),
               ),
-              trailing: IconButton(
-                icon: const Icon(
-                  Icons.lightbulb_outline,
-                  size: 18,
-                  color: StudyPalette.ember,
-                ),
-                tooltip: '讲解',
-                onPressed: () => KnowledgeExplainSheet.show(context, text),
+              trailing: const Icon(
+                Icons.auto_awesome,
+                size: 18,
+                color: StudyPalette.ember,
               ),
+              onTap: () => TutorInteractiveSheet.show(context, text),
             );
           }),
         ],
