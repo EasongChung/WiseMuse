@@ -2,6 +2,7 @@ import '../core/models/book.dart';
 import '../core/models/knowledge_extraction_job.dart';
 import '../core/models/knowledge_point.dart';
 import '../core/models/sentence.dart';
+import '../core/debug/app_log.dart';
 import '../core/storage/book_dao.dart';
 import '../core/storage/database.dart';
 import '../core/storage/knowledge_extraction_job_dao.dart';
@@ -70,6 +71,9 @@ class KnowledgeExtractionService {
 
   /// 单次调用文本上限（安全 token 预算）。
   static const int maxCharsPerCall = 3000;
+
+  /// [v0.1.60] 连续失败页数上限：达到即判定 AI 引擎不可用，中止任务防空转。
+  static const int maxConsecutiveFailures = 3;
 
   /// 按 scope 提取知识点。
   Future<KnowledgeExtractionResult> extractForScope({
@@ -235,6 +239,8 @@ class KnowledgeExtractionService {
     var done =
         pages.where((p) => p.status == KnowledgePageStatus.completed).length;
     var pointCount = await pointsDao.countByBook(book.id);
+    // [v0.1.60] 连续失败计数：单页失败继续跑，连续超阈值才中止
+    var consecutiveFailures = 0;
     _publishProgress(
       book,
       done: done,
@@ -257,24 +263,44 @@ class KnowledgeExtractionService {
         persist: false,
       );
       if (result.errors.isNotEmpty) {
+        // [v0.1.60] 单页失败不再中断整本任务：记录错误并继续后续页；
+        // 连续多页失败（疑似引擎不可用）才中止，防止空转烧 token。
         final message = result.errors.join('；');
-        errors.add(message);
+        errors.add('第 ${checkpoint.page} 页: $message');
+        consecutiveFailures++;
         await jobDao.markPageFailed(job.id, token, checkpoint.page, message);
         _publishProgress(
           book,
           done: done,
           total: pages.length,
           pointCount: pointCount,
-          running: false,
+          running: true,
           error: message,
           onProgress: onProgress,
         );
-        return KnowledgeExtractionResult(
-          summary: summary,
-          points: allPoints,
-          errors: errors,
-        );
+        if (consecutiveFailures >= maxConsecutiveFailures) {
+          final abort =
+              '连续 $consecutiveFailures 页提取失败（AI 引擎不可用），任务暂停；已提取 $pointCount 个知识点';
+          AppLog.w('knowledge_extract', abort);
+          errors.add(abort);
+          _publishProgress(
+            book,
+            done: done,
+            total: pages.length,
+            pointCount: pointCount,
+            running: false,
+            error: abort,
+            onProgress: onProgress,
+          );
+          return KnowledgeExtractionResult(
+            summary: summary,
+            points: allPoints,
+            errors: errors,
+          );
+        }
+        continue;
       }
+      consecutiveFailures = 0;
       await db.transaction((txn) async {
         for (final point in result.points) {
           await pointsDao.upsertByTextInExecutor(

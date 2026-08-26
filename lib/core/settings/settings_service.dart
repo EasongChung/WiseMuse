@@ -227,10 +227,41 @@ class SettingsService {
   /// [v0.1.59] TTS 云端供应商 ID（独立于 LLM 供应商，空=回退 LLM 供应商）。
   static const kTtsCloudProviderId = 'tts_cloud_provider_id';
 
+  /// [v0.1.60] 从 API 获取到的 TTS 模型/音色候选（JSON 数组，供下拉选择）。
+  static const kTtsFetchedModels = 'tts_fetched_models';
+  static const kTtsFetchedVoices = 'tts_fetched_voices';
+
   Future<String?> getTtsCloudProviderId() async =>
       (await SharedPreferences.getInstance()).getString(kTtsCloudProviderId);
   Future<void> setTtsCloudProviderId(String v) async =>
       (await SharedPreferences.getInstance()).setString(kTtsCloudProviderId, v);
+
+  Future<List<String>> getTtsFetchedModels() async =>
+      _readStringList(await SharedPreferences.getInstance(), kTtsFetchedModels);
+  Future<void> setTtsFetchedModels(List<String> v) async =>
+      (await SharedPreferences.getInstance()).setString(
+        kTtsFetchedModels,
+        jsonEncode(v),
+      );
+
+  Future<List<String>> getTtsFetchedVoices() async =>
+      _readStringList(await SharedPreferences.getInstance(), kTtsFetchedVoices);
+  Future<void> setTtsFetchedVoices(List<String> v) async =>
+      (await SharedPreferences.getInstance()).setString(
+        kTtsFetchedVoices,
+        jsonEncode(v),
+      );
+
+  static List<String> _readStringList(SharedPreferences prefs, String key) {
+    final raw = prefs.getString(key);
+    if (raw == null || raw.isEmpty) return const [];
+    try {
+      final list = jsonDecode(raw) as List;
+      return list.map((e) => e.toString()).toList();
+    } catch (_) {
+      return const [];
+    }
+  }
 
   /// TTS 引擎模式：auto（大模型优先/回退系统）/ cloud（仅云端大模型）/ system（系统原生）。默认 auto。
   Future<String> getTtsEngine() async =>
@@ -252,27 +283,13 @@ class SettingsService {
   Future<void> setTtsCloudVoice(String v) async =>
       (await SharedPreferences.getInstance()).setString(kTtsCloudVoice, v);
 
-  /// 云端大模型 TTS BaseUrl（若为空则回退通用 API BaseUrl）。
-  Future<String> getTtsCloudBaseUrl() async {
-    final prefs = await SharedPreferences.getInstance();
-    final custom = prefs.getString(kTtsCloudBaseUrl)?.trim();
-    if (custom != null && custom.isNotEmpty) return custom;
-    return (await getApiBaseUrl())?.trim() ?? '';
-  }
+  /// [v0.1.60] 云端大模型 TTS BaseUrl：由「云端 API 供应商」统一管理，
+  /// 不再有独立覆写值（历史遗留键忽略）。
+  Future<String> getTtsCloudBaseUrl() async =>
+      (await getApiBaseUrl())?.trim() ?? '';
 
-  Future<void> setTtsCloudBaseUrl(String v) async =>
-      (await SharedPreferences.getInstance()).setString(kTtsCloudBaseUrl, v);
-
-  /// 云端大模型 TTS ApiKey（若为空则回退通用 API Key）。
-  Future<String> getTtsCloudApiKey() async {
-    final prefs = await SharedPreferences.getInstance();
-    final custom = prefs.getString(kTtsCloudApiKey)?.trim();
-    if (custom != null && custom.isNotEmpty) return custom;
-    return (await getApiKey())?.trim() ?? '';
-  }
-
-  Future<void> setTtsCloudApiKey(String v) async =>
-      (await SharedPreferences.getInstance()).setString(kTtsCloudApiKey, v);
+  /// [v0.1.60] 云端大模型 TTS ApiKey：同上，统一取主 API Key。
+  Future<String> getTtsCloudApiKey() async => (await getApiKey())?.trim() ?? '';
 
   // ---- 离线开关 ----
   /// 是否优先离线（AI 助教/识别），默认 false（在线优先）。

@@ -63,8 +63,6 @@ class _SettingsPageState extends State<SettingsPage> {
   String _ttsEngine = 'auto';
   String _ttsCloudModel = 'tts-1';
   String _ttsCloudVoice = 'alloy';
-  final _ttsCloudBaseUrlCtrl = TextEditingController();
-  final _ttsCloudApiKeyCtrl = TextEditingController();
   final _ttsCloudModelCtrl = TextEditingController();
   final _ttsCloudVoiceCtrl = TextEditingController();
   List<TtsVoiceInfo> _systemVoices = const [];
@@ -109,6 +107,10 @@ class _SettingsPageState extends State<SettingsPage> {
   bool _fetchingTtsModels = false;
   bool _fetchingTtsVoices = false;
 
+  // [v0.1.60] 获取到的 TTS 模型/音色候选（持久化，供下拉选择）
+  List<String> _ttsFetchedModels = const [];
+  List<String> _ttsFetchedVoices = const [];
+
   bool _initDone = false;
 
   // 源语种选项（含自动识别）
@@ -145,8 +147,6 @@ class _SettingsPageState extends State<SettingsPage> {
     _baseUrlCtrl.dispose();
     _apiKeyCtrl.dispose();
     _customModelCtrl.dispose();
-    _ttsCloudBaseUrlCtrl.dispose();
-    _ttsCloudApiKeyCtrl.dispose();
     _ttsCloudModelCtrl.dispose();
     _ttsCloudVoiceCtrl.dispose();
     super.dispose();
@@ -164,8 +164,6 @@ class _SettingsPageState extends State<SettingsPage> {
     _ttsEngine = await _settings.getTtsEngine();
     _ttsCloudModel = await _settings.getTtsCloudModel();
     _ttsCloudVoice = await _settings.getTtsCloudVoice();
-    _ttsCloudBaseUrlCtrl.text = await _settings.getTtsCloudBaseUrl();
-    _ttsCloudApiKeyCtrl.text = await _settings.getTtsCloudApiKey();
     _ttsCloudModelCtrl.text = _ttsCloudModel;
     _ttsCloudVoiceCtrl.text = _ttsCloudVoice;
     _preferOffline = await _settings.getPreferOffline();
@@ -181,7 +179,6 @@ class _SettingsPageState extends State<SettingsPage> {
         (await _settings.getActiveProviderId()) ?? 'siliconflow';
     _activeEmbeddingProviderId =
         (await _settings.getEmbeddingProviderId()) ?? _activeProviderId;
-    _activeTtsProviderId = await _settings.getTtsCloudProviderId();
     _currentLlmModel = (await _settings.getApiModel()) ?? '';
     _embeddingModel = await _settings.getEmbeddingModel();
 
@@ -1019,18 +1016,8 @@ class _SettingsPageState extends State<SettingsPage> {
                           .toList(),
                   onChanged: (id) async {
                     if (id == null) return;
-                    final sel = _providers.firstWhere(
-                      (p) => p.id == id,
-                      orElse: () => _activeProvider,
-                    );
-                    setState(() {
-                      _activeTtsProviderId = id;
-                      _ttsCloudBaseUrlCtrl.text = sel.baseUrl;
-                      _ttsCloudApiKeyCtrl.text = sel.apiKey;
-                    });
+                    setState(() => _activeTtsProviderId = id);
                     await _settings.setTtsCloudProviderId(id);
-                    await _settings.setTtsCloudBaseUrl(sel.baseUrl);
-                    await _settings.setTtsCloudApiKey(sel.apiKey);
                   },
                 ),
               ),
@@ -1062,6 +1049,18 @@ class _SettingsPageState extends State<SettingsPage> {
                       },
                       itemBuilder:
                           (_) => [
+                            // [v0.1.60] 获取到的模型优先展示
+                            ..._ttsFetchedModels.map(
+                              (m) => PopupMenuItem(
+                                value: m,
+                                child: Text(
+                                  '🌐 $m',
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                            ),
+                            if (_ttsFetchedModels.isNotEmpty)
+                              const PopupMenuDivider(),
                             const PopupMenuItem(
                               value: 'tts-1',
                               child: Text('OpenAI · tts-1'),
@@ -1130,6 +1129,18 @@ class _SettingsPageState extends State<SettingsPage> {
                       },
                       itemBuilder:
                           (_) => [
+                            // [v0.1.60] 获取到的音色优先展示
+                            ..._ttsFetchedVoices.map(
+                              (v) => PopupMenuItem(
+                                value: v,
+                                child: Text(
+                                  '🌐 $v',
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                            ),
+                            if (_ttsFetchedVoices.isNotEmpty)
+                              const PopupMenuDivider(),
                             const PopupMenuItem(
                               value: 'alloy',
                               child: Text('alloy (通用清脆)'),
@@ -1178,38 +1189,25 @@ class _SettingsPageState extends State<SettingsPage> {
           ),
           const SizedBox(height: 10),
 
-          // 独立接口地址（可选）
-          TextField(
-            controller: _ttsCloudBaseUrlCtrl,
-            decoration: InputDecoration(
-              labelText: '接口地址 Base URL（可选）',
-              hintText: '留空则自动复用上方云端 API 供应商地址',
-              isDense: true,
-              filled: true,
-              fillColor: isDark ? StudyPalette.darkBorder : Colors.white,
-              border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(10),
+          // [v0.1.60] 接口地址与 Key 由「云端 API 供应商」统一管理，此处不再单独配置
+          Row(
+            children: [
+              const Icon(
+                Icons.info_outline,
+                size: 14,
+                color: StudyPalette.inkSoft,
               ),
-            ),
-            onChanged: (v) => _settings.setTtsCloudBaseUrl(v.trim()),
-          ),
-          const SizedBox(height: 10),
-
-          // 独立 API Key（可选）
-          TextField(
-            controller: _ttsCloudApiKeyCtrl,
-            obscureText: true,
-            decoration: InputDecoration(
-              labelText: 'API Key（可选）',
-              hintText: '留空则自动复用上方云端 API 供应商 Key',
-              isDense: true,
-              filled: true,
-              fillColor: isDark ? StudyPalette.darkBorder : Colors.white,
-              border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(10),
+              const SizedBox(width: 6),
+              Expanded(
+                child: Text(
+                  '接口地址与 API Key 复用「云端 API 供应商」当前选中项',
+                  style: const TextStyle(
+                    fontSize: 11,
+                    color: StudyPalette.inkSoft,
+                  ),
+                ),
               ),
-            ),
-            onChanged: (v) => _settings.setTtsCloudApiKey(v.trim()),
+            ],
           ),
         ],
       ),
@@ -1223,14 +1221,6 @@ class _SettingsPageState extends State<SettingsPage> {
         sampleText: '你好！我是智能少儿伴读书童，很高兴和你一起练习朗读。',
         model: _ttsCloudModelCtrl.text.trim(),
         voice: _ttsCloudVoiceCtrl.text.trim(),
-        baseUrl:
-            _ttsCloudBaseUrlCtrl.text.trim().isNotEmpty
-                ? _ttsCloudBaseUrlCtrl.text.trim()
-                : null,
-        apiKey:
-            _ttsCloudApiKeyCtrl.text.trim().isNotEmpty
-                ? _ttsCloudApiKeyCtrl.text.trim()
-                : null,
       );
       if (mounted) {
         TopToast.show(context, ok ? '大模型语音试听播放成功' : '大模型语音生成或播放失败，请检查 API 配置');
@@ -1291,6 +1281,11 @@ class _SettingsPageState extends State<SettingsPage> {
               .toList();
       final displayModels = ttsModels.isNotEmpty ? ttsModels : allModels;
 
+      if (!mounted) return;
+      // [v0.1.60] 获取结果持久化进可选列表（去重合并）
+      final merged = {...displayModels, ..._ttsFetchedModels}.toList();
+      setState(() => _ttsFetchedModels = merged);
+      await _settings.setTtsFetchedModels(merged);
       if (!mounted) return;
       // 弹出选择弹窗
       final selected = await showModalBottomSheet<String>(
@@ -1362,6 +1357,13 @@ class _SettingsPageState extends State<SettingsPage> {
         }
       }
 
+      if (!mounted) return;
+      // [v0.1.60] 获取到的真实音色持久化进可选列表（去重合并）
+      if (fetchedVoices != null && fetchedVoices.isNotEmpty) {
+        final merged = {...fetchedVoices, ..._ttsFetchedVoices}.toList();
+        setState(() => _ttsFetchedVoices = merged);
+        await _settings.setTtsFetchedVoices(merged);
+      }
       if (!mounted) return;
       String? selected;
       if (fetchedVoices != null && fetchedVoices.isNotEmpty) {

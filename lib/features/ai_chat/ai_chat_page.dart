@@ -80,7 +80,8 @@ class _AiChatPageState extends State<AiChatPage> {
       await ProfileService.instance.ensureInitialized();
       final profileId = ProfileService.instance.currentProfileId ?? 'default';
       final db = await DatabaseProvider.database;
-      final books = await BookDao(db, profileId: profileId).getAll();
+      // [v0.1.60] 不过滤 profile：内置书/家长导入的书也应可被选为知识库
+      final books = await BookDao(db).getAll();
       final chatDao = ChatDao(db, profileId: profileId);
       final scope = _selectedBookId == null ? ChatScope.normal : ChatScope.book;
       var sessions = await chatDao.getSessions(

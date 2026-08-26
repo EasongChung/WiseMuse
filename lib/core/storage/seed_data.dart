@@ -2,8 +2,10 @@ import 'package:sqflite/sqflite.dart';
 
 import '../models/book.dart';
 import '../models/knowledge_point.dart';
+import '../models/sentence.dart';
 import 'book_dao.dart';
 import 'knowledge_point_dao.dart';
+import 'sentence_dao.dart';
 
 /// [v0.1.55] 幼小衔接基础知识库种子数据（拼音、英文字母、基础汉字）。
 class SeedData {
@@ -264,5 +266,78 @@ class SeedData {
         source: 'manual',
       );
     }
+
+    // [v0.1.60] 为内置书生成句子数据：按章节拼成「释义 + 示例」正文并分句，
+    // 使内置书在书架中可浏览（文本阅读链路）、可构建 RAG 向量索引。
+    await _ensureBuiltinSentences(db, bookDao);
+  }
+
+  /// [v0.1.60] 内置书句子生成：从已落库的知识点按章节拼正文，再分句写入。
+  static Future<void> _ensureBuiltinSentences(
+    Database db,
+    BookDao bookDao,
+  ) async {
+    final sentenceDao = SentenceDao(db);
+    final existing = await sentenceDao.getByBook(builtinBookId);
+    if (existing.isNotEmpty) return; // 已有正文，不重复生成
+
+    final kpDao = KnowledgePointDao(db);
+    final points = await kpDao.getByBook(builtinBookId);
+    if (points.isEmpty) return;
+
+    // 按章节分组，每组拼一段正文
+    final byChapter = <int, List<KnowledgePoint>>{};
+    for (final p in points) {
+      byChapter.putIfAbsent(p.chapter ?? 0, () => []).add(p);
+    }
+    final chapterTitles = {1: '声母', 2: '韵母', 3: '整体认读音节', 4: '英文字母', 5: '基础识字'};
+
+    final rows = <Sentence>[];
+    var page = 0;
+    for (final entry in byChapter.entries) {
+      final chapter = entry.key;
+      final chapterPoints = entry.value;
+      final title = chapterTitles[chapter] ?? '第 $chapter 单元';
+      final intro = '第 $chapter 单元：$title。';
+      final bodyLines =
+          chapterPoints.map((p) {
+            final def = (p.definition ?? '').trim();
+            final extra = (p.extra ?? '').trim();
+            final text = p.text.trim();
+            if (def.isNotEmpty && extra.isNotEmpty) {
+              return '$text：$def。示例：$extra。';
+            }
+            if (def.isNotEmpty) return '$text：$def。';
+            return text;
+          }).toList();
+
+      final content = [intro, ...bodyLines].join('\n');
+      for (final line in _splitLines(content)) {
+        rows.add(
+          Sentence.create(
+            bookId: builtinBookId,
+            page: page,
+            chapter: chapter,
+            index: rows.length,
+            text: line,
+          ),
+        );
+      }
+      page++;
+    }
+
+    if (rows.isNotEmpty) {
+      await sentenceDao.replaceByBook(builtinBookId, rows);
+    }
+  }
+
+  /// 简易分句：按句末标点切分，保留非空行。
+  static List<String> _splitLines(String content) {
+    final result = <String>[];
+    for (final raw in content.split(RegExp(r'(?<=[。！？；])'))) {
+      final line = raw.trim();
+      if (line.isNotEmpty) result.add(line);
+    }
+    return result;
   }
 }
