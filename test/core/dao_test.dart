@@ -41,7 +41,7 @@ void main() {
       final book = Book.create(title: '语文', source: BookSource.pdf);
       await bookDao.insert(book);
 
-      // +1：SeedData.populate 在初始化时插入内置书籍（幼小衔接基础知识）
+      // +1：SeedData.populate 在初始化时插入内置书籍
       expect((await bookDao.getAll()).length, 2);
       expect((await bookDao.getById(book.id))!.title, '语文');
 
@@ -156,11 +156,11 @@ void main() {
       await kpDao.insert(a);
       await kpDao.insert(b);
 
-      expect((await kpDao.getAll()).length, 115); // 2 条测试数据 + 113 条种子数据
+      expect((await kpDao.getAll()).length, 224); // 2 条测试数据 + 222 条种子数据
       expect(
         (await kpDao.getAll(type: KnowledgeType.word)).length,
-        88,
-      ); // 1 条测试 + 87 条种子 word 型
+        142,
+      ); // 1 条测试 + 141 条种子 word 型
     });
 
     test('upsertByText 幂等去重', () async {

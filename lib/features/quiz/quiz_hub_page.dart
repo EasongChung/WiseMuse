@@ -7,6 +7,7 @@ import '../../core/storage/database.dart';
 import '../../core/storage/knowledge_point_dao.dart';
 import '../../core/storage/quiz_attempt_dao.dart';
 import '../../core/storage/word_entry_dao.dart';
+import '../../core/storage/seed_data.dart';
 import '../../core/theme/app_theme.dart';
 import '../../widgets/top_toast.dart';
 import 'quiz_page.dart';
@@ -26,7 +27,8 @@ class ChapterQuizInfo {
   final double? bestScore;
   final int attemptCount;
 
-  String get chapterName => chapter <= 0 ? '全书综合' : '第 $chapter 单元';
+  String get chapterName =>
+      chapter <= 0 ? '全书综合' : SeedData.chapterLabel(chapter);
 }
 
 /// [v0.3.0] [v0.1.62] 章节测验首页：选书 → 单元关卡列表（含星级/历史高分） → 综合测验 / 错题强化特训。

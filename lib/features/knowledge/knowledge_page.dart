@@ -38,6 +38,7 @@ class _KnowledgePageState extends State<KnowledgePage>
   static const _tag = 'knowledge';
 
   KnowledgeType? _filterType;
+  int? _gradeFilter; // 内置书年级：0幼小衔接，1~6小学年级
   KnowledgeSortOrder _sortOrder = KnowledgeSortOrder.updatedAtDesc;
   List<Book> _books = const [];
   Map<String, Map<int, List<KnowledgePoint>>> _groupedPoints = const {};
@@ -89,7 +90,14 @@ class _KnowledgePageState extends State<KnowledgePage>
       final db = await DatabaseProvider.database;
       var books = await BookDao(db).getAll();
       final dao = KnowledgePointDao(db);
-      final allPoints = await dao.getAll(type: _filterType);
+      var allPoints = await dao.getAll(type: _filterType);
+      if (_gradeFilter != null) {
+        allPoints =
+            allPoints.where((p) {
+              if (p.bookId != SeedData.builtinBookId) return true;
+              return SeedData.chapterInGrade(p.chapter ?? 0, _gradeFilter!);
+            }).toList();
+      }
 
       // 直接按 bookId → page(页码) 分组（回落至按物理页组织）
       final grouped = <String, Map<int, List<KnowledgePoint>>>{};
@@ -232,6 +240,43 @@ class _KnowledgePageState extends State<KnowledgePage>
   }
 
   Widget _buildFilterChips() {
+    const grades = <int?>[null, 0, 1, 2, 3, 4, 5, 6];
+    const gradeLabels = <String>[
+      '全部年级',
+      '幼小衔接',
+      '一年级',
+      '二年级',
+      '三年级',
+      '四年级',
+      '五年级',
+      '六年级',
+    ];
+    final gradeChips = Padding(
+      padding: const EdgeInsets.only(bottom: 4),
+      child: SingleChildScrollView(
+        scrollDirection: Axis.horizontal,
+        child: Row(
+          children: List.generate(grades.length, (i) {
+            final selected = _gradeFilter == grades[i];
+            return Padding(
+              padding: const EdgeInsets.only(right: 8),
+              child: FilterChip(
+                label: Text(gradeLabels[i]),
+                selected: selected,
+                onSelected: (_) {
+                  setState(() {
+                    _gradeFilter = grades[i];
+                    _loading = true;
+                  });
+                  _load();
+                },
+              ),
+            );
+          }),
+        ),
+      ),
+    );
+
     const allTypes = <KnowledgeType?>[
       null,
       KnowledgeType.word,
@@ -243,27 +288,33 @@ class _KnowledgePageState extends State<KnowledgePage>
 
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-      child: SingleChildScrollView(
-        scrollDirection: Axis.horizontal,
-        child: Row(
-          children: List.generate(allTypes.length, (i) {
-            final selected = _filterType == allTypes[i];
-            return Padding(
-              padding: const EdgeInsets.only(right: 8),
-              child: FilterChip(
-                label: Text(typeLabels[i]),
-                selected: selected,
-                onSelected: (_) {
-                  setState(() {
-                    _filterType = allTypes[i];
-                    _loading = true;
-                  });
-                  _load();
-                },
-              ),
-            );
-          }),
-        ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          gradeChips,
+          SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: Row(
+              children: List.generate(allTypes.length, (i) {
+                final selected = _filterType == allTypes[i];
+                return Padding(
+                  padding: const EdgeInsets.only(right: 8),
+                  child: FilterChip(
+                    label: Text(typeLabels[i]),
+                    selected: selected,
+                    onSelected: (_) {
+                      setState(() {
+                        _filterType = allTypes[i];
+                        _loading = true;
+                      });
+                      _load();
+                    },
+                  ),
+                );
+              }),
+            ),
+          ),
+        ],
       ),
     );
   }

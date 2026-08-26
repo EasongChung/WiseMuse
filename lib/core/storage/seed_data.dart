@@ -6,6 +6,7 @@ import '../models/sentence.dart';
 import 'book_dao.dart';
 import 'knowledge_point_dao.dart';
 import 'sentence_dao.dart';
+import 'seed_grade_data.dart';
 
 /// [v0.1.55] [v0.1.60] 幼小衔接与小学一/二年级基础知识库种子数据。
 class SeedData {
@@ -15,6 +16,41 @@ class SeedData {
 
   /// [v0.1.60] 内置书名：现有幼小衔接为其一个子集，预设一至六年级入口。
   static const String builtinBookTitle = '幼小知识点收集(内置)';
+
+  /// 内置书章节范围：5 个幼小衔接单元，以及一/二年级语数英入口。
+  static String chapterLabel(int chapter) {
+    if (chapter <= 5) {
+      return '幼小衔接 · ${_kindergartenChapterNames[chapter] ?? '基础知识'}';
+    }
+    const labels = {
+      101: '一年级 · 语文 · 识字与词语',
+      102: '一年级 · 语文 · 古诗积累',
+      104: '一年级 · 数学 · 数与图形',
+      106: '一年级 · 英语 · 基础词汇',
+      201: '二年级 · 语文 · 生字词',
+      202: '二年级 · 语文 · 成语积累',
+      203: '二年级 · 语文 · 古诗积累',
+      204: '二年级 · 数学 · 乘除与量',
+      206: '二年级 · 英语 · 生活词汇',
+    };
+    return labels[chapter] ?? '拓展知识 · 第 $chapter 单元';
+  }
+
+  /// 年级筛选：0=幼小衔接，1=一年级，2=二年级，3~6=对应预留年级。
+  static bool chapterInGrade(int chapter, int grade) {
+    if (grade == 0) return chapter >= 1 && chapter <= 5;
+    if (grade == 1) return chapter >= 101 && chapter < 200;
+    if (grade == 2) return chapter >= 201 && chapter < 300;
+    return chapter >= grade * 100 && chapter < (grade + 1) * 100;
+  }
+
+  static const _kindergartenChapterNames = {
+    1: '声母',
+    2: '韵母',
+    3: '整体认读音节',
+    4: '英文字母',
+    5: '基础识字',
+  };
 
   /// [v0.1.60] v11→v12 幂等迁移入口：保证升级用户也能补全书名、books 行、句子。
   ///
@@ -54,7 +90,9 @@ class SeedData {
         whereArgs: [builtinBookId],
       );
     }
-    // 任何时候都尝试补句子（内部幂等）
+    // v11→v12 也补入一、二年级核心知识点；upsert 不会重复写入。
+    await GradeSeedData.populate(KnowledgePointDao(db));
+    // 任何时候都重建内置书正文，确保新增章节可浏览/RAG 可索引。
     await _ensureBuiltinSentences(db);
   }
 
@@ -298,6 +336,8 @@ class SeedData {
       );
     }
 
+    // [v0.1.61] 追加小学一、二年级语数英公共核心知识点。
+    await GradeSeedData.populate(dao);
     // [v0.1.60] 为内置书生成句子数据：按章节拼成「释义 + 示例」正文并分句，
     // 使内置书在书架中可浏览（文本阅读链路）、可构建 RAG 向量索引。
     await _ensureBuiltinSentences(db);
@@ -312,7 +352,10 @@ class SeedData {
     if (tableCheck.isEmpty) return;
     final sentenceDao = SentenceDao(db);
     final existing = await sentenceDao.getByBook(builtinBookId);
-    if (existing.isNotEmpty) return; // 已有正文，不重复生成
+    // 内置正文由知识点派生；新增年级知识点后需幂等重建，避免旧用户只看到幼小衔接。
+    if (existing.isNotEmpty) {
+      await sentenceDao.deleteByBook(builtinBookId);
+    }
 
     final kpDao = KnowledgePointDao(db);
     final points = await kpDao.getByBook(builtinBookId);

@@ -91,8 +91,8 @@ void main() {
           where: 'book_id = ?',
           whereArgs: ['builtin_kindergarten_bridge'],
         ),
-        hasLength(113),
-        reason: 'v1-v7 跨级升 v9 也必须执行首次种子迁移',
+        hasLength(222),
+        reason: 'v1-v7 跨级升级也必须执行完整内置知识迁移',
       );
 
       final idx = await v2.rawQuery(
@@ -147,7 +147,7 @@ void main() {
       }
       await batch.commit(noResult: true);
       expect(await v8.query('books'), isEmpty);
-      expect(await v8.query('knowledge_points'), hasLength(113));
+      expect(await v8.query('knowledge_points'), hasLength(222));
       await v8.close();
 
       final v9 = await DatabaseProvider.openFile(dbPath);
@@ -158,7 +158,7 @@ void main() {
       );
       expect(books, hasLength(1));
       expect(books.single['title'], '幼小知识点收集(内置)');
-      expect(await v9.query('knowledge_points'), hasLength(113));
+      expect(await v9.query('knowledge_points'), hasLength(222));
       // v9 repair is non-destructive: a user-deleted/customized point is not restored.
       await v9.delete(
         'knowledge_points',

@@ -28,13 +28,13 @@ void main() {
       expect(book.source.name, 'txt');
     });
 
-    test('知识点总数 113 条（23 声母 + 24 韵母 + 16 整体认读 + 26 字母 + 24 汉字）', () async {
+    test('知识点总数 222 条（含幼小衔接与一、二年级语数英核心内容）', () async {
       await SeedData.populate(db);
       final all = await KnowledgePointDao(db).getAll();
-      expect(all, hasLength(113));
+      expect(all, hasLength(222));
     });
 
-    test('5 个单元（chapter 1-5）各条目数正确', () async {
+    test('幼小衔接 5 个单元（chapter 1-5）各条目数正确', () async {
       await SeedData.populate(db);
       final dao = KnowledgePointDao(db);
       final all = await dao.getAll();
@@ -48,6 +48,12 @@ void main() {
       expect(byChapter[3], 16, reason: '第 3 单元 整体认读 16 个');
       expect(byChapter[4], 26, reason: '第 4 单元 英文字母 26 个');
       expect(byChapter[5], 24, reason: '第 5 单元 基础汉字 24 个');
+      expect(byChapter[101], greaterThan(0), reason: '一年级语文知识点已写入');
+      expect(byChapter[104], greaterThan(0), reason: '一年级数学知识点已写入');
+      expect(byChapter[106], greaterThan(0), reason: '一年级英语知识点已写入');
+      expect(byChapter[201], greaterThan(0), reason: '二年级语文知识点已写入');
+      expect(byChapter[204], greaterThan(0), reason: '二年级数学知识点已写入');
+      expect(byChapter[206], greaterThan(0), reason: '二年级英语知识点已写入');
     });
 
     test('populate 幂等：二次调用不重复插入', () async {
@@ -57,7 +63,7 @@ void main() {
       // 仅内置书 1 条（无额外 insert）
       expect(books.where((b) => b.id == SeedData.builtinBookId), hasLength(1));
       final points = await KnowledgePointDao(db).getAll();
-      expect(points, hasLength(113));
+      expect(points, hasLength(222));
     });
 
     test('所有知识点均归属 builtinBookId', () async {
