@@ -48,12 +48,18 @@ void main() {
       expect(await dao.markPageRunning(first.id, token, secondPage), isTrue);
       expect(await dao.markPageFailed(first.id, token, 1, '网络不可用'), isTrue);
       final failed = await dao.getByBook('book-a');
-      expect(failed!.status, KnowledgeJobStatus.failed);
+      // [v0.1.60] markPageFailed 只改页状态、保持任务 running，便于续跑。
+      expect(failed!.status, KnowledgeJobStatus.running);
       expect(failed.completedPages, 1);
       expect(
         (await dao.getPage(first.id, 1))!.status,
         KnowledgePageStatus.failed,
       );
+      // 续跑：resetFailedPages 把失败页重置为 pending，下一轮可重新 markPageRunning
+      expect(await dao.resetFailedPages(first.id, token), isTrue);
+      final retriedPage = (await dao.getPage(first.id, 1))!;
+      expect(retriedPage.status, KnowledgePageStatus.pending);
+      expect(await dao.markPageRunning(first.id, token, retriedPage), isTrue);
       expect(await dao.getByBook('book-b'), isNotNull);
 
       final restarted = await dao.createJob(

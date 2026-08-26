@@ -7,17 +7,24 @@ import 'book_dao.dart';
 import 'knowledge_point_dao.dart';
 import 'sentence_dao.dart';
 
-/// [v0.1.55] 幼小衔接基础知识库种子数据（拼音、英文字母、基础汉字）。
+/// [v0.1.55] [v0.1.60] 幼小衔接与小学一/二年级基础知识库种子数据。
 class SeedData {
   SeedData._();
 
   static const String builtinBookId = 'builtin_kindergarten_bridge';
-  static const String builtinBookTitle = '幼小衔接基础知识';
 
-  /// 只补写内置书籍记录，不改动知识点。
+  /// [v0.1.60] 内置书名：现有幼小衔接为其一个子集，预设一至六年级入口。
+  static const String builtinBookTitle = '幼小知识点收集(内置)';
+
+  /// [v0.1.60] v11→v12 幂等迁移入口：保证升级用户也能补全书名、books 行、句子。
   ///
-  /// 用于修复 v0.1.55 已写入 113 条知识点、但缺少 books 行的升级用户。
-  static Future<void> repairBuiltinBook(Database db) async {
+  /// 覆盖以下场景：
+  /// - 旧库已写入 113 条知识点但缺 books 行（v0.1.55 老用户）
+  /// - 已存在 books 行但 title 是旧版「幼小衔接基础知识」（v0.1.59 升级）
+  /// - 已存在 books 行但未生成 sentences（无法浏览/RAG 索引）
+  /// - 新增章节（一/二年级知识点扩充）后未生成对应句子
+  static Future<void> reconcileBuiltinBook(Database db) async {
+    final existing = await _getBuiltinBookRow(db);
     final pointCount =
         Sqflite.firstIntValue(
           await db.rawQuery(
@@ -26,21 +33,45 @@ class SeedData {
           ),
         ) ??
         0;
-    if (pointCount == 0) return;
-    final bookDao = BookDao(db);
-    if (await bookDao.getById(builtinBookId) != null) return;
     final now = DateTime.now().microsecondsSinceEpoch;
-    await bookDao.insert(
-      Book(
-        id: builtinBookId,
-        title: builtinBookTitle,
-        source: BookSource.txt,
-        pageCount: 5,
-        importStatus: 0,
-        createdAt: now,
-        updatedAt: now,
-      ),
+    if (existing == null) {
+      if (pointCount == 0) return;
+      // [v0.1.60] 直接用原生 SQL INSERT，避免老 schema 列不全导致 BookDao.insert 失败
+      await db.insert('books', {
+        'id': builtinBookId,
+        'title': builtinBookTitle,
+        'source': 'txt',
+        'page_count': 5,
+        'import_status': 0,
+        'created_at': now,
+        'updated_at': now,
+      });
+    } else if ((existing['title'] as String?) != builtinBookTitle) {
+      await db.update(
+        'books',
+        {'title': builtinBookTitle, 'updated_at': now},
+        where: 'id = ?',
+        whereArgs: [builtinBookId],
+      );
+    }
+    // 任何时候都尝试补句子（内部幂等）
+    await _ensureBuiltinSentences(db);
+  }
+
+  /// 旧接口保留（v8/v9 修复路径仍可能走到）。
+  static Future<void> repairBuiltinBook(Database db) async {
+    await reconcileBuiltinBook(db);
+  }
+
+  /// [v0.1.60] 用原生 SQL 查内置书行，避免老 schema 列缺失导致 BookDao.fromMap 崩溃。
+  static Future<Map<String, Object?>?> _getBuiltinBookRow(Database db) async {
+    final rows = await db.query(
+      'books',
+      where: 'id = ?',
+      whereArgs: [builtinBookId],
+      limit: 1,
     );
+    return rows.isEmpty ? null : rows.first;
   }
 
   /// 插入内置种子数据。
@@ -269,14 +300,16 @@ class SeedData {
 
     // [v0.1.60] 为内置书生成句子数据：按章节拼成「释义 + 示例」正文并分句，
     // 使内置书在书架中可浏览（文本阅读链路）、可构建 RAG 向量索引。
-    await _ensureBuiltinSentences(db, bookDao);
+    await _ensureBuiltinSentences(db);
   }
 
   /// [v0.1.60] 内置书句子生成：从已落库的知识点按章节拼正文，再分句写入。
-  static Future<void> _ensureBuiltinSentences(
-    Database db,
-    BookDao bookDao,
-  ) async {
+  static Future<void> _ensureBuiltinSentences(Database db) async {
+    // [v0.1.60] 旧 schema 可能还没建 sentences 表，跳过即可
+    final tableCheck = await db.rawQuery(
+      "SELECT name FROM sqlite_master WHERE type='table' AND name='sentences'",
+    );
+    if (tableCheck.isEmpty) return;
     final sentenceDao = SentenceDao(db);
     final existing = await sentenceDao.getByBook(builtinBookId);
     if (existing.isNotEmpty) return; // 已有正文，不重复生成

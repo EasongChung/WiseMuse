@@ -230,6 +230,10 @@ class KnowledgeExtractionService {
     if (token == null) {
       return KnowledgeExtractionResult(errors: ['《${book.title}》已有提取任务正在运行']);
     }
+    // [v0.1.60] 接管到失败任务时，把失败页重置为 pending，本次循环可重跑
+    if (job.status == KnowledgeJobStatus.failed) {
+      await jobDao.resetFailedPages(job.id, token);
+    }
 
     final pointsDao = KnowledgePointDao(db);
     final pages = await jobDao.getPages(job.id);

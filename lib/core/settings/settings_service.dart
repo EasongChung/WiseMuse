@@ -227,40 +227,108 @@ class SettingsService {
   /// [v0.1.59] TTS 云端供应商 ID（独立于 LLM 供应商，空=回退 LLM 供应商）。
   static const kTtsCloudProviderId = 'tts_cloud_provider_id';
 
-  /// [v0.1.60] 从 API 获取到的 TTS 模型/音色候选（JSON 数组，供下拉选择）。
-  static const kTtsFetchedModels = 'tts_fetched_models';
-  static const kTtsFetchedVoices = 'tts_fetched_voices';
+  /// [v0.1.60] 从 API 获取到的 TTS 模型/音色候选：按供应商+模型分组，
+  /// 避免跨供应商污染。结构：`{ providerId: { modelName: [voiceId, ...] } }`
+  static const kTtsCatalog = 'tts_catalog';
 
   Future<String?> getTtsCloudProviderId() async =>
       (await SharedPreferences.getInstance()).getString(kTtsCloudProviderId);
   Future<void> setTtsCloudProviderId(String v) async =>
       (await SharedPreferences.getInstance()).setString(kTtsCloudProviderId, v);
 
-  Future<List<String>> getTtsFetchedModels() async =>
-      _readStringList(await SharedPreferences.getInstance(), kTtsFetchedModels);
-  Future<void> setTtsFetchedModels(List<String> v) async =>
-      (await SharedPreferences.getInstance()).setString(
-        kTtsFetchedModels,
-        jsonEncode(v),
-      );
-
-  Future<List<String>> getTtsFetchedVoices() async =>
-      _readStringList(await SharedPreferences.getInstance(), kTtsFetchedVoices);
-  Future<void> setTtsFetchedVoices(List<String> v) async =>
-      (await SharedPreferences.getInstance()).setString(
-        kTtsFetchedVoices,
-        jsonEncode(v),
-      );
-
-  static List<String> _readStringList(SharedPreferences prefs, String key) {
-    final raw = prefs.getString(key);
-    if (raw == null || raw.isEmpty) return const [];
+  /// 读取完整 TTS 目录（`provider → model → voiceIds`）。
+  Future<Map<String, Map<String, List<String>>>> getTtsCatalog() async {
+    final prefs = await SharedPreferences.getInstance();
+    final raw = prefs.getString(kTtsCatalog);
+    if (raw == null || raw.isEmpty) return {};
     try {
-      final list = jsonDecode(raw) as List;
-      return list.map((e) => e.toString()).toList();
+      final outer = jsonDecode(raw) as Map<String, dynamic>;
+      return outer.map((provider, inner) {
+        final modelMap = (inner as Map<String, dynamic>);
+        return MapEntry(
+          provider,
+          modelMap.map(
+            (model, voices) => MapEntry(
+              model,
+              (voices as List).map((e) => e.toString()).toList(),
+            ),
+          ),
+        );
+      });
     } catch (_) {
-      return const [];
+      return {};
     }
+  }
+
+  /// 写入单条：某个供应商下的某个模型的音色列表（覆盖）。
+  Future<void> setTtsVoicesForModel({
+    required String providerId,
+    required String model,
+    required List<String> voices,
+  }) async {
+    final prefs = await SharedPreferences.getInstance();
+    final raw = prefs.getString(kTtsCatalog);
+    Map<String, dynamic> outer;
+    if (raw == null || raw.isEmpty) {
+      outer = {};
+    } else {
+      try {
+        outer = (jsonDecode(raw) as Map<String, dynamic>);
+      } catch (_) {
+        outer = {};
+      }
+    }
+    final inner = (outer[providerId] as Map<String, dynamic>?) ?? {};
+    inner[model] = voices;
+    outer[providerId] = inner;
+    await prefs.setString(kTtsCatalog, jsonEncode(outer));
+  }
+
+  /// 读取某个供应商下某模型的音色列表（无则返回空列表）。
+  Future<List<String>> getTtsVoicesForModel({
+    required String providerId,
+    required String model,
+  }) async {
+    final all = await getTtsCatalog();
+    return all[providerId]?[model] ?? const [];
+  }
+
+  /// [v0.1.60] 已通过 /models 获取的 TTS 模型清单（按供应商分组），避免重复拉取。
+  /// 结构：{ providerId: [model, ...] }
+  static const kTtsModelsByProvider = 'tts_models_by_provider';
+
+  Future<Map<String, List<String>>> getTtsModelsByProvider() async {
+    final prefs = await SharedPreferences.getInstance();
+    final raw = prefs.getString(kTtsModelsByProvider);
+    if (raw == null || raw.isEmpty) return {};
+    try {
+      final m = jsonDecode(raw) as Map<String, dynamic>;
+      return m.map(
+        (k, v) => MapEntry(k, (v as List).map((e) => e.toString()).toList()),
+      );
+    } catch (_) {
+      return {};
+    }
+  }
+
+  Future<void> setTtsModelsForProvider({
+    required String providerId,
+    required List<String> models,
+  }) async {
+    final prefs = await SharedPreferences.getInstance();
+    final raw = prefs.getString(kTtsModelsByProvider);
+    Map<String, dynamic> m;
+    if (raw == null || raw.isEmpty) {
+      m = {};
+    } else {
+      try {
+        m = (jsonDecode(raw) as Map<String, dynamic>);
+      } catch (_) {
+        m = {};
+      }
+    }
+    m[providerId] = models;
+    await prefs.setString(kTtsModelsByProvider, jsonEncode(m));
   }
 
   /// TTS 引擎模式：auto（大模型优先/回退系统）/ cloud（仅云端大模型）/ system（系统原生）。默认 auto。

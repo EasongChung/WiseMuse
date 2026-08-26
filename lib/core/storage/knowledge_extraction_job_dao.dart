@@ -73,9 +73,12 @@ class KnowledgeExtractionJobDao {
     return rows.map(KnowledgeExtractionJob.fromMap).toList();
   }
 
+  /// [v0.1.60] 包含 pending / running（lease 过期）/ failed 三类任务，便于失败页恢复。
   Future<List<KnowledgeExtractionJob>> getRecoverable() async {
     final where = <String>[
-      "(status = 'pending' OR (status = 'running' AND (lease_until IS NULL OR lease_until < ?)))",
+      "(status = 'pending' "
+          "OR (status = 'running' AND (lease_until IS NULL OR lease_until < ?)) "
+          "OR status = 'failed')",
     ];
     final args = <dynamic>[DateTime.now().microsecondsSinceEpoch];
     if (profileId != null) {
@@ -123,6 +126,8 @@ class KnowledgeExtractionJobDao {
     return rows.isEmpty ? null : KnowledgeExtractionJobPage.fromMap(rows.first);
   }
 
+  /// [v0.1.60] 接管任务：拒绝已 completed；failed 状态且 lease 过期可被接管，
+  /// 调用方接管后调用 [resetFailedPages] 把失败页重置为 pending 再续跑。
   Future<String?> claim(
     String jobId, {
     Duration lease = const Duration(minutes: 2),
@@ -198,6 +203,9 @@ class KnowledgeExtractionJobDao {
     });
   }
 
+  /// [v0.1.60] 单页失败：仅改页状态、记录错误、保持 job running，
+  /// 不再把整本任务置 failed（否则下一页 markPageRunning 会拒绝）。
+  /// 失败页允许后续重试；任务全部页处理完后由调用方根据成功/失败汇总最终状态。
   Future<bool> markPageFailed(
     String jobId,
     String token,
@@ -209,7 +217,9 @@ class KnowledgeExtractionJobDao {
       final changed = await txn.update(
         _jobs,
         {
-          'status': KnowledgeJobStatus.failed.name,
+          // 保持 status=running；释放 lease（让失败页后可被再次 claim）；
+          // 错误写到 last_error 供诊断。
+          'status': KnowledgeJobStatus.running.name,
           'last_error': error,
           'lease_until': null,
           'updated_at': now,
@@ -227,6 +237,31 @@ class KnowledgeExtractionJobDao {
         },
         where: 'job_id = ? AND page = ?',
         whereArgs: [jobId, page],
+      );
+      return true;
+    });
+  }
+
+  /// [v0.1.60] 失败页重置为 pending，供下次恢复时重跑。
+  Future<bool> resetFailedPages(String jobId, String token) async {
+    final now = DateTime.now().microsecondsSinceEpoch;
+    return db.transaction((txn) async {
+      final jobChanged = await txn.update(
+        _jobs,
+        {'last_error': null, 'updated_at': now},
+        where: 'id = ? AND run_token = ?',
+        whereArgs: [jobId, token],
+      );
+      if (jobChanged != 1) return false;
+      await txn.update(
+        _pages,
+        {
+          'status': KnowledgePageStatus.pending.name,
+          'last_error': null,
+          'updated_at': now,
+        },
+        where: "job_id = ? AND status = 'failed'",
+        whereArgs: [jobId],
       );
       return true;
     });

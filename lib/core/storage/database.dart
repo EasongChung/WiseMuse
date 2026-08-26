@@ -12,7 +12,7 @@ class DatabaseProvider {
   DatabaseProvider._();
 
   static const String dbName = 'wisemuse.db';
-  static const int dbVersion = 11;
+  static const int dbVersion = 12;
 
   static Database? _db;
 
@@ -277,6 +277,10 @@ class DatabaseProvider {
       await db.execute(_createKnowledgeJobsSql);
       await db.execute(_createKnowledgeJobPagesSql);
       await db.execute(_createKnowledgeJobIndexesSql);
+    }
+    if (oldVersion < 12) {
+      // [v0.1.60] v11→v12：内置书幂等修正（更名、补书行、补句子、补章节）
+      await SeedData.reconcileBuiltinBook(db);
     }
     if (oldVersion < 9) {
       // v8→v9：补充分句规则版本，并修复已执行但缺少 books 行的种子数据。

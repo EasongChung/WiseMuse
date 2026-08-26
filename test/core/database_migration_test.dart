@@ -157,7 +157,7 @@ void main() {
         whereArgs: ['builtin_kindergarten_bridge'],
       );
       expect(books, hasLength(1));
-      expect(books.single['title'], '幼小衔接基础知识');
+      expect(books.single['title'], '幼小知识点收集(内置)');
       expect(await v9.query('knowledge_points'), hasLength(113));
       // v9 repair is non-destructive: a user-deleted/customized point is not restored.
       await v9.delete(

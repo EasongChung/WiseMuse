@@ -166,6 +166,13 @@ class _SettingsPageState extends State<SettingsPage> {
     _ttsCloudVoice = await _settings.getTtsCloudVoice();
     _ttsCloudModelCtrl.text = _ttsCloudModel;
     _ttsCloudVoiceCtrl.text = _ttsCloudVoice;
+    _activeTtsProviderId = await _settings.getTtsCloudProviderId();
+    final ttsModels = await _settings.getTtsModelsByProvider();
+    _ttsFetchedModels = ttsModels[_activeTtsProviderId] ?? const [];
+    _ttsFetchedVoices = await _settings.getTtsVoicesForModel(
+      providerId: _activeTtsProviderId ?? _activeProviderId,
+      model: _ttsCloudModel,
+    );
     _preferOffline = await _settings.getPreferOffline();
 
     // 加载系统真实音色
@@ -1016,7 +1023,23 @@ class _SettingsPageState extends State<SettingsPage> {
                           .toList(),
                   onChanged: (id) async {
                     if (id == null) return;
-                    setState(() => _activeTtsProviderId = id);
+                    final previousModel = _ttsCloudModelCtrl.text.trim();
+                    final voices = await _settings.getTtsVoicesForModel(
+                      providerId: id,
+                      model: previousModel,
+                    );
+                    final modelsByProvider =
+                        await _settings.getTtsModelsByProvider();
+                    setState(() {
+                      _activeTtsProviderId = id;
+                      _ttsFetchedModels = modelsByProvider[id] ?? const [];
+                      _ttsFetchedVoices = voices;
+                      // 供应商切换后仅保留该供应商已获模型；否则等待用户获取
+                      if (_ttsFetchedModels.isNotEmpty &&
+                          !_ttsFetchedModels.contains(previousModel)) {
+                        _ttsCloudModelCtrl.text = _ttsFetchedModels.first;
+                      }
+                    });
                     await _settings.setTtsCloudProviderId(id);
                   },
                 ),
@@ -1043,9 +1066,15 @@ class _SettingsPageState extends State<SettingsPage> {
                     ),
                     suffixIcon: PopupMenuButton<String>(
                       icon: const Icon(Icons.arrow_drop_down),
-                      onSelected: (model) {
+                      onSelected: (model) async {
                         _ttsCloudModelCtrl.text = model;
-                        _settings.setTtsCloudModel(model);
+                        _ttsFetchedVoices = await _settings
+                            .getTtsVoicesForModel(
+                              providerId: _activeTtsProvider.id,
+                              model: model,
+                            );
+                        if (mounted) setState(() {});
+                        await _settings.setTtsCloudModel(model);
                       },
                       itemBuilder:
                           (_) => [
@@ -1129,7 +1158,7 @@ class _SettingsPageState extends State<SettingsPage> {
                       },
                       itemBuilder:
                           (_) => [
-                            // [v0.1.60] 获取到的音色优先展示
+                            // [v0.1.60] 获取到的真实音色优先展示
                             ..._ttsFetchedVoices.map(
                               (v) => PopupMenuItem(
                                 value: v,
@@ -1139,32 +1168,35 @@ class _SettingsPageState extends State<SettingsPage> {
                                 ),
                               ),
                             ),
-                            if (_ttsFetchedVoices.isNotEmpty)
-                              const PopupMenuDivider(),
-                            const PopupMenuItem(
-                              value: 'alloy',
-                              child: Text('alloy (通用清脆)'),
-                            ),
-                            const PopupMenuItem(
-                              value: 'echo',
-                              child: Text('echo (浑厚男声)'),
-                            ),
-                            const PopupMenuItem(
-                              value: 'fable',
-                              child: Text('fable (英伦故事音)'),
-                            ),
-                            const PopupMenuItem(
-                              value: 'onyx',
-                              child: Text('onyx (低沉男声)'),
-                            ),
-                            const PopupMenuItem(
-                              value: 'nova',
-                              child: Text('nova (明亮女声)'),
-                            ),
-                            const PopupMenuItem(
-                              value: 'shimmer',
-                              child: Text('shimmer (温柔甜美)'),
-                            ),
+                            // 仅 OpenAI 兼容服务展示 alloy 等内置六预设
+                            if (_activeTtsProvider.id == 'openai') ...[
+                              if (_ttsFetchedVoices.isNotEmpty)
+                                const PopupMenuDivider(),
+                              const PopupMenuItem(
+                                value: 'alloy',
+                                child: Text('alloy (通用清脆)'),
+                              ),
+                              const PopupMenuItem(
+                                value: 'echo',
+                                child: Text('echo (浑厚男声)'),
+                              ),
+                              const PopupMenuItem(
+                                value: 'fable',
+                                child: Text('fable (英伦故事音)'),
+                              ),
+                              const PopupMenuItem(
+                                value: 'onyx',
+                                child: Text('onyx (低沉男声)'),
+                              ),
+                              const PopupMenuItem(
+                                value: 'nova',
+                                child: Text('nova (明亮女声)'),
+                              ),
+                              const PopupMenuItem(
+                                value: 'shimmer',
+                                child: Text('shimmer (温柔甜美)'),
+                              ),
+                            ],
                           ],
                     ),
                   ),
@@ -1279,13 +1311,22 @@ class _SettingsPageState extends State<SettingsPage> {
           allModels
               .where((m) => ttsKeywords.any((k) => m.toLowerCase().contains(k)))
               .toList();
-      final displayModels = ttsModels.isNotEmpty ? ttsModels : allModels;
+      if (ttsModels.isEmpty) {
+        if (mounted) {
+          TopToast.show(context, '该供应商未返回可识别的 TTS 模型，请手动填写并确认接口文档');
+        }
+        return;
+      }
+      final displayModels = ttsModels;
 
       if (!mounted) return;
-      // [v0.1.60] 获取结果持久化进可选列表（去重合并）
+      // [v0.1.60] 按供应商持久化，避免切换供应商后混入旧模型
       final merged = {...displayModels, ..._ttsFetchedModels}.toList();
       setState(() => _ttsFetchedModels = merged);
-      await _settings.setTtsFetchedModels(merged);
+      await _settings.setTtsModelsForProvider(
+        providerId: cur.id,
+        models: merged,
+      );
       if (!mounted) return;
       // 弹出选择弹窗
       final selected = await showModalBottomSheet<String>(
@@ -1358,11 +1399,15 @@ class _SettingsPageState extends State<SettingsPage> {
       }
 
       if (!mounted) return;
-      // [v0.1.60] 获取到的真实音色持久化进可选列表（去重合并）
       if (fetchedVoices != null && fetchedVoices.isNotEmpty) {
+        // [v0.1.60] 按供应商+模型持久化，避免跨模型污染
         final merged = {...fetchedVoices, ..._ttsFetchedVoices}.toList();
         setState(() => _ttsFetchedVoices = merged);
-        await _settings.setTtsFetchedVoices(merged);
+        await _settings.setTtsVoicesForModel(
+          providerId: cur.id,
+          model: _ttsCloudModelCtrl.text.trim(),
+          voices: merged,
+        );
       }
       if (!mounted) return;
       String? selected;
@@ -1371,9 +1416,8 @@ class _SettingsPageState extends State<SettingsPage> {
           context: context,
           builder: (ctx) => _buildModelListSheet(ctx, fetchedVoices!, 'TTS 音色'),
         );
-      } else {
-        // 兜底：内置六预设音色弹窗
-        TopToast.show(context, '该接口未提供音色列表，已展示内置预设');
+      } else if (cur.id == 'openai') {
+        // 仅 OpenAI 兼容服务回退到内置六预设音色
         selected = await showModalBottomSheet<String>(
           context: context,
           builder:
@@ -1384,8 +1428,10 @@ class _SettingsPageState extends State<SettingsPage> {
                 'onyx',
                 'nova',
                 'shimmer',
-              ], 'TTS 音色（内置预设）'),
+              ], 'TTS 音色（OpenAI 预设）'),
         );
+      } else {
+        TopToast.show(context, '该供应商未提供 voice 列表，请按供应商文档手动填写 voice id');
       }
       if (selected != null) {
         _ttsCloudVoiceCtrl.text = selected;
