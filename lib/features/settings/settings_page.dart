@@ -104,6 +104,11 @@ class _SettingsPageState extends State<SettingsPage> {
   bool _fetchingModels = false;
   String _currentLlmModel = '';
 
+  // [v0.1.59] 云端 TTS 独立供应商
+  String? _activeTtsProviderId;
+  bool _fetchingTtsModels = false;
+  bool _fetchingTtsVoices = false;
+
   bool _initDone = false;
 
   // 源语种选项（含自动识别）
@@ -176,6 +181,7 @@ class _SettingsPageState extends State<SettingsPage> {
         (await _settings.getActiveProviderId()) ?? 'siliconflow';
     _activeEmbeddingProviderId =
         (await _settings.getEmbeddingProviderId()) ?? _activeProviderId;
+    _activeTtsProviderId = await _settings.getTtsCloudProviderId();
     _currentLlmModel = (await _settings.getApiModel()) ?? '';
     _embeddingModel = await _settings.getEmbeddingModel();
 
@@ -222,6 +228,16 @@ class _SettingsPageState extends State<SettingsPage> {
       (p) => p.id == _activeEmbeddingProviderId,
       orElse: () => _activeProvider,
     );
+  }
+
+  /// [v0.1.59] 当前 TTS 云端供应商（独立选择，未设置时回退主 LLM 供应商）。
+  ApiProvider get _activeTtsProvider {
+    final id = _activeTtsProviderId;
+    if (id != null) {
+      final hit = _providers.where((p) => p.id == id).toList();
+      if (hit.isNotEmpty) return hit.first;
+    }
+    return _activeProvider;
   }
 
   Future<void> _syncActiveProviderToFields() async {
@@ -970,101 +986,195 @@ class _SettingsPageState extends State<SettingsPage> {
           ),
           const SizedBox(height: 10),
 
-          // 模型选择
-          TextField(
-            controller: _ttsCloudModelCtrl,
-            decoration: InputDecoration(
-              labelText: 'TTS 模型名称',
-              hintText: '如 tts-1 / FunAudioLLM/CosyVoice2-0.5B',
-              isDense: true,
-              filled: true,
-              fillColor: isDark ? StudyPalette.darkBorder : Colors.white,
-              border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(10),
+          // [v0.1.59] 独立 TTS 供应商选择（参照 RAG 向量供应商模式）
+          Row(
+            children: [
+              const Icon(Icons.dns_outlined, size: 16, color: StudyPalette.ink),
+              const SizedBox(width: 6),
+              const Text('语音供应商', style: TextStyle(fontSize: 12)),
+              const SizedBox(width: 10),
+              Expanded(
+                child: DropdownButton<String>(
+                  value:
+                      _providers.any((p) => p.id == _activeTtsProvider.id)
+                          ? _activeTtsProvider.id
+                          : (_providers.isNotEmpty
+                              ? _providers.first.id
+                              : 'default'),
+                  isExpanded: true,
+                  underline: const SizedBox(),
+                  style: const TextStyle(fontSize: 13, color: StudyPalette.ink),
+                  items:
+                      _providers
+                          .map(
+                            (p) => DropdownMenuItem(
+                              value: p.id,
+                              child: Text(
+                                p.name,
+                                style: const TextStyle(fontSize: 13),
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                          )
+                          .toList(),
+                  onChanged: (id) async {
+                    if (id == null) return;
+                    final sel = _providers.firstWhere(
+                      (p) => p.id == id,
+                      orElse: () => _activeProvider,
+                    );
+                    setState(() {
+                      _activeTtsProviderId = id;
+                      _ttsCloudBaseUrlCtrl.text = sel.baseUrl;
+                      _ttsCloudApiKeyCtrl.text = sel.apiKey;
+                    });
+                    await _settings.setTtsCloudProviderId(id);
+                    await _settings.setTtsCloudBaseUrl(sel.baseUrl);
+                    await _settings.setTtsCloudApiKey(sel.apiKey);
+                  },
+                ),
               ),
-              suffixIcon: PopupMenuButton<String>(
-                icon: const Icon(Icons.arrow_drop_down),
-                onSelected: (model) {
-                  _ttsCloudModelCtrl.text = model;
-                  _settings.setTtsCloudModel(model);
-                },
-                itemBuilder:
-                    (_) => [
-                      const PopupMenuItem(
-                        value: 'tts-1',
-                        child: Text('OpenAI · tts-1'),
-                      ),
-                      const PopupMenuItem(
-                        value: 'tts-1-hd',
-                        child: Text('OpenAI · tts-1-hd'),
-                      ),
-                      const PopupMenuItem(
-                        value: 'FunAudioLLM/CosyVoice2-0.5B',
-                        child: Text('硅基流动 · CosyVoice2-0.5B'),
-                      ),
-                      const PopupMenuItem(
-                        value: 'fishaudio/fish-speech-1.5',
-                        child: Text('硅基流动 · FishSpeech-1.5'),
-                      ),
-                      const PopupMenuItem(
-                        value: 'speech-01',
-                        child: Text('01.AI · speech-01'),
-                      ),
-                    ],
+            ],
+          ),
+          const Divider(height: 16),
+
+          // 模型选择 + 获取模型按钮
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(
+                child: TextField(
+                  controller: _ttsCloudModelCtrl,
+                  decoration: InputDecoration(
+                    labelText: 'TTS 模型名称',
+                    hintText: '如 tts-1 / FunAudioLLM/CosyVoice2-0.5B',
+                    isDense: true,
+                    filled: true,
+                    fillColor: isDark ? StudyPalette.darkBorder : Colors.white,
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    suffixIcon: PopupMenuButton<String>(
+                      icon: const Icon(Icons.arrow_drop_down),
+                      onSelected: (model) {
+                        _ttsCloudModelCtrl.text = model;
+                        _settings.setTtsCloudModel(model);
+                      },
+                      itemBuilder:
+                          (_) => [
+                            const PopupMenuItem(
+                              value: 'tts-1',
+                              child: Text('OpenAI · tts-1'),
+                            ),
+                            const PopupMenuItem(
+                              value: 'tts-1-hd',
+                              child: Text('OpenAI · tts-1-hd'),
+                            ),
+                            const PopupMenuItem(
+                              value: 'FunAudioLLM/CosyVoice2-0.5B',
+                              child: Text('硅基流动 · CosyVoice2-0.5B'),
+                            ),
+                            const PopupMenuItem(
+                              value: 'fishaudio/fish-speech-1.5',
+                              child: Text('硅基流动 · FishSpeech-1.5'),
+                            ),
+                            const PopupMenuItem(
+                              value: 'speech-01',
+                              child: Text('01.AI · speech-01'),
+                            ),
+                          ],
+                    ),
+                  ),
+                  onChanged: (v) => _settings.setTtsCloudModel(v.trim()),
+                ),
               ),
-            ),
-            onChanged: (v) => _settings.setTtsCloudModel(v.trim()),
+              const SizedBox(width: 8),
+              SizedBox(
+                height: 42,
+                child: FilledButton.tonal(
+                  style: FilledButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(horizontal: 12),
+                  ),
+                  onPressed: _fetchingTtsModels ? null : _fetchTtsModelsFromApi,
+                  child: Text(
+                    _fetchingTtsModels ? '获取中…' : '获取模型',
+                    style: const TextStyle(fontSize: 12),
+                  ),
+                ),
+              ),
+            ],
           ),
           const SizedBox(height: 10),
 
-          // 音色选择
-          TextField(
-            controller: _ttsCloudVoiceCtrl,
-            decoration: InputDecoration(
-              labelText: 'TTS 音色 (Voice)',
-              hintText: '如 alloy / shimmer / nova / echo',
-              isDense: true,
-              filled: true,
-              fillColor: isDark ? StudyPalette.darkBorder : Colors.white,
-              border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(10),
+          // 音色选择 + 获取音色按钮
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(
+                child: TextField(
+                  controller: _ttsCloudVoiceCtrl,
+                  decoration: InputDecoration(
+                    labelText: 'TTS 音色 (Voice)',
+                    hintText: '如 alloy / shimmer / nova / echo',
+                    isDense: true,
+                    filled: true,
+                    fillColor: isDark ? StudyPalette.darkBorder : Colors.white,
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    suffixIcon: PopupMenuButton<String>(
+                      icon: const Icon(Icons.arrow_drop_down),
+                      onSelected: (voice) {
+                        _ttsCloudVoiceCtrl.text = voice;
+                        _settings.setTtsCloudVoice(voice);
+                      },
+                      itemBuilder:
+                          (_) => [
+                            const PopupMenuItem(
+                              value: 'alloy',
+                              child: Text('alloy (通用清脆)'),
+                            ),
+                            const PopupMenuItem(
+                              value: 'echo',
+                              child: Text('echo (浑厚男声)'),
+                            ),
+                            const PopupMenuItem(
+                              value: 'fable',
+                              child: Text('fable (英伦故事音)'),
+                            ),
+                            const PopupMenuItem(
+                              value: 'onyx',
+                              child: Text('onyx (低沉男声)'),
+                            ),
+                            const PopupMenuItem(
+                              value: 'nova',
+                              child: Text('nova (明亮女声)'),
+                            ),
+                            const PopupMenuItem(
+                              value: 'shimmer',
+                              child: Text('shimmer (温柔甜美)'),
+                            ),
+                          ],
+                    ),
+                  ),
+                  onChanged: (v) => _settings.setTtsCloudVoice(v.trim()),
+                ),
               ),
-              suffixIcon: PopupMenuButton<String>(
-                icon: const Icon(Icons.arrow_drop_down),
-                onSelected: (voice) {
-                  _ttsCloudVoiceCtrl.text = voice;
-                  _settings.setTtsCloudVoice(voice);
-                },
-                itemBuilder:
-                    (_) => [
-                      const PopupMenuItem(
-                        value: 'alloy',
-                        child: Text('alloy (通用清脆)'),
-                      ),
-                      const PopupMenuItem(
-                        value: 'echo',
-                        child: Text('echo (浑厚男声)'),
-                      ),
-                      const PopupMenuItem(
-                        value: 'fable',
-                        child: Text('fable (英伦故事音)'),
-                      ),
-                      const PopupMenuItem(
-                        value: 'onyx',
-                        child: Text('onyx (低沉男声)'),
-                      ),
-                      const PopupMenuItem(
-                        value: 'nova',
-                        child: Text('nova (明亮女声)'),
-                      ),
-                      const PopupMenuItem(
-                        value: 'shimmer',
-                        child: Text('shimmer (温柔甜美)'),
-                      ),
-                    ],
+              const SizedBox(width: 8),
+              SizedBox(
+                height: 42,
+                child: FilledButton.tonal(
+                  style: FilledButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(horizontal: 12),
+                  ),
+                  onPressed: _fetchingTtsVoices ? null : _fetchTtsVoicesFromApi,
+                  child: Text(
+                    _fetchingTtsVoices ? '获取中…' : '获取音色',
+                    style: const TextStyle(fontSize: 12),
+                  ),
+                ),
               ),
-            ),
-            onChanged: (v) => _settings.setTtsCloudVoice(v.trim()),
+            ],
           ),
           const SizedBox(height: 10),
 
@@ -1128,6 +1238,209 @@ class _SettingsPageState extends State<SettingsPage> {
     } finally {
       if (mounted) setState(() => _cloudPreviewing = false);
     }
+  }
+
+  /// [v0.1.59] 从当前 TTS 供应商 API 获取模型列表，过滤 TTS 相关模型后弹出选择。
+  Future<void> _fetchTtsModelsFromApi() async {
+    final cur = _activeTtsProvider;
+    if (cur.baseUrl.isEmpty) {
+      TopToast.show(context, '请先选择或填写供应商地址');
+      return;
+    }
+    setState(() => _fetchingTtsModels = true);
+    try {
+      final url =
+          '${cur.baseUrl.endsWith('/') ? cur.baseUrl : '${cur.baseUrl}/'}models';
+      final headers = <String, String>{};
+      if (cur.apiKey.isNotEmpty) {
+        headers['Authorization'] = 'Bearer ${cur.apiKey}';
+      }
+      final resp = await http
+          .get(Uri.parse(url), headers: headers)
+          .timeout(const Duration(seconds: 15));
+      if (resp.statusCode != 200) {
+        if (mounted) {
+          TopToast.show(context, '获取模型失败: HTTP ${resp.statusCode}');
+        }
+        return;
+      }
+      final json = jsonDecode(resp.body) as Map<String, dynamic>;
+      final data = json['data'] as List?;
+      if (data == null || data.isEmpty) {
+        if (mounted) TopToast.show(context, '该接口未返回任何模型');
+        return;
+      }
+      // 优先过滤 TTS / audio / speech / voice 相关模型
+      final allModels =
+          data
+              .map((e) => (e as Map<String, dynamic>)['id']?.toString())
+              .where((e) => e != null && e.isNotEmpty)
+              .cast<String>()
+              .toList();
+      const ttsKeywords = [
+        'tts',
+        'audio',
+        'speech',
+        'voice',
+        'cosyvoice',
+        'fish',
+      ];
+      final ttsModels =
+          allModels
+              .where((m) => ttsKeywords.any((k) => m.toLowerCase().contains(k)))
+              .toList();
+      final displayModels = ttsModels.isNotEmpty ? ttsModels : allModels;
+
+      if (!mounted) return;
+      // 弹出选择弹窗
+      final selected = await showModalBottomSheet<String>(
+        context: context,
+        builder: (ctx) => _buildModelListSheet(ctx, displayModels, 'TTS 模型'),
+      );
+      if (selected != null) {
+        _ttsCloudModelCtrl.text = selected;
+        await _settings.setTtsCloudModel(selected);
+        if (mounted) TopToast.show(context, '已选择模型: $selected');
+      }
+    } catch (e) {
+      if (mounted) TopToast.show(context, '获取模型失败: $e');
+    } finally {
+      if (mounted) setState(() => _fetchingTtsModels = false);
+    }
+  }
+
+  /// [v0.1.59] 尝试从当前 TTS 供应商获取音色列表；失败则弹内置六预设音色选择。
+  Future<void> _fetchTtsVoicesFromApi() async {
+    final cur = _activeTtsProvider;
+    setState(() => _fetchingTtsVoices = true);
+    List<String>? fetchedVoices;
+    try {
+      // 尝试常见 OpenAI 兼容音色端点（如硅基流动 /v1/audio/voice/list）
+      final base = cur.baseUrl.endsWith('/') ? cur.baseUrl : '${cur.baseUrl}/';
+      final voiceUrls = [
+        '${base}audio/voice/list',
+        '${base}voices',
+        '${base}audio/voices',
+      ];
+      for (final url in voiceUrls) {
+        try {
+          final headers = <String, String>{};
+          if (cur.apiKey.isNotEmpty) {
+            headers['Authorization'] = 'Bearer ${cur.apiKey}';
+          }
+          final resp = await http
+              .get(Uri.parse(url), headers: headers)
+              .timeout(const Duration(seconds: 8));
+          if (resp.statusCode == 200) {
+            final json = jsonDecode(resp.body);
+            final list =
+                json is Map
+                    ? (json['data'] ?? json['voices']) as List?
+                    : json as List?;
+            if (list != null && list.isNotEmpty) {
+              final parsed =
+                  list
+                      .map((e) {
+                        if (e is String) return e;
+                        if (e is Map) {
+                          return (e['voice_id'] ?? e['name'] ?? e['id'])
+                              ?.toString();
+                        }
+                        return null;
+                      })
+                      .where((e) => e != null && e.isNotEmpty)
+                      .cast<String>()
+                      .toList();
+              if (parsed.isNotEmpty) {
+                fetchedVoices = parsed;
+                break;
+              }
+            }
+          }
+        } catch (_) {
+          continue; // 该端点不可用，尝试下一个
+        }
+      }
+
+      if (!mounted) return;
+      String? selected;
+      if (fetchedVoices != null && fetchedVoices.isNotEmpty) {
+        selected = await showModalBottomSheet<String>(
+          context: context,
+          builder: (ctx) => _buildModelListSheet(ctx, fetchedVoices!, 'TTS 音色'),
+        );
+      } else {
+        // 兜底：内置六预设音色弹窗
+        TopToast.show(context, '该接口未提供音色列表，已展示内置预设');
+        selected = await showModalBottomSheet<String>(
+          context: context,
+          builder:
+              (ctx) => _buildModelListSheet(ctx, [
+                'alloy',
+                'echo',
+                'fable',
+                'onyx',
+                'nova',
+                'shimmer',
+              ], 'TTS 音色（内置预设）'),
+        );
+      }
+      if (selected != null) {
+        _ttsCloudVoiceCtrl.text = selected;
+        await _settings.setTtsCloudVoice(selected);
+        if (mounted) TopToast.show(context, '已选择音色: $selected');
+      }
+    } finally {
+      if (mounted) setState(() => _fetchingTtsVoices = false);
+    }
+  }
+
+  /// 模型/音色通用选择弹窗。
+  Widget _buildModelListSheet(
+    BuildContext ctx,
+    List<String> items,
+    String title,
+  ) {
+    final isDark = Theme.of(ctx).brightness == Brightness.dark;
+    return Container(
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 32),
+      decoration: BoxDecoration(
+        color: isDark ? StudyPalette.darkCard : StudyPalette.parchment,
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Center(
+            child: Container(
+              width: 36,
+              height: 4,
+              margin: const EdgeInsets.only(bottom: 12),
+              decoration: BoxDecoration(
+                color: StudyPalette.linen,
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+          ),
+          Text(title, style: titleStyle(fontSize: 16)),
+          const SizedBox(height: 12),
+          Flexible(
+            child: ListView.separated(
+              shrinkWrap: true,
+              itemCount: items.length,
+              separatorBuilder: (_, _) => const Divider(height: 1),
+              itemBuilder:
+                  (_, i) => ListTile(
+                    dense: true,
+                    title: Text(items[i], style: const TextStyle(fontSize: 13)),
+                    onTap: () => Navigator.pop(ctx, items[i]),
+                  ),
+            ),
+          ),
+        ],
+      ),
+    );
   }
 
   // ===== 5. Vosk 语音模型（模型名称 + 删除按钮，不展示冗余绝对路径） =====

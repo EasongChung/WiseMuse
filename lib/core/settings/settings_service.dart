@@ -224,6 +224,14 @@ class SettingsService {
   static const kTtsCloudBaseUrl = 'tts_cloud_base_url';
   static const kTtsCloudApiKey = 'tts_cloud_api_key';
 
+  /// [v0.1.59] TTS 云端供应商 ID（独立于 LLM 供应商，空=回退 LLM 供应商）。
+  static const kTtsCloudProviderId = 'tts_cloud_provider_id';
+
+  Future<String?> getTtsCloudProviderId() async =>
+      (await SharedPreferences.getInstance()).getString(kTtsCloudProviderId);
+  Future<void> setTtsCloudProviderId(String v) async =>
+      (await SharedPreferences.getInstance()).setString(kTtsCloudProviderId, v);
+
   /// TTS 引擎模式：auto（大模型优先/回退系统）/ cloud（仅云端大模型）/ system（系统原生）。默认 auto。
   Future<String> getTtsEngine() async =>
       (await SharedPreferences.getInstance()).getString(kTtsEngine) ?? 'auto';
@@ -384,4 +392,15 @@ class SettingsService {
         kLlamaEngineDisabled,
         disabled,
       );
+
+  // ---- [v0.1.59] 章节测验朗读题模式 ----
+
+  /// 测验「朗读认读」题型作答方式：
+  /// asr=语音识别评分（Vosk 未就绪自动回落自评）；self=听范读后自评（听写测验形态）。
+  static const kQuizReadMode = 'quiz_read_mode';
+
+  Future<String> getQuizReadMode() async =>
+      (await SharedPreferences.getInstance()).getString(kQuizReadMode) ?? 'asr';
+  Future<void> setQuizReadMode(String v) async =>
+      (await SharedPreferences.getInstance()).setString(kQuizReadMode, v);
 }

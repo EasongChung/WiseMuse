@@ -1,6 +1,8 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:permission_handler/permission_handler.dart';
 
 import '../../core/debug/app_log.dart';
 import '../../core/models/book.dart';
@@ -15,11 +17,15 @@ import '../../core/storage/word_entry_dao.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/utils/json_util.dart';
 import '../../services/ai_service.dart';
+import '../../services/asr_service.dart';
 import '../../services/hybrid_tts_service.dart';
 import '../../services/mastery_service.dart';
 import '../../services/tts_service.dart';
+import '../../services/vosk_asr_service.dart';
 import '../../widgets/char_select_grid.dart';
+import '../../widgets/top_toast.dart';
 import '../assistant/tutor_interactive_sheet.dart';
+import '../follow/scoring.dart';
 import 'quiz_question_builder.dart';
 import 'quiz_scorer.dart';
 
@@ -45,9 +51,18 @@ class _QuizPageState extends State<QuizPage> {
 
   final TtsService _tts = HybridTtsService.instance;
   final AiService _ai = AiService();
+  final AsrService _asr = VoskAsrService();
 
   List<QuizQuestion> _questions = const [];
   int _currentIndex = 0;
+
+  // [v0.1.59] 朗读题作答模式：asr=语音识别评分 / self=自评（听写形态）
+  String _readMode = 'asr';
+  bool _voskReady = false;
+  bool _voskLoading = false;
+  bool _listening = false;
+  bool _asrScoring = false;
+  String _asrError = '';
 
   // 各题型得分统计
   final List<double> _readScores = [];
@@ -74,6 +89,67 @@ class _QuizPageState extends State<QuizPage> {
   void initState() {
     super.initState();
     _init();
+    _initReadMode();
+  }
+
+  /// [v0.1.59] 初始化朗读题作答模式；若为语音识别模式则异步加载 Vosk（失败回落自评）。
+  Future<void> _initReadMode() async {
+    try {
+      final mode = await SettingsService.instance.getQuizReadMode();
+      if (mounted) setState(() => _readMode = mode);
+      if (mode == 'asr') {
+        await _autoLoadVosk();
+      }
+    } catch (e) {
+      AppLog.w(_tag, '读取朗读模式失败: $e');
+    }
+  }
+
+  Future<void> _autoLoadVosk() async {
+    if (_voskLoading) return;
+    setState(() {
+      _voskLoading = true;
+      _asrError = '';
+    });
+    try {
+      final settings = SettingsService.instance;
+      final modelPath = await settings.getVoskModelPath();
+      if (modelPath == null || modelPath.isEmpty) {
+        if (mounted) {
+          setState(() {
+            _voskLoading = false;
+            _asrError = '未配置语音识别模型';
+          });
+        }
+        return;
+      }
+      final modelDir = Directory(modelPath);
+      if (!await modelDir.exists()) {
+        if (mounted) {
+          setState(() {
+            _voskLoading = false;
+            _asrError = '语音识别模型文件丢失';
+          });
+        }
+        return;
+      }
+      final ok = await _asr.init(modelPath);
+      if (mounted) {
+        setState(() {
+          _voskLoading = false;
+          _voskReady = ok;
+          if (!ok) _asrError = '语音识别模型加载失败';
+        });
+      }
+    } catch (e) {
+      AppLog.e(_tag, 'Vosk 自动加载失败: $e');
+      if (mounted) {
+        setState(() {
+          _voskLoading = false;
+          _asrError = '语音识别模型加载失败';
+        });
+      }
+    }
   }
 
   Future<void> _init() async {
@@ -202,6 +278,89 @@ class _QuizPageState extends State<QuizPage> {
     _recordResult(false);
   }
 
+  // ===== 2b. [v0.1.59] 语音识别认读（Vosk 录音 → 识别 → FollowScorer 评分） =====
+
+  /// 切换朗读题作答模式；切到 asr 时若 Vosk 未就绪先尝试加载。
+  Future<void> _switchReadMode(String mode) async {
+    if (_readMode == mode || _answered || _listening) return;
+    setState(() => _readMode = mode);
+    await SettingsService.instance.setQuizReadMode(mode);
+    if (mode == 'asr' && !_voskReady) {
+      await _autoLoadVosk();
+      // 加载失败自动回落自评，保证题目可作答
+      if (mounted && !_voskReady) {
+        setState(() => _readMode = 'self');
+        await SettingsService.instance.setQuizReadMode('self');
+        if (mounted) TopToast.show(context, '$_asrError，已切换为自评模式');
+      }
+    }
+  }
+
+  /// 开始/停止录音识别。
+  Future<void> _toggleListen() async {
+    if (_submitting || _answered) return;
+    final q = _currentQuestion;
+
+    if (_listening) {
+      setState(() {
+        _listening = false;
+        _asrScoring = true;
+      });
+      String text = '';
+      try {
+        text = await _asr.stop();
+      } catch (e) {
+        AppLog.e(_tag, 'ASR 停止失败: $e');
+      }
+      AppLog.d(_tag, '认读识别结果: "$text"');
+      if (!mounted) return;
+      final score = FollowScorer.scoreFollow(q.target, text);
+      final passed = score.passed && text.trim().isNotEmpty;
+      setState(() {
+        _asrScoring = false;
+        _answered = true;
+        _correct = passed;
+      });
+      _readScores.add(score.score);
+      _recordResult(passed);
+      TopToast.show(
+        context,
+        passed
+            ? '🌟 ${score.comment} (${score.score.toStringAsFixed(0)}分)'
+            : '💪 ${score.comment} (${score.score.toStringAsFixed(0)}分)',
+      );
+    } else {
+      await _tts.stop();
+      final perm = await Permission.microphone.request();
+      if (!mounted) return;
+      if (!perm.isGranted) {
+        TopToast.show(context, '请允许麦克风权限');
+        return;
+      }
+      final ok = await _asr.start();
+      if (!mounted) {
+        if (ok) unawaited(_asr.stop());
+        return;
+      }
+      if (!ok) {
+        TopToast.show(context, '启动录音失败，请重试');
+        return;
+      }
+      setState(() => _listening = true);
+    }
+  }
+
+  @override
+  void dispose() {
+    if (_listening) {
+      try {
+        _asr.stop();
+      } catch (_) {}
+    }
+    _asr.dispose();
+    super.dispose();
+  }
+
   // ===== 3. 词句释义选择 =====
   void _onMeaningSelect(String option) {
     if (_submitting || _answered) return;
@@ -321,6 +480,8 @@ class _QuizPageState extends State<QuizPage> {
       _selectedOption = null;
       _selectedChoice = null;
       _choiceOptions = const [];
+      _listening = false;
+      _asrScoring = false;
     });
 
     if (_currentIndex < _questions.length &&
@@ -719,6 +880,46 @@ class _QuizPageState extends State<QuizPage> {
     return SingleChildScrollView(
       child: Column(
         children: [
+          // 朗读题作答模式开关
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              _buildReadModeChip('语音识别', 'asr', isDark),
+              const SizedBox(width: 8),
+              _buildReadModeChip('听写自评', 'self', isDark),
+            ],
+          ),
+          const SizedBox(height: 12),
+          if (_readMode == 'asr' && _voskLoading)
+            const Padding(
+              padding: EdgeInsets.only(bottom: 8),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  SizedBox(
+                    width: 14,
+                    height: 14,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  ),
+                  SizedBox(width: 6),
+                  Text(
+                    '加载语音识别…',
+                    style: TextStyle(fontSize: 12, color: StudyPalette.inkSoft),
+                  ),
+                ],
+              ),
+            ),
+          if (_readMode == 'asr' &&
+              !_voskReady &&
+              !_voskLoading &&
+              _asrError.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 8),
+              child: Text(
+                '⚠️ $_asrError，当前为自评模式',
+                style: const TextStyle(fontSize: 11, color: StudyPalette.ember),
+              ),
+            ),
           Text(
             q.prompt ?? '请朗读以下词句：',
             style: const TextStyle(fontSize: 14, color: StudyPalette.inkSoft),
@@ -744,6 +945,7 @@ class _QuizPageState extends State<QuizPage> {
             ),
           ),
           const SizedBox(height: 16),
+          // 听读控制
           IconButton(
             icon: Icon(
               _ttsPlaying ? Icons.hourglass_top : Icons.volume_up_outlined,
@@ -755,34 +957,137 @@ class _QuizPageState extends State<QuizPage> {
             tooltip: '听发音',
           ),
           const SizedBox(height: 8),
-          const Text(
-            '先听范读，朗读完毕后点击下方按钮：',
-            style: TextStyle(fontSize: 12, color: StudyPalette.inkSoft),
+          if (_readMode == 'asr')
+            ..._buildAsrReadButtons(q)
+          else
+            ..._buildSelfReadButtons(),
+        ],
+      ),
+    );
+  }
+
+  List<Widget> _buildAsrReadButtons(QuizQuestion q) {
+    if (_listening) {
+      return [
+        const Text(
+          '🎙️ 正在聆听，读完请点击停止',
+          style: TextStyle(fontSize: 12, color: StudyPalette.inkSoft),
+        ),
+        const SizedBox(height: 12),
+        SizedBox(
+          width: double.infinity,
+          child: FilledButton.icon(
+            style: FilledButton.styleFrom(backgroundColor: StudyPalette.ember),
+            onPressed: _answered || _submitting ? null : _toggleListen,
+            icon: const Icon(Icons.stop),
+            label: const Text('停止录音，智能评分'),
           ),
-          const SizedBox(height: 14),
-          Row(
-            children: [
-              Expanded(
-                child: OutlinedButton.icon(
-                  onPressed: _answered || _submitting ? null : _skipRead,
-                  icon: const Icon(Icons.close),
-                  label: const Text('不熟练(需复习)'),
+        ),
+      ];
+    }
+    if (_asrScoring) {
+      return [
+        const Center(
+          child: Padding(
+            padding: EdgeInsets.all(8),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                SizedBox(
+                  width: 14,
+                  height: 14,
+                  child: CircularProgressIndicator(strokeWidth: 2),
                 ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: FilledButton.icon(
-                  style: FilledButton.styleFrom(
-                    backgroundColor: StudyPalette.moss,
-                  ),
-                  onPressed: _answered || _submitting ? null : _markRead,
-                  icon: const Icon(Icons.check),
-                  label: const Text('朗读正确'),
+                SizedBox(width: 8),
+                Text(
+                  '正在智能评分…',
+                  style: TextStyle(fontSize: 12, color: StudyPalette.inkSoft),
                 ),
-              ),
-            ],
+              ],
+            ),
+          ),
+        ),
+      ];
+    }
+    if (_answered) return [];
+    return [
+      const Text(
+        '先听范读，然后点击麦克风开始朗读：',
+        style: TextStyle(fontSize: 12, color: StudyPalette.inkSoft),
+      ),
+      const SizedBox(height: 12),
+      SizedBox(
+        width: double.infinity,
+        child: FilledButton.icon(
+          style: FilledButton.styleFrom(backgroundColor: StudyPalette.moss),
+          onPressed: _answered || _submitting ? null : _toggleListen,
+          icon: const Icon(Icons.mic),
+          label: const Text('开始朗读'),
+        ),
+      ),
+    ];
+  }
+
+  List<Widget> _buildSelfReadButtons() {
+    return [
+      const Text(
+        '先听范读，朗读完毕后点击下方按钮：',
+        style: TextStyle(fontSize: 12, color: StudyPalette.inkSoft),
+      ),
+      const SizedBox(height: 14),
+      Row(
+        children: [
+          Expanded(
+            child: OutlinedButton.icon(
+              onPressed: _answered || _submitting ? null : _skipRead,
+              icon: const Icon(Icons.close),
+              label: const Text('不熟练(需复习)'),
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: FilledButton.icon(
+              style: FilledButton.styleFrom(backgroundColor: StudyPalette.moss),
+              onPressed: _answered || _submitting ? null : _markRead,
+              icon: const Icon(Icons.check),
+              label: const Text('朗读正确'),
+            ),
           ),
         ],
+      ),
+    ];
+  }
+
+  Widget _buildReadModeChip(String label, String mode, bool isDark) {
+    final selected = _readMode == mode;
+    return GestureDetector(
+      onTap:
+          _readMode == mode
+              ? null
+              : () {
+                if (_listening || _asrScoring) return;
+                _switchReadMode(mode);
+              },
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+        decoration: BoxDecoration(
+          color:
+              selected
+                  ? (isDark ? StudyPalette.ember : StudyPalette.ember)
+                  : (isDark ? StudyPalette.darkCard : Colors.white),
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(
+            color: selected ? StudyPalette.ember : StudyPalette.linen,
+          ),
+        ),
+        child: Text(
+          label,
+          style: TextStyle(
+            fontSize: 12,
+            fontWeight: selected ? FontWeight.bold : FontWeight.normal,
+            color: selected ? Colors.white : StudyPalette.inkSoft,
+          ),
+        ),
       ),
     );
   }
