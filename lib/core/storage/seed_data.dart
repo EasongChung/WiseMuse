@@ -17,6 +17,44 @@ class SeedData {
   /// [v0.1.60] 内置书名：现有幼小衔接为其一个子集，预设一至六年级入口。
   static const String builtinBookTitle = '小学知识点收集（内置）';
 
+  /// 内置书正文标题：按年级与学科组织，供正文目录和章节页标题共用。
+  static String builtinChapterTitle(int chapter) {
+    const labels = {
+      1: '一年级 · 声母',
+      2: '一年级 · 韵母',
+      3: '一年级 · 整体认读音节',
+      4: '一年级 · 英文字母',
+      5: '一年级 · 基础识字',
+      101: '一年级 · 语文',
+      102: '一年级 · 语文',
+      104: '一年级 · 数学',
+      106: '一年级 · 英语',
+      201: '二年级 · 语文',
+      202: '二年级 · 语文',
+      203: '二年级 · 语文',
+      204: '二年级 · 数学',
+      206: '二年级 · 英语',
+      301: '三年级 · 语文',
+      302: '三年级 · 语文',
+      303: '三年级 · 语文',
+      304: '三年级 · 数学',
+      305: '三年级 · 英语',
+      401: '四年级 · 语文',
+      402: '四年级 · 语文',
+      403: '四年级 · 数学',
+      404: '四年级 · 英语',
+      501: '五年级 · 语文',
+      502: '五年级 · 语文',
+      503: '五年级 · 数学',
+      504: '五年级 · 英语',
+      601: '六年级 · 语文',
+      602: '六年级 · 语文',
+      603: '六年级 · 数学',
+      604: '六年级 · 英语',
+    };
+    return labels[chapter] ?? '拓展知识 · 第 $chapter 单元';
+  }
+
   /// 内置书章节范围：5 个幼小衔接单元，以及一/二年级语数英入口。
   static String chapterLabel(int chapter) {
     if (chapter <= 5) {
@@ -426,25 +464,53 @@ class SeedData {
     for (final p in points) {
       byChapter.putIfAbsent(p.chapter ?? 0, () => []).add(p);
     }
-    final chapterTitles = {1: '声母', 2: '韵母', 3: '整体认读音节', 4: '英文字母', 5: '基础识字'};
-
     final rows = <Sentence>[];
-    var page = 0;
-    for (final entry in byChapter.entries) {
-      final chapter = entry.key;
-      final chapterPoints = entry.value;
-      final title = chapterTitles[chapter] ?? '第 $chapter 单元';
-      final intro = '第 $chapter 单元：$title。';
-      final bodyLines =
-          chapterPoints.map((p) {
-            final def = (p.definition ?? '').trim();
-            final text = p.text.trim();
-            if (def.isNotEmpty) return '$text：$def。';
-            return text;
-          }).toList();
+    final chapters = byChapter.keys.toList()..sort();
+
+    // 正文第一页就是目录实体，不额外在知识库页渲染一份伪目录。
+    final directoryLines = <String>['目录。'];
+    for (var i = 0; i < chapters.length; i++) {
+      directoryLines.add('${i + 1}．${builtinChapterTitle(chapters[i])}');
+    }
+    for (final line in directoryLines) {
+      rows.add(
+        Sentence.create(
+          bookId: builtinBookId,
+          page: 0,
+          chapter: 0,
+          index: rows.length,
+          text: line,
+        ),
+      );
+    }
+
+    var page = 1;
+    for (final chapter in chapters) {
+      final chapterPoints = byChapter[chapter]!;
+      final intro = '${builtinChapterTitle(chapter)}。';
+      final bodyLines = <String>[];
+      for (final point in chapterPoints) {
+        final text = point.text.trim();
+        final def = (point.definition ?? '').trim();
+        if (point.type == KnowledgeType.poem) {
+          // 诗词一首保持为一段，避免按句号拆出孤立标点行。
+          bodyLines.add('《$text》${def.isEmpty ? '' : '：$def'}');
+        } else if (def.isNotEmpty) {
+          bodyLines.add('$text：$def。');
+        } else {
+          bodyLines.add(text);
+        }
+      }
 
       final content = [intro, ...bodyLines].join('\n');
-      for (final line in _splitLines(content)) {
+      final lines =
+          chapterPoints.any((p) => p.type == KnowledgeType.poem)
+              ? content
+                  .split('\n')
+                  .map((line) => line.trim())
+                  .where((line) => line.isNotEmpty)
+              : _splitLines(content);
+      for (final line in lines) {
         rows.add(
           Sentence.create(
             bookId: builtinBookId,

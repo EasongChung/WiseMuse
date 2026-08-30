@@ -14,9 +14,11 @@ import '../../core/settings/settings_service.dart';
 import '../../core/storage/database.dart';
 import '../../core/storage/knowledge_point_dao.dart';
 import '../../core/storage/learning_record_dao.dart';
+import '../../core/storage/seed_data.dart';
 import '../../core/storage/sentence_dao.dart';
 import '../../core/storage/word_entry_dao.dart';
 import '../../core/theme/app_theme.dart';
+import '../../core/utils/pinyin_speech.dart';
 import '../../services/asr_service.dart';
 import '../../services/native_tts_service.dart';
 import '../../services/tts_service.dart';
@@ -327,7 +329,11 @@ class _FollowPageState extends State<FollowPage>
       });
       return;
     }
-    final ok = await _tts.speak(item.text);
+    final speakText = PinyinSpeech.transform(
+      item.text,
+      enabled: item.bookId == SeedData.builtinBookId,
+    );
+    final ok = await _tts.speak(speakText);
     if (!mounted || request != _playRequest) return;
     setState(() {
       _playing = false;
@@ -360,7 +366,11 @@ class _FollowPageState extends State<FollowPage>
       });
       return;
     }
-    final ok = await _tts.speak(item.text);
+    final speakText = PinyinSpeech.transform(
+      item.text,
+      enabled: item.bookId == SeedData.builtinBookId,
+    );
+    final ok = await _tts.speak(speakText);
     if (!mounted || request != _playRequest) return;
     setState(() {
       _playing = false;

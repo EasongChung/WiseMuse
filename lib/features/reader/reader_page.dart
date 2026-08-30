@@ -17,6 +17,7 @@ import '../../core/storage/seed_data.dart';
 import '../../core/storage/sentence_dao.dart';
 import '../../core/storage/word_entry_dao.dart';
 import '../../core/theme/app_theme.dart';
+import '../../core/utils/pinyin_speech.dart';
 import '../../services/book_import_service.dart';
 import '../../services/docx_html_converter.dart';
 import '../../services/native_tts_service.dart';
@@ -86,6 +87,9 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
   List<List<Sentence>> _textPages = const [];
 
   int _pdfCurrentPage = 0;
+  // [v0.1.63] PDF 原文真实文档页数，独立于文本句子派生的 _pageTexts。
+  // 避免 PDF 某页无文本句子时总页数被低估，导致翻页按钮失效。
+  int _documentPageCount = 0;
   final ScrollController _sheetScrollController = ScrollController();
 
   // [v0.1.51] 手势滑动跟踪（基于 Listener, 绕过 SelectionArea / PDFView 手势拦截）
@@ -215,12 +219,12 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
   }
 
   /// 是否多页文档。
-  bool get _isMultiPage => _pageTexts.length > 1;
+  bool get _isMultiPage => _documentPageCount > 1 || _pageTexts.length > 1;
 
   /// [v0.1.28] 统一翻页同步：更新共享页码、清除旧状态。
   /// 所有翻页操作（PDF onPageChanged / 文本翻页 / 目录跳页）最终调用此函数。
   void _syncPage(int page) {
-    final total = _pageTexts.length;
+    final total = _documentPageCount > 0 ? _documentPageCount : _pageTexts.length;
     if (total <= 1) return;
     final next = page.clamp(0, total - 1);
     if (next == _pdfCurrentPage) return;
@@ -253,9 +257,20 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
         .catchError((_) {});
   }
 
+  /// [v0.1.63] 跳转到指定页：文本模式走 _syncPage，PDF 原文额外驱动原生控件。
+  void _goToPage(int page) {
+    final total = _documentPageCount > 0 ? _documentPageCount : _pageTexts.length;
+    if (total <= 1) return;
+    final next = page.clamp(0, total - 1);
+    if (_useOriginal && _pdfController != null) {
+      _pdfController!.setPage(next);
+    }
+    _syncPage(next);
+  }
+
   /// 文本模式翻页（+/- 翻页）。
   void _changePage(int delta) {
-    final total = _pageTexts.length;
+    final total = _documentPageCount > 0 ? _documentPageCount : _pageTexts.length;
     if (total <= 1) return;
     _syncPage(_pdfCurrentPage + delta);
   }
@@ -315,7 +330,11 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
   Future<void> _initPdf() async {
     final path = widget.book.originalFilePath;
     if (path == null) throw Exception('缺少 PDF 原文件');
-    await PdfService().getPageCount(path);
+    // [v0.1.63] 取真实文档页数，供翻页栏与目录跳页使用。
+    final count = await PdfService().getPageCount(path) ?? 0;
+    if (mounted) {
+      setState(() => _documentPageCount = count);
+    }
   }
 
   /// onPageChanged / onViewCreated：下发 CropBox 尺寸（G2.5 必需）。
@@ -624,17 +643,11 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
     await _speakRequest(_preparePinyin(text), request);
   }
 
-  /// [v0.1.62] 朗读前把句首孤立的拼音字母转为中文谐音字，TTS 走中文发音。
+  /// [v0.1.63] 朗读前把句首孤立的拼音字母转为中文谐音字，TTS 走中文发音。
   /// 仅对内置书生效，句子显示不变（如「b：双唇不送气清塞音。」朗读为「玻：…」）。
   String _preparePinyin(String text) {
-    if (widget.book.id != SeedData.builtinBookId) return text;
-    // 句首可能是「第 N 单元：声母。」这类无拼音的，直接返回
-    final m = RegExp(r'^([a-zA-Zü]+)([：:])').firstMatch(text);
-    if (m == null) return text;
-    final pinyin = m.group(1)!.toLowerCase();
-    final read = SeedData.pinyinReadOf(pinyin);
-    if (read == null) return text;
-    return '$read${text.substring(m.group(1)!.length)}';
+    final enabled = widget.book.id == SeedData.builtinBookId;
+    return PinyinSpeech.transform(text, enabled: enabled);
   }
 
   Future<void> _speakRequest(String text, int request) async {
@@ -1470,7 +1483,8 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
 
   /// [v0.1.35] 顶部独立页码控制栏（多页文件显示，仅包含 上一页 / 页码选择 / 下一页，无朗读与翻译按键）。
   Widget _buildTopPageBar() {
-    final total = _pageTexts.length;
+    final total =
+        _documentPageCount > 0 ? _documentPageCount : _pageTexts.length;
     final isDark = Theme.of(context).brightness == Brightness.dark;
     return Material(
       elevation: 4,
@@ -1493,7 +1507,7 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
               Icons.chevron_left,
               '上一页',
               _pdfCurrentPage > 0 && total > 1
-                  ? () => _syncPage(_pdfCurrentPage - 1)
+                  ? () => _goToPage(_pdfCurrentPage - 1)
                   : null,
             ),
             const SizedBox(width: 8),
@@ -1524,7 +1538,7 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
               Icons.chevron_right,
               '下一页',
               _pdfCurrentPage < total - 1 && total > 1
-                  ? () => _syncPage(_pdfCurrentPage + 1)
+                  ? () => _goToPage(_pdfCurrentPage + 1)
                   : null,
             ),
           ],
@@ -1533,119 +1547,259 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
     );
   }
 
-  /// [v0.1.38] 全宽页码选择器弹窗：列出所有页码，点击跳转。
+  /// [v0.1.38] 目录弹窗：顶部居中放页码输入框 + 跳转按钮，下方显示目录项。
+  /// 文本模式或 PDF 原文都使用同一入口；总页数优先用真实文档页数（PDF），
+  /// 否则回退到文本句子页数。
   void _showPageSelector() {
     final pages = _pageTexts;
-    if (pages.length <= 1) return;
+    final total = _documentPageCount > 0 ? _documentPageCount : pages.length;
+    if (total <= 1) return;
+    final controller = TextEditingController(
+      text: (_pdfCurrentPage + 1).toString(),
+    );
     final isDark = Theme.of(context).brightness == Brightness.dark;
     showModalBottomSheet(
       context: context,
-      isScrollControlled: false,
+      isScrollControlled: true,
       backgroundColor: isDark ? StudyPalette.darkCard : StudyPalette.parchment,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(18)),
       ),
-      builder:
-          (_) => SizedBox(
-            height: MediaQuery.of(context).size.height * 0.55,
-            child: Column(
-              children: [
-                Center(
-                  child: Container(
-                    width: 32,
-                    height: 4,
-                    margin: const EdgeInsets.only(top: 12, bottom: 8),
-                    decoration: BoxDecoration(
-                      color:
-                          isDark ? StudyPalette.darkBorder : StudyPalette.linen,
-                      borderRadius: BorderRadius.circular(2),
+      builder: (ctx) {
+        return Padding(
+          padding: EdgeInsets.only(
+            bottom: MediaQuery.of(ctx).viewInsets.bottom,
+          ),
+          child: SizedBox(
+            height: MediaQuery.of(ctx).size.height * 0.6,
+            child: StatefulBuilder(
+              builder: (ctx, setStateSheet) {
+                String? errorText;
+                void jump() {
+                  final raw = controller.text.trim();
+                  final n = int.tryParse(raw);
+                  if (n == null || n < 1 || n > total) {
+                    setStateSheet(
+                      () =>
+                          errorText = '请输入 1~$total 之间的页码',
+                    );
+                    return;
+                  }
+                  _goToPage(n - 1);
+                  Navigator.of(ctx).pop();
+                }
+
+                final entries = _buildDirectoryEntries(pages);
+                return Column(
+                  children: [
+                    Center(
+                      child: Container(
+                        width: 32,
+                        height: 4,
+                        margin: const EdgeInsets.only(top: 12, bottom: 8),
+                        decoration: BoxDecoration(
+                          color: isDark
+                              ? StudyPalette.darkBorder
+                              : StudyPalette.linen,
+                          borderRadius: BorderRadius.circular(2),
+                        ),
+                      ),
                     ),
-                  ),
-                ),
-                Padding(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 16,
-                    vertical: 8,
-                  ),
-                  child: Row(
-                    children: [
-                      Text('选择页码', style: titleStyle(fontSize: 16)),
-                      const Spacer(),
-                      TextButton.icon(
-                        icon: Icon(
-                          Icons.close,
-                          size: 16,
-                          color:
-                              isDark
+                    Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 16,
+                        vertical: 8,
+                      ),
+                      child: Row(
+                        children: [
+                          Text('目录', style: titleStyle(fontSize: 16)),
+                          const Spacer(),
+                          TextButton.icon(
+                            icon: Icon(
+                              Icons.close,
+                              size: 16,
+                              color: isDark
                                   ? StudyPalette.darkInkSoft
                                   : StudyPalette.inkSoft,
-                        ),
-                        label: Text(
-                          '关闭',
-                          style: TextStyle(
-                            fontSize: 12,
-                            color:
-                                isDark
+                            ),
+                            label: Text(
+                              '关闭',
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: isDark
                                     ? StudyPalette.darkInkSoft
                                     : StudyPalette.inkSoft,
-                          ),
-                        ),
-                        onPressed: () => Navigator.of(context).pop(),
-                      ),
-                    ],
-                  ),
-                ),
-                const Divider(height: 1),
-                Expanded(
-                  child: GridView.builder(
-                    padding: const EdgeInsets.all(12),
-                    gridDelegate:
-                        const SliverGridDelegateWithFixedCrossAxisCount(
-                          crossAxisCount: 5,
-                          mainAxisSpacing: 8,
-                          crossAxisSpacing: 8,
-                          childAspectRatio: 1.0,
-                        ),
-                    itemCount: pages.length,
-                    itemBuilder: (ctx, i) {
-                      final selected = i == _pdfCurrentPage;
-                      return Material(
-                        color:
-                            selected ? StudyPalette.ember : Colors.transparent,
-                        borderRadius: BorderRadius.circular(10),
-                        child: InkWell(
-                          borderRadius: BorderRadius.circular(10),
-                          onTap: () {
-                            _syncPage(i);
-                            if (_useOriginal && _pdfController != null) {
-                              _pdfController!.setPage(i);
-                            }
-                            Navigator.of(context).pop();
-                          },
-                          child: Center(
-                            child: Text(
-                              '${i + 1}',
-                              style: TextStyle(
-                                color:
-                                    selected
-                                        ? Colors.white
-                                        : StudyPalette.onSurfaceResolved(
-                                          context,
-                                        ),
-                                fontSize: 18,
-                                fontWeight: FontWeight.w600,
                               ),
                             ),
+                            onPressed: () => Navigator.of(ctx).pop(),
                           ),
-                        ),
-                      );
-                    },
-                  ),
-                ),
-              ],
+                        ],
+                      ),
+                    ),
+                    // 顶部居中：页码输入框 + 跳转按钮
+                    Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 16,
+                        vertical: 4,
+                      ),
+                      child: Row(
+                        children: [
+                          Text(
+                            '第',
+                            style: TextStyle(
+                              fontSize: 14,
+                              color: StudyPalette.onSurfaceResolved(ctx),
+                            ),
+                          ),
+                          const SizedBox(width: 6),
+                          SizedBox(
+                            width: 72,
+                            child: TextField(
+                              controller: controller,
+                              keyboardType: TextInputType.number,
+                              textAlign: TextAlign.center,
+                              decoration: InputDecoration(
+                                isDense: true,
+                                contentPadding: const EdgeInsets.symmetric(
+                                  horizontal: 8,
+                                  vertical: 8,
+                                ),
+                                border: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(8),
+                                ),
+                                errorText: errorText,
+                              ),
+                              onSubmitted: (_) => jump(),
+                            ),
+                          ),
+                          const SizedBox(width: 6),
+                          Text(
+                            '页 / 共 $total 页',
+                            style: TextStyle(
+                              fontSize: 14,
+                              color: StudyPalette.onSurfaceResolved(ctx),
+                            ),
+                          ),
+                          const Spacer(),
+                          FilledButton.icon(
+                            icon: const Icon(Icons.swap_vert, size: 16),
+                            label: const Text('跳转'),
+                            onPressed: jump,
+                          ),
+                        ],
+                      ),
+                    ),
+                    const Divider(height: 1),
+                    Expanded(
+                      child: entries.isEmpty
+                          ? GridView.builder(
+                              padding: const EdgeInsets.all(12),
+                              gridDelegate:
+                                  const SliverGridDelegateWithFixedCrossAxisCount(
+                                crossAxisCount: 5,
+                                mainAxisSpacing: 8,
+                                crossAxisSpacing: 8,
+                                childAspectRatio: 1.0,
+                              ),
+                              itemCount: pages.length,
+                              itemBuilder: (ctx, i) {
+                                final selected = i == _pdfCurrentPage;
+                                return Material(
+                                  color: selected
+                                      ? StudyPalette.ember
+                                      : Colors.transparent,
+                                  borderRadius: BorderRadius.circular(10),
+                                  child: InkWell(
+                                    borderRadius: BorderRadius.circular(10),
+                                    onTap: () {
+                                      _goToPage(i);
+                                      Navigator.of(ctx).pop();
+                                    },
+                                    child: Center(
+                                      child: Text(
+                                        '${i + 1}',
+                                        style: TextStyle(
+                                          color: selected
+                                              ? Colors.white
+                                              : StudyPalette.onSurfaceResolved(
+                                                  ctx,
+                                                ),
+                                          fontSize: 18,
+                                          fontWeight: FontWeight.w600,
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                );
+                              },
+                            )
+                          : ListView.separated(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 8,
+                                vertical: 8,
+                              ),
+                              itemCount: entries.length,
+                              separatorBuilder: (_, _) =>
+                                  const Divider(height: 1, indent: 16),
+                              itemBuilder: (ctx, i) {
+                                final entry = entries[i];
+                                return ListTile(
+                                  leading: CircleAvatar(
+                                    radius: 14,
+                                    backgroundColor: entry.page == _pdfCurrentPage
+                                        ? StudyPalette.ember
+                                        : StudyPalette.parchmentDeep,
+                                    child: Text(
+                                      '${entry.page + 1}',
+                                      style: TextStyle(
+                                        fontSize: 12,
+                                        color: entry.page == _pdfCurrentPage
+                                            ? Colors.white
+                                            : StudyPalette.inkSoft,
+                                      ),
+                                    ),
+                                  ),
+                                  title: Text(
+                                    entry.title,
+                                    style: TextStyle(
+                                      fontSize: 14,
+                                      color: StudyPalette.onSurfaceResolved(ctx),
+                                    ),
+                                  ),
+                                  onTap: () {
+                                    _goToPage(entry.page);
+                                    Navigator.of(ctx).pop();
+                                  },
+                                );
+                              },
+                            ),
+                    ),
+                  ],
+                );
+              },
             ),
           ),
+        );
+      },
     );
+  }
+
+  /// 构建目录项：取每页第一条非空文本作为标题。
+  List<({int page, String title})> _buildDirectoryEntries(
+    List<String> pages,
+  ) {
+    final entries = <({int page, String title})>[];
+    for (var i = 0; i < pages.length; i++) {
+      final first = pages[i]
+          .split('\n')
+          .map((line) => line.trim())
+          .firstWhere((line) => line.isNotEmpty, orElse: () => '');
+      if (first.isEmpty) continue;
+      // 跳过内置书目录页自身，避免点击跳到目录页造成循环。
+      if (first == '目录。') continue;
+      entries.add((page: i, title: first));
+    }
+    return entries;
   }
 
   // ===== [v0.1.35] 紧凑图标按钮 =====

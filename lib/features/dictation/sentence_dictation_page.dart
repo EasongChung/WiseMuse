@@ -6,7 +6,9 @@ import '../../core/debug/app_log.dart';
 import '../../core/models/learning_record.dart';
 import '../../core/storage/database.dart';
 import '../../core/storage/learning_record_dao.dart';
+import '../../core/storage/seed_data.dart';
 import '../../core/theme/app_theme.dart';
+import '../../core/utils/pinyin_speech.dart';
 import '../../services/mastery_service.dart';
 import '../../services/native_tts_service.dart';
 import '../../services/tts_service.dart';
@@ -109,7 +111,11 @@ class _SentenceDictationPageState extends State<SentenceDictationPage> {
       _ttsPlaying = true;
       _status = '播放中... (剩余 $_playsRemaining 次)';
     });
-    await _tts.speak(_currentSentence);
+    final text = PinyinSpeech.transform(
+      _currentSentence,
+      enabled: widget.bookId == SeedData.builtinBookId,
+    );
+    await _tts.speak(text);
     if (!mounted) return;
     _playsRemaining--;
     setState(() => _ttsPlaying = false);

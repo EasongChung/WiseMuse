@@ -42,8 +42,6 @@ class _KnowledgePageState extends State<KnowledgePage>
   KnowledgeSortOrder _sortOrder = KnowledgeSortOrder.updatedAtDesc;
   List<Book> _books = const [];
   Map<String, Map<int, List<KnowledgePoint>>> _groupedPoints = const {};
-  // [v0.1.62] 内置书目录：chapter -> [points]
-  Map<int, List<KnowledgePoint>> _builtinChapterPoints = const {};
   bool _loading = true;
 
   KnowledgeTaskProgress? _backgroundProgress;
@@ -127,13 +125,6 @@ class _KnowledgePageState extends State<KnowledgePage>
       setState(() {
         _books = books;
         _groupedPoints = grouped;
-        // [v0.1.62] 内置书按 chapter 分组，供目录展示
-        final builtinChapterPoints = <int, List<KnowledgePoint>>{};
-        for (final p in allPoints) {
-          if (p.bookId != SeedData.builtinBookId || p.chapter == null) continue;
-          builtinChapterPoints.putIfAbsent(p.chapter!, () => []).add(p);
-        }
-        _builtinChapterPoints = builtinChapterPoints;
         _loading = false;
       });
     } catch (e, s) {
@@ -391,13 +382,7 @@ class _KnowledgePageState extends State<KnowledgePage>
             _backgroundProgress!.bookId == book.id &&
             _backgroundProgress!.isRunning;
 
-        final isBuiltin = book.id == SeedData.builtinBookId;
-        return _buildBookSection(
-          book,
-          pageMap,
-          isExtracting,
-          isBuiltin: isBuiltin,
-        );
+        return _buildBookSection(book, pageMap, isExtracting);
       },
     );
   }
@@ -405,34 +390,25 @@ class _KnowledgePageState extends State<KnowledgePage>
   Widget _buildBookSection(
     Book book,
     Map<int, List<KnowledgePoint>> pageMap,
-    bool isExtracting, {
-    bool isBuiltin = false,
-  }) {
+    bool isExtracting,
+  ) {
     final totalPoints = _countPoints(pageMap);
     final sortedPages =
         pageMap.entries.toList()..sort((a, b) => a.key.compareTo(b.key));
-    // [v0.1.62] 内置书目录计算
-    final childList = <Widget>[];
-    if (isBuiltin && _builtinChapterPoints.isNotEmpty) {
-      childList.add(const SizedBox(height: 4));
-      childList.add(_buildChapterDirectory());
-      childList.add(const SizedBox(height: 4));
-    }
-    if (sortedPages.isEmpty && !isExtracting) {
-      childList.add(
-        const Padding(
-          padding: EdgeInsets.all(12),
-          child: Text(
-            '暂无知识点，可点右侧更多按钮提取',
-            style: TextStyle(fontSize: 12, color: StudyPalette.inkSoft),
-          ),
-        ),
-      );
-    } else {
-      childList.addAll(
-        sortedPages.map((e) => _buildPageSection(book.id, e.key, e.value)),
-      );
-    }
+    final childList =
+        sortedPages.isEmpty && !isExtracting
+            ? <Widget>[
+              const Padding(
+                padding: EdgeInsets.all(12),
+                child: Text(
+                  '暂无知识点，可点右侧更多按钮提取',
+                  style: TextStyle(fontSize: 12, color: StudyPalette.inkSoft),
+                ),
+              ),
+            ]
+            : sortedPages
+                .map((e) => _buildPageSection(book.id, e.key, e.value))
+                .toList();
 
     return Card(
       margin: const EdgeInsets.symmetric(vertical: 4),
@@ -590,54 +566,6 @@ class _KnowledgePageState extends State<KnowledgePage>
             ),
           ),
         ],
-      ),
-    );
-  }
-
-  // [v0.1.62] 内置书年级目录：按 chapter 分组展示
-  Widget _buildChapterDirectory() {
-    final sortedChapters = _builtinChapterPoints.keys.toList()..sort();
-    return Container(
-      margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
-      decoration: BoxDecoration(
-        color: const Color(0xFF8D6E63).withValues(alpha: 0.08),
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(
-          color: const Color(0xFF8D6E63).withValues(alpha: 0.2),
-        ),
-      ),
-      child: ExpansionTile(
-        leading: const Icon(
-          Icons.menu_book,
-          size: 18,
-          color: StudyPalette.inkSoft,
-        ),
-        title: const Text(
-          '知识点目录',
-          style: TextStyle(
-            fontSize: 13,
-            fontWeight: FontWeight.w600,
-            color: StudyPalette.ink,
-          ),
-        ),
-        children:
-            sortedChapters.map((chapter) {
-              final points = _builtinChapterPoints[chapter] ?? [];
-              final label = SeedData.chapterLabel(chapter);
-              return ListTile(
-                dense: true,
-                visualDensity: VisualDensity.compact,
-                title: Text(label, style: const TextStyle(fontSize: 12)),
-                trailing: Text(
-                  '$points.length',
-                  style: const TextStyle(
-                    fontSize: 10,
-                    color: StudyPalette.inkSoft,
-                  ),
-                ),
-                onTap: () {},
-              );
-            }).toList(),
       ),
     );
   }

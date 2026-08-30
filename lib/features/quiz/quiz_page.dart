@@ -14,8 +14,10 @@ import '../../core/storage/knowledge_point_dao.dart';
 import '../../core/storage/learning_record_dao.dart';
 import '../../core/storage/quiz_attempt_dao.dart';
 import '../../core/storage/word_entry_dao.dart';
+import '../../core/storage/seed_data.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/utils/json_util.dart';
+import '../../core/utils/pinyin_speech.dart';
 import '../../services/ai_service.dart';
 import '../../services/asr_service.dart';
 import '../../services/hybrid_tts_service.dart';
@@ -238,7 +240,12 @@ class _QuizPageState extends State<QuizPage> {
     if (_currentIndex >= _questions.length) return;
     setState(() => _ttsPlaying = true);
     await _tts.stop();
-    await _tts.speak(_questions[_currentIndex].target);
+    final target = _questions[_currentIndex].target;
+    final text = PinyinSpeech.transform(
+      target,
+      enabled: widget.book.id == SeedData.builtinBookId,
+    );
+    await _tts.speak(text);
     if (mounted) setState(() => _ttsPlaying = false);
   }
 

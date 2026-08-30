@@ -59,6 +59,9 @@ class _AiChatPageState extends State<AiChatPage> {
   /// [v0.1.52] 暂存待发送的图片路径。
   List<String> _pendingImagePaths = [];
 
+  // [v0.1.63] 当前正在朗读的消息 id，用于播放/停止按钮切换。
+  String? _speakingMessageId;
+
   @override
   void initState() {
     super.initState();
@@ -67,12 +70,34 @@ class _AiChatPageState extends State<AiChatPage> {
 
   @override
   void dispose() {
+    unawaited(_tts.stop());
     _textController.dispose();
     _scrollController.dispose();
     if (_isListening) {
       unawaited(_asr.stop());
     }
     super.dispose();
+  }
+
+  /// [v0.1.63] 朗读/停止切换：同一条消息再次点击停止，切换消息先停旧的。
+  Future<void> _toggleSpeak(ChatMessage message) async {
+    if (_speakingMessageId == message.id) {
+      await _tts.stop();
+      if (mounted) setState(() => _speakingMessageId = null);
+      return;
+    }
+    await _tts.stop();
+    if (!mounted) return;
+    setState(() => _speakingMessageId = message.id);
+    // 朗读前清理 Markdown 标记，避免把 #、** 等读出来。
+    final plain = message.content
+        .replaceAll(RegExp(r'^#{1,6}\s+', multiLine: true), '')
+        .replaceAll(RegExp(r'\*\*(.+?)\*\*'), r'$1')
+        .replaceAll(RegExp(r'\*([^*]+)\*'), r'$1')
+        .replaceAll(RegExp(r'`([^`]*)`'), r'$1')
+        .trim();
+    await _tts.speak(plain);
+    if (mounted) setState(() => _speakingMessageId = null);
   }
 
   Future<void> _init() async {
@@ -939,7 +964,7 @@ class _AiChatPageState extends State<AiChatPage> {
                       );
                     }),
                   if (isUser)
-                    Text(
+                    SelectableText(
                       msg.content,
                       style: const TextStyle(
                         fontSize: 14,
@@ -988,13 +1013,17 @@ class _AiChatPageState extends State<AiChatPage> {
                       mainAxisSize: MainAxisSize.min,
                       children: [
                         InkWell(
-                          onTap: () => _tts.speak(msg.content),
-                          child: const Padding(
-                            padding: EdgeInsets.all(4),
+                          onTap: () => unawaited(_toggleSpeak(msg)),
+                          child: Padding(
+                            padding: const EdgeInsets.all(4),
                             child: Icon(
-                              Icons.volume_up_outlined,
+                              _speakingMessageId == msg.id
+                                  ? Icons.stop_circle_outlined
+                                  : Icons.volume_up_outlined,
                               size: 16,
-                              color: StudyPalette.inkSoft,
+                              color: _speakingMessageId == msg.id
+                                  ? StudyPalette.ember
+                                  : StudyPalette.inkSoft,
                             ),
                           ),
                         ),

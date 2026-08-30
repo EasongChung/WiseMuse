@@ -9,8 +9,10 @@ import '../../core/models/learning_record.dart';
 import '../../core/storage/database.dart';
 import '../../core/storage/knowledge_point_dao.dart';
 import '../../core/storage/learning_record_dao.dart';
+import '../../core/storage/seed_data.dart';
 import '../../core/storage/word_entry_dao.dart';
 import '../../core/theme/app_theme.dart';
+import '../../core/utils/pinyin_speech.dart';
 import '../../services/dictation_engine.dart';
 import '../../services/mastery_service.dart';
 import '../../services/native_tts_service.dart';
@@ -51,6 +53,8 @@ class _DictationPageState extends State<DictationPage> {
 
   // 题目状态
   List<DictationQuestion> _questions = const [];
+  // [v0.1.63] 当前题源书籍 id，用于判断是否启用拼音朗读预处理。
+  String _bookId = '';
   int _currentIndex = 0;
   int _correctCount = 0;
 
@@ -144,6 +148,7 @@ class _DictationPageState extends State<DictationPage> {
     try {
       final db = await DatabaseProvider.database;
       final dao = KnowledgePointDao(db);
+      _bookId = scope.bookId;
       final points = await dao.getByBook(scope.bookId);
       var filtered = points;
       if (scope.chapter != null && scope.chapter! > 0) {
@@ -389,7 +394,12 @@ class _DictationPageState extends State<DictationPage> {
     if (_currentIndex >= _questions.length) return;
     setState(() => _ttsPlaying = true);
     await _tts.stop();
-    await _tts.speak(_questions[_currentIndex].word);
+    final word = _questions[_currentIndex].word;
+    final text = PinyinSpeech.transform(
+      word,
+      enabled: _bookId == SeedData.builtinBookId,
+    );
+    await _tts.speak(text);
     if (mounted) setState(() => _ttsPlaying = false);
   }
 

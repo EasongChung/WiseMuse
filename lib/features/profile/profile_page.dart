@@ -5,8 +5,8 @@ import '../../core/theme/app_theme.dart';
 import '../../services/profile_service.dart';
 import '../rag/rag_management_page.dart';
 import '../settings/settings_page.dart';
+import '../stats/stats_page.dart';
 import '../wordbook/wordbook_page.dart';
-import '../../widgets/top_toast.dart';
 
 /// [v0.3.0] 个人中心页（我的 Tab）。
 /// [v0.1.35] 多孩子模式：顶部显示当前孩子头像+名称，点击切换；
@@ -251,6 +251,19 @@ class _ProfilePageState extends State<ProfilePage> {
                     const Divider(height: 1, indent: 56),
                     _buildEntry(
                       context,
+                      icon: Icons.bar_chart_outlined,
+                      title: '学习统计',
+                      subtitle: '整个应用的学习记录与进度',
+                      onTap:
+                          () => Navigator.of(context).push(
+                            MaterialPageRoute(
+                              builder: (_) => const StatsPage(),
+                            ),
+                          ),
+                    ),
+                    const Divider(height: 1, indent: 56),
+                    _buildEntry(
+                      context,
                       icon: Icons.psychology_outlined,
                       title: 'RAG 知识库',
                       subtitle: '管理书籍向量索引与原文切片',
@@ -260,16 +273,6 @@ class _ProfilePageState extends State<ProfilePage> {
                               builder: (_) => const RagManagementPage(),
                             ),
                           ),
-                    ),
-                    const Divider(height: 1, indent: 56),
-                    _buildEntry(
-                      context,
-                      icon: Icons.bar_chart_outlined,
-                      title: '学习统计',
-                      subtitle: '学习记录与进度',
-                      onTap: () {
-                        TopToast.show(context, '学习统计即将推出');
-                      },
                     ),
                     const Divider(height: 1, indent: 56),
                     _buildEntry(

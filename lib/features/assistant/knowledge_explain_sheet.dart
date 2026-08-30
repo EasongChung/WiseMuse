@@ -1,7 +1,10 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../../core/theme/app_theme.dart';
 import '../../services/ai_tutor_service.dart';
+import '../../services/hybrid_tts_service.dart';
 
 /// [v0.1.28] 知识点讲解弹窗：调用 [AiTutorService.explain] 生成 Markdown 讲解。
 ///
@@ -32,11 +35,44 @@ class _KnowledgeExplainSheetState extends State<KnowledgeExplainSheet> {
   String? _explanation;
   bool _loading = true;
   bool _failed = false;
+  bool _reading = false;
+  final HybridTtsService _tts = HybridTtsService.instance;
 
   @override
   void initState() {
     super.initState();
     _load();
+  }
+
+  @override
+  void dispose() {
+    unawaited(_tts.stop());
+    super.dispose();
+  }
+
+  /// [v0.1.63] 朗读/停止切换：朗读前清理 Markdown 标记。
+  Future<void> _toggleRead() async {
+    if (_reading) {
+      await _tts.stop();
+      if (mounted) setState(() => _reading = false);
+      return;
+    }
+    if (_explanation == null || _explanation!.isEmpty) return;
+    setState(() => _reading = true);
+    await _tts.speak(_stripMarkdown(_explanation!));
+    if (mounted) setState(() => _reading = false);
+  }
+
+  /// 移除 Markdown 标记，只保留纯文本供 TTS 朗读。
+  static String _stripMarkdown(String md) {
+    return md
+        .replaceAll(RegExp(r'^#{1,6}\s+', multiLine: true), '')
+        .replaceAll(RegExp(r'\*\*(.+?)\*\*'), r'$1')
+        .replaceAll(RegExp(r'\*(.+?)\*'), r'$1')
+        .replaceAll(RegExp(r'`([^`]*)`'), r'$1')
+        .replaceAll(RegExp(r'^\s*[-*]\s+', multiLine: true), '')
+        .replaceAll(RegExp(r'\n{3,}'), '\n\n')
+        .trim();
   }
 
   Future<void> _load() async {
@@ -97,6 +133,20 @@ class _KnowledgeExplainSheetState extends State<KnowledgeExplainSheet> {
                       style: titleStyle(fontSize: 18),
                       overflow: TextOverflow.ellipsis,
                     ),
+                  ),
+                  // [v0.1.63] 讲解朗读/停止按钮
+                  IconButton(
+                    icon: Icon(
+                      _reading
+                          ? Icons.stop_circle_outlined
+                          : Icons.volume_up_outlined,
+                      size: 20,
+                      color: _reading ? StudyPalette.ember : StudyPalette.inkSoft,
+                    ),
+                    tooltip: _reading ? '停止朗读' : '朗读讲解',
+                    onPressed: _explanation == null
+                        ? null
+                        : () => unawaited(_toggleRead()),
                   ),
                   IconButton(
                     icon: const Icon(

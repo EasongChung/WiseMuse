@@ -2644,18 +2644,41 @@ class _SettingsPageState extends State<SettingsPage> {
                         ),
                       ),
                     ),
-                    SizedBox(
-                      height: 28,
-                      child: OutlinedButton(
-                        style: OutlinedButton.styleFrom(
-                          padding: const EdgeInsets.symmetric(horizontal: 10),
-                          textStyle: const TextStyle(fontSize: 11),
+                    // [v0.1.63] 已下载的预设模型显示绿色状态，不再显示下载按钮。
+                    if (_localModels.any((m) => m.name == filename))
+                      const Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(
+                            Icons.check_circle,
+                            size: 16,
+                            color: StudyPalette.moss,
+                          ),
+                          SizedBox(width: 4),
+                          Text(
+                            '已下载',
+                            style: TextStyle(
+                              fontSize: 11,
+                              color: StudyPalette.moss,
+                            ),
+                          ),
+                        ],
+                      )
+                    else
+                      SizedBox(
+                        height: 28,
+                        child: OutlinedButton(
+                          style: OutlinedButton.styleFrom(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 10,
+                            ),
+                            textStyle: const TextStyle(fontSize: 11),
+                          ),
+                          onPressed:
+                              () => _downloadPresetModel(filename, name, url),
+                          child: const Text('下载'),
                         ),
-                        onPressed:
-                            () => _downloadPresetModel(filename, name, url),
-                        child: const Text('下载'),
                       ),
-                    ),
                   ],
                 ),
               ),
