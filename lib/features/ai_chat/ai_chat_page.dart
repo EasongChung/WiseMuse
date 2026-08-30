@@ -965,12 +965,23 @@ class _AiChatPageState extends State<AiChatPage> {
                       );
                     }),
                   if (isUser)
-                    SelectableText(
-                      msg.content,
-                      style: const TextStyle(
-                        fontSize: 14,
-                        height: 1.5,
-                        color: Colors.white,
+                    // [v0.1.64] 用户气泡背景为橙色，选区/光标默认同色不可见，
+                    // 这里局部覆盖 SelectionTheme 使用高对比色，便于长按复制。
+                    Theme(
+                      data: Theme.of(context).copyWith(
+                        textSelectionTheme: const TextSelectionThemeData(
+                          selectionColor: Color(0xFFFFE0B2),
+                          selectionHandleColor: Color(0xFFFFFFFF),
+                          cursorColor: Color(0xFFFFFFFF),
+                        ),
+                      ),
+                      child: SelectableText(
+                        msg.content,
+                        style: const TextStyle(
+                          fontSize: 14,
+                          height: 1.5,
+                          color: Colors.white,
+                        ),
                       ),
                     )
                   else

@@ -2391,16 +2391,12 @@ class _SettingsPageState extends State<SettingsPage> {
 
   // ===== 8. 本地大模型管理（合入 AI 离线优先 + 模型弹窗选择与删除） =====
 
+  // [v0.1.64] MiniCPM5 本地推理输出兼容问题暂不处理，移除预设下载项。
   static const _presetModels = [
     (
       'Qwen3-0.6B Q8_0 (~670MB)',
       'Qwen3-0.6B-Q8_0.gguf',
       'https://modelscope.cn/models/Qwen/Qwen3-0.6B-GGUF/resolve/master/Qwen3-0.6B-Q8_0.gguf',
-    ),
-    (
-      'MiniCPM5-1B Q4_K_M (~650MB)',
-      'MiniCPM5-1B-Q4_K_M.gguf',
-      'https://modelscope.cn/models/OpenBMB/MiniCPM5-1B-GGUF/resolve/master/MiniCPM5-1B-Q4_K_M.gguf',
     ),
   ];
 
