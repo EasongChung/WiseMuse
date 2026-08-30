@@ -53,12 +53,6 @@ class ReaderPage extends StatefulWidget {
 class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
   static const _tag = 'reader';
 
-  /// [v0.1.62] 拼音朗读方案开关：
-  /// - 'a1'：句子数据已含谐音字（seed_data 改写），朗读直接读
-  /// - 'a2'：朗读前实时转换孤立拼音字母为谐音字，sentence 显示不变
-  /// 测试 A2 时改为 'a2'，测试 A1 改回 'a1'
-  static const _pinyinMode = 'a1';
-
   final NativeTtsService _tts = NativeTtsService();
 
   // 状态
@@ -630,13 +624,10 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
     await _speakRequest(_preparePinyin(text), request);
   }
 
-  /// [v0.1.62] A2 方案：朗读前把句首孤立的拼音字母转为中文谐音字。
-  /// 仅对内置书声母韵母章节（chapter 1-3）的句子生效，显示不变。
-  /// 句子格式如「b：双唇不送气清塞音。示例：…」→「玻：双唇…」
+  /// [v0.1.62] 朗读前把句首孤立的拼音字母转为中文谐音字，TTS 走中文发音。
+  /// 仅对内置书生效，句子显示不变（如「b：双唇不送气清塞音。」朗读为「玻：…」）。
   String _preparePinyin(String text) {
-    if (_pinyinMode != 'a2' || widget.book.id != SeedData.builtinBookId) {
-      return text;
-    }
+    if (widget.book.id != SeedData.builtinBookId) return text;
     // 句首可能是「第 N 单元：声母。」这类无拼音的，直接返回
     final m = RegExp(r'^([a-zA-Zü]+)([：:])').firstMatch(text);
     if (m == null) return text;

@@ -355,7 +355,7 @@ class SeedData {
 
     // [v0.1.61] 追加小学一、二年级语数英公共核心知识点。
     await GradeSeedData.populate(dao);
-    // [v0.1.60] 为内置书生成句子数据：按章节拼成「释义 + 示例」正文并分句，
+    // [v0.1.60] 为内置书生成句子数据：按章节拼成「释义」正文并分句，
     // 使内置书在书架中可浏览（文本阅读链路）、可构建 RAG 向量索引。
     await _ensureBuiltinSentences(db);
   }
@@ -438,20 +438,7 @@ class SeedData {
       final bodyLines =
           chapterPoints.map((p) {
             final def = (p.definition ?? '').trim();
-            final extra = (p.extra ?? '').trim();
-            final rawText = p.text.trim();
-            // [v0.1.62] 声母韵母章节朗读发音：把孤立的拼音字母替换为中文谐音字，
-            // 让 TTS 走中文发音而非英文字母名。仅影响句子文本（朗读+阅读显示），
-            // 不改知识点本身的 text（知识库列表仍显示原拼音字母）。
-            final readMap = chapter == 3 ? _integralReadMap : _pinyinReadMap;
-            final usePinyinRead = chapter == 1 || chapter == 2 || chapter == 3;
-            final text =
-                (usePinyinRead && readMap.containsKey(rawText.toLowerCase()))
-                    ? '$rawText（读${readMap[rawText.toLowerCase()]}）'
-                    : rawText;
-            if (def.isNotEmpty && extra.isNotEmpty) {
-              return '$text：$def。示例：$extra。';
-            }
+            final text = p.text.trim();
             if (def.isNotEmpty) return '$text：$def。';
             return text;
           }).toList();
