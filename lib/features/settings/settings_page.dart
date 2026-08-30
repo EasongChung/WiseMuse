@@ -2669,9 +2669,7 @@ class _SettingsPageState extends State<SettingsPage> {
                         height: 28,
                         child: OutlinedButton(
                           style: OutlinedButton.styleFrom(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 10,
-                            ),
+                            padding: const EdgeInsets.symmetric(horizontal: 10),
                             textStyle: const TextStyle(fontSize: 11),
                           ),
                           onPressed:

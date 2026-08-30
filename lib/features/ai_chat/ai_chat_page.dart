@@ -90,12 +90,13 @@ class _AiChatPageState extends State<AiChatPage> {
     if (!mounted) return;
     setState(() => _speakingMessageId = message.id);
     // 朗读前清理 Markdown 标记，避免把 #、** 等读出来。
-    final plain = message.content
-        .replaceAll(RegExp(r'^#{1,6}\s+', multiLine: true), '')
-        .replaceAll(RegExp(r'\*\*(.+?)\*\*'), r'$1')
-        .replaceAll(RegExp(r'\*([^*]+)\*'), r'$1')
-        .replaceAll(RegExp(r'`([^`]*)`'), r'$1')
-        .trim();
+    final plain =
+        message.content
+            .replaceAll(RegExp(r'^#{1,6}\s+', multiLine: true), '')
+            .replaceAll(RegExp(r'\*\*(.+?)\*\*'), r'$1')
+            .replaceAll(RegExp(r'\*([^*]+)\*'), r'$1')
+            .replaceAll(RegExp(r'`([^`]*)`'), r'$1')
+            .trim();
     await _tts.speak(plain);
     if (mounted) setState(() => _speakingMessageId = null);
   }
@@ -1021,9 +1022,10 @@ class _AiChatPageState extends State<AiChatPage> {
                                   ? Icons.stop_circle_outlined
                                   : Icons.volume_up_outlined,
                               size: 16,
-                              color: _speakingMessageId == msg.id
-                                  ? StudyPalette.ember
-                                  : StudyPalette.inkSoft,
+                              color:
+                                  _speakingMessageId == msg.id
+                                      ? StudyPalette.ember
+                                      : StudyPalette.inkSoft,
                             ),
                           ),
                         ),

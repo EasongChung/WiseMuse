@@ -224,7 +224,8 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
   /// [v0.1.28] 统一翻页同步：更新共享页码、清除旧状态。
   /// 所有翻页操作（PDF onPageChanged / 文本翻页 / 目录跳页）最终调用此函数。
   void _syncPage(int page) {
-    final total = _documentPageCount > 0 ? _documentPageCount : _pageTexts.length;
+    final total =
+        _documentPageCount > 0 ? _documentPageCount : _pageTexts.length;
     if (total <= 1) return;
     final next = page.clamp(0, total - 1);
     if (next == _pdfCurrentPage) return;
@@ -259,7 +260,8 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
 
   /// [v0.1.63] 跳转到指定页：文本模式走 _syncPage，PDF 原文额外驱动原生控件。
   void _goToPage(int page) {
-    final total = _documentPageCount > 0 ? _documentPageCount : _pageTexts.length;
+    final total =
+        _documentPageCount > 0 ? _documentPageCount : _pageTexts.length;
     if (total <= 1) return;
     final next = page.clamp(0, total - 1);
     if (_useOriginal && _pdfController != null) {
@@ -270,7 +272,8 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
 
   /// 文本模式翻页（+/- 翻页）。
   void _changePage(int delta) {
-    final total = _documentPageCount > 0 ? _documentPageCount : _pageTexts.length;
+    final total =
+        _documentPageCount > 0 ? _documentPageCount : _pageTexts.length;
     if (total <= 1) return;
     _syncPage(_pdfCurrentPage + delta);
   }
@@ -1579,10 +1582,7 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
                   final raw = controller.text.trim();
                   final n = int.tryParse(raw);
                   if (n == null || n < 1 || n > total) {
-                    setStateSheet(
-                      () =>
-                          errorText = '请输入 1~$total 之间的页码',
-                    );
+                    setStateSheet(() => errorText = '请输入 1~$total 之间的页码');
                     return;
                   }
                   _goToPage(n - 1);
@@ -1598,9 +1598,10 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
                         height: 4,
                         margin: const EdgeInsets.only(top: 12, bottom: 8),
                         decoration: BoxDecoration(
-                          color: isDark
-                              ? StudyPalette.darkBorder
-                              : StudyPalette.linen,
+                          color:
+                              isDark
+                                  ? StudyPalette.darkBorder
+                                  : StudyPalette.linen,
                           borderRadius: BorderRadius.circular(2),
                         ),
                       ),
@@ -1618,17 +1619,19 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
                             icon: Icon(
                               Icons.close,
                               size: 16,
-                              color: isDark
-                                  ? StudyPalette.darkInkSoft
-                                  : StudyPalette.inkSoft,
+                              color:
+                                  isDark
+                                      ? StudyPalette.darkInkSoft
+                                      : StudyPalette.inkSoft,
                             ),
                             label: Text(
                               '关闭',
                               style: TextStyle(
                                 fontSize: 12,
-                                color: isDark
-                                    ? StudyPalette.darkInkSoft
-                                    : StudyPalette.inkSoft,
+                                color:
+                                    isDark
+                                        ? StudyPalette.darkInkSoft
+                                        : StudyPalette.inkSoft,
                               ),
                             ),
                             onPressed: () => Navigator.of(ctx).pop(),
@@ -1691,88 +1694,96 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
                     ),
                     const Divider(height: 1),
                     Expanded(
-                      child: entries.isEmpty
-                          ? GridView.builder(
-                              padding: const EdgeInsets.all(12),
-                              gridDelegate:
-                                  const SliverGridDelegateWithFixedCrossAxisCount(
-                                crossAxisCount: 5,
-                                mainAxisSpacing: 8,
-                                crossAxisSpacing: 8,
-                                childAspectRatio: 1.0,
-                              ),
-                              itemCount: pages.length,
-                              itemBuilder: (ctx, i) {
-                                final selected = i == _pdfCurrentPage;
-                                return Material(
-                                  color: selected
-                                      ? StudyPalette.ember
-                                      : Colors.transparent,
-                                  borderRadius: BorderRadius.circular(10),
-                                  child: InkWell(
+                      child:
+                          entries.isEmpty
+                              ? GridView.builder(
+                                padding: const EdgeInsets.all(12),
+                                gridDelegate:
+                                    const SliverGridDelegateWithFixedCrossAxisCount(
+                                      crossAxisCount: 5,
+                                      mainAxisSpacing: 8,
+                                      crossAxisSpacing: 8,
+                                      childAspectRatio: 1.0,
+                                    ),
+                                itemCount: pages.length,
+                                itemBuilder: (ctx, i) {
+                                  final selected = i == _pdfCurrentPage;
+                                  return Material(
+                                    color:
+                                        selected
+                                            ? StudyPalette.ember
+                                            : Colors.transparent,
                                     borderRadius: BorderRadius.circular(10),
-                                    onTap: () {
-                                      _goToPage(i);
-                                      Navigator.of(ctx).pop();
-                                    },
-                                    child: Center(
-                                      child: Text(
-                                        '${i + 1}',
-                                        style: TextStyle(
-                                          color: selected
-                                              ? Colors.white
-                                              : StudyPalette.onSurfaceResolved(
-                                                  ctx,
-                                                ),
-                                          fontSize: 18,
-                                          fontWeight: FontWeight.w600,
+                                    child: InkWell(
+                                      borderRadius: BorderRadius.circular(10),
+                                      onTap: () {
+                                        _goToPage(i);
+                                        Navigator.of(ctx).pop();
+                                      },
+                                      child: Center(
+                                        child: Text(
+                                          '${i + 1}',
+                                          style: TextStyle(
+                                            color:
+                                                selected
+                                                    ? Colors.white
+                                                    : StudyPalette.onSurfaceResolved(
+                                                      ctx,
+                                                    ),
+                                            fontSize: 18,
+                                            fontWeight: FontWeight.w600,
+                                          ),
                                         ),
                                       ),
                                     ),
-                                  ),
-                                );
-                              },
-                            )
-                          : ListView.separated(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 8,
-                                vertical: 8,
-                              ),
-                              itemCount: entries.length,
-                              separatorBuilder: (_, _) =>
-                                  const Divider(height: 1, indent: 16),
-                              itemBuilder: (ctx, i) {
-                                final entry = entries[i];
-                                return ListTile(
-                                  leading: CircleAvatar(
-                                    radius: 14,
-                                    backgroundColor: entry.page == _pdfCurrentPage
-                                        ? StudyPalette.ember
-                                        : StudyPalette.parchmentDeep,
-                                    child: Text(
-                                      '${entry.page + 1}',
-                                      style: TextStyle(
-                                        fontSize: 12,
-                                        color: entry.page == _pdfCurrentPage
-                                            ? Colors.white
-                                            : StudyPalette.inkSoft,
+                                  );
+                                },
+                              )
+                              : ListView.separated(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 8,
+                                  vertical: 8,
+                                ),
+                                itemCount: entries.length,
+                                separatorBuilder:
+                                    (_, _) =>
+                                        const Divider(height: 1, indent: 16),
+                                itemBuilder: (ctx, i) {
+                                  final entry = entries[i];
+                                  return ListTile(
+                                    leading: CircleAvatar(
+                                      radius: 14,
+                                      backgroundColor:
+                                          entry.page == _pdfCurrentPage
+                                              ? StudyPalette.ember
+                                              : StudyPalette.parchmentDeep,
+                                      child: Text(
+                                        '${entry.page + 1}',
+                                        style: TextStyle(
+                                          fontSize: 12,
+                                          color:
+                                              entry.page == _pdfCurrentPage
+                                                  ? Colors.white
+                                                  : StudyPalette.inkSoft,
+                                        ),
                                       ),
                                     ),
-                                  ),
-                                  title: Text(
-                                    entry.title,
-                                    style: TextStyle(
-                                      fontSize: 14,
-                                      color: StudyPalette.onSurfaceResolved(ctx),
+                                    title: Text(
+                                      entry.title,
+                                      style: TextStyle(
+                                        fontSize: 14,
+                                        color: StudyPalette.onSurfaceResolved(
+                                          ctx,
+                                        ),
+                                      ),
                                     ),
-                                  ),
-                                  onTap: () {
-                                    _goToPage(entry.page);
-                                    Navigator.of(ctx).pop();
-                                  },
-                                );
-                              },
-                            ),
+                                    onTap: () {
+                                      _goToPage(entry.page);
+                                      Navigator.of(ctx).pop();
+                                    },
+                                  );
+                                },
+                              ),
                     ),
                   ],
                 );
@@ -1785,9 +1796,7 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
   }
 
   /// 构建目录项：取每页第一条非空文本作为标题。
-  List<({int page, String title})> _buildDirectoryEntries(
-    List<String> pages,
-  ) {
+  List<({int page, String title})> _buildDirectoryEntries(List<String> pages) {
     final entries = <({int page, String title})>[];
     for (var i = 0; i < pages.length; i++) {
       final first = pages[i]

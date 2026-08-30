@@ -141,12 +141,14 @@ class _KnowledgeExplainSheetState extends State<KnowledgeExplainSheet> {
                           ? Icons.stop_circle_outlined
                           : Icons.volume_up_outlined,
                       size: 20,
-                      color: _reading ? StudyPalette.ember : StudyPalette.inkSoft,
+                      color:
+                          _reading ? StudyPalette.ember : StudyPalette.inkSoft,
                     ),
                     tooltip: _reading ? '停止朗读' : '朗读讲解',
-                    onPressed: _explanation == null
-                        ? null
-                        : () => unawaited(_toggleRead()),
+                    onPressed:
+                        _explanation == null
+                            ? null
+                            : () => unawaited(_toggleRead()),
                   ),
                   IconButton(
                     icon: const Icon(
