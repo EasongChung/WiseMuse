@@ -333,6 +333,34 @@ class _SettingsPageState extends State<SettingsPage> {
               ? ListView(
                 padding: const EdgeInsets.fromLTRB(16, 8, 16, 40),
                 children: [
+                  // [v0.1.62] 上移：云端 AI 供应商至顶部
+                  _buildSectionTitle('云端 AI 供应商'),
+                  _buildProviderSection(),
+                  const SizedBox(height: 24),
+
+                  // [v0.1.62] 上移：RAG 知识库
+                  _buildSectionTitle('RAG 知识库'),
+                  _buildRagSection(),
+                  const SizedBox(height: 24),
+
+                  // [v0.1.62] 上移：本地大模型管理
+                  // [v0.1.44] 本地大模型管理（合入 AI 离线优先）
+                  _buildSectionTitle('本地大模型管理'),
+                  _buildLocalModelManager(),
+                  const SizedBox(height: 24),
+
+                  // [v0.1.62] 朗读参数
+                  // [v0.1.44] 朗读参数迁移至离线翻译模型下方
+                  _buildSectionTitle('朗读参数'),
+                  _buildTtsParams(),
+                  const SizedBox(height: 24),
+
+                  // [v0.1.62] 语音识别模型（Vosk）
+                  _buildSectionTitle('语音识别模型（Vosk 跟读）'),
+                  _buildVoskSection(),
+                  const SizedBox(height: 24),
+
+                  // [v0.1.62] 下移：翻译相关设置移至 Vosk 下方
                   _buildSectionTitle('翻译引擎'),
                   _buildEngineSelector(),
                   const SizedBox(height: 24),
@@ -343,28 +371,6 @@ class _SettingsPageState extends State<SettingsPage> {
 
                   _buildSectionTitle('离线翻译模型'),
                   _buildModelList(),
-                  const SizedBox(height: 24),
-
-                  // [v0.1.44] 朗读参数迁移至离线翻译模型下方
-                  _buildSectionTitle('朗读参数'),
-                  _buildTtsParams(),
-                  const SizedBox(height: 24),
-
-                  _buildSectionTitle('语音识别模型（Vosk 跟读）'),
-                  _buildVoskSection(),
-                  const SizedBox(height: 24),
-
-                  _buildSectionTitle('云端 AI 供应商'),
-                  _buildProviderSection(),
-                  const SizedBox(height: 24),
-
-                  _buildSectionTitle('RAG 知识库'),
-                  _buildRagSection(),
-                  const SizedBox(height: 24),
-
-                  // [v0.1.44] 本地大模型管理（合入 AI 离线优先）
-                  _buildSectionTitle('本地大模型管理'),
-                  _buildLocalModelManager(),
                   const SizedBox(height: 16),
                   _buildAboutSection(),
                 ],

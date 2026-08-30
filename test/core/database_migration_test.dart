@@ -91,7 +91,7 @@ void main() {
           where: 'book_id = ?',
           whereArgs: ['builtin_kindergarten_bridge'],
         ),
-        hasLength(222),
+        hasLength(354),
         reason: 'v1-v7 跨级升级也必须执行完整内置知识迁移',
       );
 
@@ -108,7 +108,7 @@ void main() {
     }
   });
 
-  test('v8 库升级 v9：补写内置书籍并保留 113 条孤儿知识点', () async {
+  test('v8 库升级 v9：补写内置书籍并保留孤儿知识点', () async {
     final dir = await Directory.systemTemp.createTemp('wisemuse_mig_v89_');
     final dbPath = p.join(dir.path, DatabaseProvider.dbName);
     try {
@@ -147,7 +147,7 @@ void main() {
       }
       await batch.commit(noResult: true);
       expect(await v8.query('books'), isEmpty);
-      expect(await v8.query('knowledge_points'), hasLength(222));
+      expect(await v8.query('knowledge_points'), hasLength(354));
       await v8.close();
 
       final v9 = await DatabaseProvider.openFile(dbPath);
@@ -157,8 +157,8 @@ void main() {
         whereArgs: ['builtin_kindergarten_bridge'],
       );
       expect(books, hasLength(1));
-      expect(books.single['title'], '幼小知识点收集(内置)');
-      expect(await v9.query('knowledge_points'), hasLength(222));
+      expect(books.single['title'], '小学知识点收集（内置）');
+      expect(await v9.query('knowledge_points'), hasLength(354));
       // v9 repair is non-destructive: a user-deleted/customized point is not restored.
       await v9.delete(
         'knowledge_points',

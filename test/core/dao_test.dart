@@ -156,11 +156,11 @@ void main() {
       await kpDao.insert(a);
       await kpDao.insert(b);
 
-      expect((await kpDao.getAll()).length, 224); // 2 条测试数据 + 222 条种子数据
+      expect((await kpDao.getAll()).length, 356); // 2 条测试数据 + 354 条种子数据
       expect(
         (await kpDao.getAll(type: KnowledgeType.word)).length,
-        142,
-      ); // 1 条测试 + 141 条种子 word 型
+        216,
+      ); // 1 条测试 + 215 条种子 word 型
     });
 
     test('upsertByText 幂等去重', () async {

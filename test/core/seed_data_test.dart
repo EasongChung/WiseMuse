@@ -28,10 +28,10 @@ void main() {
       expect(book.source.name, 'txt');
     });
 
-    test('知识点总数 222 条（含幼小衔接与一、二年级语数英核心内容）', () async {
+    test('知识点总数 354 条（含幼小衔接与一~六年级语数英核心内容）', () async {
       await SeedData.populate(db);
       final all = await KnowledgePointDao(db).getAll();
-      expect(all, hasLength(222));
+      expect(all, hasLength(354));
     });
 
     test('幼小衔接 5 个单元（chapter 1-5）各条目数正确', () async {
@@ -63,7 +63,7 @@ void main() {
       // 仅内置书 1 条（无额外 insert）
       expect(books.where((b) => b.id == SeedData.builtinBookId), hasLength(1));
       final points = await KnowledgePointDao(db).getAll();
-      expect(points, hasLength(222));
+      expect(points, hasLength(354));
     });
 
     test('所有知识点均归属 builtinBookId', () async {
