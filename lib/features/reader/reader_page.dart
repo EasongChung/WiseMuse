@@ -13,6 +13,7 @@ import '../../core/models/word_entry.dart';
 import '../../core/settings/settings_service.dart';
 import '../../core/storage/book_dao.dart';
 import '../../core/storage/database.dart';
+import '../../core/storage/seed_data.dart';
 import '../../core/storage/sentence_dao.dart';
 import '../../core/storage/word_entry_dao.dart';
 import '../../core/theme/app_theme.dart';
@@ -51,6 +52,12 @@ class ReaderPage extends StatefulWidget {
 
 class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
   static const _tag = 'reader';
+
+  /// [v0.1.62] 拼音朗读方案开关：
+  /// - 'a1'：句子数据已含谐音字（seed_data 改写），朗读直接读
+  /// - 'a2'：朗读前实时转换孤立拼音字母为谐音字，sentence 显示不变
+  /// 测试 A2 时改为 'a2'，测试 A1 改回 'a1'
+  static const _pinyinMode = 'a1';
 
   final NativeTtsService _tts = NativeTtsService();
 
@@ -620,7 +627,23 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
   Future<void> _speak(String text) async {
     if (_switchingMode) return;
     final request = ++_speechRequest;
-    await _speakRequest(text, request);
+    await _speakRequest(_preparePinyin(text), request);
+  }
+
+  /// [v0.1.62] A2 方案：朗读前把句首孤立的拼音字母转为中文谐音字。
+  /// 仅对内置书声母韵母章节（chapter 1-3）的句子生效，显示不变。
+  /// 句子格式如「b：双唇不送气清塞音。示例：…」→「玻：双唇…」
+  String _preparePinyin(String text) {
+    if (_pinyinMode != 'a2' || widget.book.id != SeedData.builtinBookId) {
+      return text;
+    }
+    // 句首可能是「第 N 单元：声母。」这类无拼音的，直接返回
+    final m = RegExp(r'^([a-zA-Zü]+)([：:])').firstMatch(text);
+    if (m == null) return text;
+    final pinyin = m.group(1)!.toLowerCase();
+    final read = SeedData.pinyinReadOf(pinyin);
+    if (read == null) return text;
+    return '$read${text.substring(m.group(1)!.length)}';
   }
 
   Future<void> _speakRequest(String text, int request) async {
@@ -1262,7 +1285,7 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
           _tag,
           '连读句子 ($i/${sentences.length}): "${currentSentence.text}"',
         );
-        final ok = await _tts.speak(currentSentence.text);
+        final ok = await _tts.speak(_preparePinyin(currentSentence.text));
         if (!ok && _isSpeechRequestCurrent(request)) {
           AppLog.w(_tag, '连读 TTS 未完成: "${currentSentence.text}"');
           break;

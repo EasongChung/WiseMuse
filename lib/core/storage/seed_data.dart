@@ -360,6 +360,49 @@ class SeedData {
     await _ensureBuiltinSentences(db);
   }
 
+  /// [v0.1.62] 声母韵母拉丁字母 → 中文谐音字，供朗读发音（避免 TTS 读成英文字母）。
+  static const _pinyinReadMap = {
+    // 声母
+    'b': '玻', 'p': '泼', 'm': '摸', 'f': '佛', 'd': '得', 't': '特',
+    'n': '讷', 'l': '勒', 'g': '哥', 'k': '科', 'h': '喝', 'j': '鸡',
+    'q': '七', 'x': '西', 'zh': '知', 'ch': '吃', 'sh': '狮', 'r': '日',
+    'z': '资', 'c': '雌', 's': '丝', 'y': '衣', 'w': '乌',
+    // 单韵母
+    'a': '啊', 'o': '喔', 'e': '鹅', 'i': '衣', 'u': '乌', 'ü': '淤',
+    // 复韵母
+    'ai': '哀', 'ei': '诶', 'ui': '威', 'ao': '袄', 'ou': '欧',
+    'iu': '优', 'ie': '耶', 'üe': '约', 'er': '耳',
+    // 鼻韵母
+    'an': '安', 'en': '恩', 'in': '音', 'un': '温', 'ün': '晕',
+    'ang': '昂', 'eng': '鞥', 'ing': '英', 'ong': '翁',
+  };
+
+  /// [v0.1.62] 整体认读音节谐音（chapter 3）。
+  static const _integralReadMap = {
+    'zhi': '知',
+    'chi': '吃',
+    'shi': '狮',
+    'ri': '日',
+    'zi': '资',
+    'ci': '雌',
+    'si': '丝',
+    'yi': '衣',
+    'wu': '乌',
+    'yu': '淤',
+    'ye': '耶',
+    'yue': '约',
+    'yuan': '渊',
+    'yin': '音',
+    'yun': '晕',
+  };
+
+  /// [v0.1.62] 查拼音字母对应的中文谐音字（A2 方案朗读预处理用）。
+  /// 优先整体认读音节，再查声母韵母表；找不到返回 null。
+  static String? pinyinReadOf(String pinyin) {
+    final p = pinyin.toLowerCase();
+    return _integralReadMap[p] ?? _pinyinReadMap[p];
+  }
+
   /// [v0.1.60] 内置书句子生成：从已落库的知识点按章节拼正文，再分句写入。
   static Future<void> _ensureBuiltinSentences(Database db) async {
     // [v0.1.60] 旧 schema 可能还没建 sentences 表，跳过即可
@@ -396,7 +439,16 @@ class SeedData {
           chapterPoints.map((p) {
             final def = (p.definition ?? '').trim();
             final extra = (p.extra ?? '').trim();
-            final text = p.text.trim();
+            final rawText = p.text.trim();
+            // [v0.1.62] 声母韵母章节朗读发音：把孤立的拼音字母替换为中文谐音字，
+            // 让 TTS 走中文发音而非英文字母名。仅影响句子文本（朗读+阅读显示），
+            // 不改知识点本身的 text（知识库列表仍显示原拼音字母）。
+            final readMap = chapter == 3 ? _integralReadMap : _pinyinReadMap;
+            final usePinyinRead = chapter == 1 || chapter == 2 || chapter == 3;
+            final text =
+                (usePinyinRead && readMap.containsKey(rawText.toLowerCase()))
+                    ? '$rawText（读${readMap[rawText.toLowerCase()]}）'
+                    : rawText;
             if (def.isNotEmpty && extra.isNotEmpty) {
               return '$text：$def。示例：$extra。';
             }
