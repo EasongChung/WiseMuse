@@ -565,6 +565,31 @@ class _KnowledgePageState extends State<KnowledgePage>
               color: StudyPalette.ember,
             ),
           ),
+          // [v0.1.64] 提取失败/中断时在进度条下方展示错误提示。
+          if (p.error != null && p.error!.isNotEmpty) ...[
+            const SizedBox(height: 6),
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Icon(
+                  Icons.error_outline,
+                  size: 14,
+                  color: Color(0xFFB3261E),
+                ),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: Text(
+                    p.error!,
+                    style: const TextStyle(
+                      fontSize: 11,
+                      color: Color(0xFFB3261E),
+                      height: 1.4,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ],
         ],
       ),
     );

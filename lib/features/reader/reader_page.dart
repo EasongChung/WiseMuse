@@ -1943,13 +1943,13 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
         padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
         child: Row(
           children: [
-            // 1. 连读/停止
+            // 1. 连读/暂停
             _sentenceActionButton(
               icon:
                   isPlaying
-                      ? Icons.stop_circle_outlined
+                      ? Icons.pause_circle_outlined
                       : Icons.play_circle_outline,
-              label: isPlaying ? '停止' : '连读',
+              label: isPlaying ? '暂停' : '连读',
               color:
                   isPlaying
                       ? StudyPalette.inkSoft
@@ -1957,13 +1957,14 @@ class _ReaderPageState extends State<ReaderPage> with WidgetsBindingObserver {
                           ? StudyPalette.ember
                           : StudyPalette.inkSoft),
               onTap: () {
-                if (!hasSentence) return;
                 if (isPlaying) {
+                  // [v0.1.63] 暂停替代停止；暂停后再点击句子回到单句朗读。
                   _stopAutoPlay();
-                } else {
-                  final idx = _activeSentenceIndex ?? 0;
-                  _startContinuousPlayFrom(idx);
+                  return;
                 }
+                // [v0.1.63] 无选中句时从第一句开始连读，无需先点句子。
+                final idx = _activeSentenceIndex ?? 0;
+                _startContinuousPlayFrom(idx);
               },
             ),
             // 2. 跟读
