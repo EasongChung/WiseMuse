@@ -323,7 +323,10 @@ class _KnowledgePageState extends State<KnowledgePage>
 
   Widget _buildKnowledgeTree() {
     if (_groupedPoints.isEmpty &&
-        (_backgroundProgress == null || !_backgroundProgress!.isRunning)) {
+        (_backgroundProgress == null ||
+            (!_backgroundProgress!.isRunning &&
+                (_backgroundProgress!.error == null ||
+                    _backgroundProgress!.error!.isEmpty)))) {
       return Center(
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -377,12 +380,24 @@ class _KnowledgePageState extends State<KnowledgePage>
       itemBuilder: (context, index) {
         final book = booksWithPoints[index];
         final pageMap = _groupedPoints[book.id] ?? const {};
+        // [v0.1.66] 终态错误也要渲染进度卡，避免失败提示不可见。
+        final hasTerminalError =
+            _backgroundProgress != null &&
+            _backgroundProgress!.bookId == book.id &&
+            !_backgroundProgress!.isRunning &&
+            _backgroundProgress!.error != null &&
+            _backgroundProgress!.error!.isNotEmpty;
         final isExtracting =
             _backgroundProgress != null &&
             _backgroundProgress!.bookId == book.id &&
             _backgroundProgress!.isRunning;
 
-        return _buildBookSection(book, pageMap, isExtracting);
+        return _buildBookSection(
+          book,
+          pageMap,
+          isExtracting,
+          hasTerminalError: hasTerminalError,
+        );
       },
     );
   }
@@ -390,13 +405,14 @@ class _KnowledgePageState extends State<KnowledgePage>
   Widget _buildBookSection(
     Book book,
     Map<int, List<KnowledgePoint>> pageMap,
-    bool isExtracting,
-  ) {
+    bool isExtracting, {
+    bool hasTerminalError = false,
+  }) {
     final totalPoints = _countPoints(pageMap);
     final sortedPages =
         pageMap.entries.toList()..sort((a, b) => a.key.compareTo(b.key));
     final childList =
-        sortedPages.isEmpty && !isExtracting
+        sortedPages.isEmpty && !isExtracting && !hasTerminalError
             ? <Widget>[
               const Padding(
                 padding: EdgeInsets.all(12),
@@ -517,7 +533,10 @@ class _KnowledgePageState extends State<KnowledgePage>
             ),
             children: childList,
           ),
-          if (isExtracting) _buildBookItemProgressBar(_backgroundProgress!),
+          if (_backgroundProgress != null &&
+              (_backgroundProgress!.isRunning ||
+                  (hasTerminalError && _backgroundProgress!.bookId == book.id)))
+            _buildBookItemProgressBar(_backgroundProgress!),
         ],
       ),
     );

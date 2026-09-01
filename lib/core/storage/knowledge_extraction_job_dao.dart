@@ -73,12 +73,12 @@ class KnowledgeExtractionJobDao {
     return rows.map(KnowledgeExtractionJob.fromMap).toList();
   }
 
-  /// [v0.1.60] 包含 pending / running（lease 过期）/ failed 三类任务，便于失败页恢复。
+  /// 待自动恢复的任务仅包含 pending 和租约过期的 running。
+  /// failed 表示已暂停，必须由用户显式点击重试，避免启动时吞掉错误。
   Future<List<KnowledgeExtractionJob>> getRecoverable() async {
     final where = <String>[
       "(status = 'pending' "
-          "OR (status = 'running' AND (lease_until IS NULL OR lease_until < ?)) "
-          "OR status = 'failed')",
+          "OR (status = 'running' AND lease_until IS NOT NULL AND lease_until < ?))",
     ];
     final args = <dynamic>[DateTime.now().microsecondsSinceEpoch];
     if (profileId != null) {
@@ -242,7 +242,25 @@ class KnowledgeExtractionJobDao {
     });
   }
 
-  /// [v0.1.60] 失败页重置为 pending，供下次恢复时重跑。
+  /// 将整本任务标记为 failed（UI 语义为“已暂停，等待用户重试”）。
+  Future<bool> markJobFailed(String jobId, String token, String error) async {
+    final now = DateTime.now().microsecondsSinceEpoch;
+    final changed = await db.update(
+      _jobs,
+      {
+        'status': KnowledgeJobStatus.failed.name,
+        'last_error': error,
+        'lease_until': null,
+        'run_token': null,
+        'updated_at': now,
+      },
+      where: 'id = ? AND run_token = ?',
+      whereArgs: [jobId, token],
+    );
+    return changed == 1;
+  }
+
+  /// [v0.1.60] 失败页重置为 pending，供用户显式重试时重跑。
   Future<bool> resetFailedPages(String jobId, String token) async {
     final now = DateTime.now().microsecondsSinceEpoch;
     return db.transaction((txn) async {
@@ -305,7 +323,7 @@ class KnowledgeExtractionJobDao {
                 : KnowledgeJobStatus.running.name,
         'completed_pages': completed,
         'point_count': pointCount,
-        'last_error': null,
+        // 保留此前失败页的错误，避免后续成功页覆盖诊断信息。
         'lease_until':
             isLastPage ? null : now + const Duration(minutes: 2).inMicroseconds,
         'updated_at': now,

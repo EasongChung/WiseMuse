@@ -287,6 +287,7 @@ class KnowledgeExtractionService {
               '连续 $consecutiveFailures 页提取失败（AI 引擎不可用），任务暂停；已提取 $pointCount 个知识点';
           AppLog.w('knowledge_extract', abort);
           errors.add(abort);
+          await jobDao.markJobFailed(job.id, token, abort);
           _publishProgress(
             book,
             done: done,
