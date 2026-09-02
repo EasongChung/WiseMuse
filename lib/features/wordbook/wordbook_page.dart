@@ -9,7 +9,6 @@ import '../../core/storage/word_entry_dao.dart';
 import '../../core/theme/app_theme.dart';
 import '../../widgets/review_card.dart';
 import '../../widgets/knowledge_scope_picker.dart';
-import '../stats/stats_page.dart';
 import '../../services/spaced_repetition_service.dart';
 import '../../widgets/top_toast.dart';
 
@@ -159,21 +158,6 @@ class _WordBookPageState extends State<WordBookPage> {
       appBar: AppBar(
         title: const Text('生词本'),
         actions: [
-          IconButton(
-            tooltip: '学习统计',
-            icon: const Icon(Icons.insights_outlined),
-            onPressed: () {
-              Navigator.of(context).push(
-                MaterialPageRoute<void>(builder: (_) => const StatsPage()),
-              );
-            },
-          ),
-          if (_words.isNotEmpty)
-            IconButton(
-              tooltip: '复习',
-              icon: const Icon(Icons.autorenew_outlined),
-              onPressed: _openReview,
-            ),
           // [v0.1.38] 从知识库复习
           IconButton(
             tooltip: '从知识库复习',

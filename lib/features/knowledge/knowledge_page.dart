@@ -465,7 +465,22 @@ class _KnowledgePageState extends State<KnowledgePage>
                 PopupMenuButton<String>(
                   icon: const Icon(Icons.more_vert, size: 18),
                   onSelected: (action) async {
-                    if (action == 'clear') {
+                    if (action == 'pause') {
+                      await KnowledgeExtractionService.instance.pauseExtraction(
+                        book.id,
+                      );
+                      if (mounted) {
+                        TopToast.show(context, '已暂停《${book.title}》提取');
+                      }
+                    } else if (action == 'stop') {
+                      await KnowledgeExtractionService.instance.stopExtraction(
+                        book.id,
+                      );
+                      if (mounted) {
+                        TopToast.show(context, '已停止《${book.title}》提取');
+                        _load();
+                      }
+                    } else if (action == 'clear') {
                       final ok = await showDialog<bool>(
                         context: context,
                         builder:
@@ -509,9 +524,35 @@ class _KnowledgePageState extends State<KnowledgePage>
                   },
                   itemBuilder:
                       (context) => [
-                        if (isExtracting ||
+                        if (isExtracting) ...[
+                          const PopupMenuItem(
+                            value: 'pause',
+                            child: Row(
+                              children: [
+                                Icon(Icons.pause, size: 18),
+                                SizedBox(width: 8),
+                                Text('暂停提取'),
+                              ],
+                            ),
+                          ),
+                          const PopupMenuItem(
+                            value: 'stop',
+                            child: Row(
+                              children: [
+                                Icon(Icons.stop, size: 18, color: Colors.red),
+                                SizedBox(width: 8),
+                                Text(
+                                  '停止提取',
+                                  style: TextStyle(color: Colors.red),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                        if (!isExtracting &&
                             (_backgroundProgress?.bookId == book.id &&
-                                !_backgroundProgress!.isRunning))
+                                _backgroundProgress!.error != null &&
+                                _backgroundProgress!.error!.isNotEmpty))
                           const PopupMenuItem(
                             value: 'retry',
                             child: Text('继续/重试当前页'),

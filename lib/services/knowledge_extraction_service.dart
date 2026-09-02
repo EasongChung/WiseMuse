@@ -45,6 +45,8 @@ class KnowledgeExtractionService {
 
   final AiService _ai;
   final Map<String, Future<KnowledgeExtractionResult>> _activeRuns = {};
+  final Set<String> _pausedBooks = {};
+  final Set<String> _stoppedBooks = {};
   Future<void>? _resumeFuture;
 
   /// 全局任务状态回调列表。
@@ -191,6 +193,8 @@ class KnowledgeExtractionService {
     void Function(int done, int total)? onProgress,
     bool restart = false,
   }) {
+    _pausedBooks.remove(book.id);
+    _stoppedBooks.remove(book.id);
     final active = _activeRuns[book.id];
     if (active != null) return active;
     final future = _runBook(book, onProgress: onProgress, restart: restart);
@@ -255,6 +259,46 @@ class KnowledgeExtractionService {
     );
 
     for (final checkpoint in pages) {
+      if (_pausedBooks.contains(book.id)) {
+        _pausedBooks.remove(book.id);
+        const pauseMsg = '提取已由用户暂停';
+        AppLog.d('knowledge_extract', '《${book.title}》$pauseMsg');
+        await jobDao.markJobFailed(job.id, token, pauseMsg);
+        _publishProgress(
+          book,
+          done: done,
+          total: pages.length,
+          pointCount: pointCount,
+          running: false,
+          error: pauseMsg,
+          onProgress: onProgress,
+        );
+        return KnowledgeExtractionResult(
+          summary: summary,
+          points: allPoints,
+          errors: [pauseMsg],
+        );
+      }
+      if (_stoppedBooks.contains(book.id)) {
+        _stoppedBooks.remove(book.id);
+        AppLog.d('knowledge_extract', '《${book.title}》提取已由用户停止');
+        await jobDao.clearBook(book.id);
+        _publishProgress(
+          book,
+          done: done,
+          total: pages.length,
+          pointCount: pointCount,
+          running: false,
+          error: null,
+          onProgress: onProgress,
+        );
+        return KnowledgeExtractionResult(
+          summary: summary,
+          points: allPoints,
+          errors: ['提取已停止'],
+        );
+      }
+
       if (checkpoint.status == KnowledgePageStatus.completed) continue;
       final pageSentences = pageGroups[checkpoint.page] ?? const <Sentence>[];
       if (!await jobDao.markPageRunning(job.id, token, checkpoint)) continue;
@@ -364,6 +408,46 @@ class KnowledgeExtractionService {
   }
 
   Future<void> clearCheckpoint(String bookId) async {
+    final db = await DatabaseProvider.database;
+    await KnowledgeExtractionJobDao(db).clearBook(bookId);
+  }
+
+  /// [v0.1.67] 暂停指定书籍的提取任务。
+  Future<void> pauseExtraction(String bookId) async {
+    _pausedBooks.add(bookId);
+    final current = _currentTask;
+    if (current != null && current.bookId == bookId) {
+      _notify(
+        KnowledgeTaskProgress(
+          bookId: current.bookId,
+          bookTitle: current.bookTitle,
+          done: current.done,
+          total: current.total,
+          pointCount: current.pointCount,
+          isRunning: false,
+          error: '提取已暂停',
+        ),
+      );
+    }
+  }
+
+  /// [v0.1.67] 停止指定书籍的提取任务并清理进度。
+  Future<void> stopExtraction(String bookId) async {
+    _stoppedBooks.add(bookId);
+    final current = _currentTask;
+    if (current != null && current.bookId == bookId) {
+      _notify(
+        KnowledgeTaskProgress(
+          bookId: current.bookId,
+          bookTitle: current.bookTitle,
+          done: current.done,
+          total: current.total,
+          pointCount: current.pointCount,
+          isRunning: false,
+          error: null,
+        ),
+      );
+    }
     final db = await DatabaseProvider.database;
     await KnowledgeExtractionJobDao(db).clearBook(bookId);
   }

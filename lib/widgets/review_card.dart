@@ -13,12 +13,11 @@ import '../services/spaced_repetition_service.dart';
 import 'review_item.dart';
 import '../../widgets/top_toast.dart';
 
-/// [v0.1.35] 复习卡片：三种形态，艾宾浩斯双向掌握度流转。
-/// [v0.1.66] 重构为儿童友好交互：空态保护、显式自评、保存反馈、TTS 拼写。
+/// [v0.1.35] 复习卡片：形态流转与掌握度更新。
+/// [v0.1.66] [v0.1.67] 重构为儿童友好交互：听写模式（大字+小喇叭+已掌握/未掌握按钮）与选择题。
 ///
-/// - [ReviewMode.flashcard]：卡片翻转记忆（看词 → 翻转看释义/例句 → 自评）
+/// - [ReviewMode.dictation]：听写模式（大字显示、语音播放、直接自评掌握状态）
 /// - [ReviewMode.choice]：选择题辨析（不暴露答案，语义/听音选词）
-/// - [ReviewMode.spelling]：拼写复习（隐藏目标词，听音输入，重播按钮）
 class ReviewCard extends StatefulWidget {
   const ReviewCard({
     super.key,
@@ -42,9 +41,8 @@ class ReviewCard extends StatefulWidget {
 
 /// 复习形态。
 enum ReviewMode {
-  flashcard('卡片翻转'),
-  choice('选择题'),
-  spelling('拼写');
+  dictation('听写'),
+  choice('选择题');
 
   const ReviewMode(this.label);
   final String label;
@@ -57,31 +55,29 @@ class _ReviewCardState extends State<ReviewCard> {
 
   late final List<ReviewItem> _items;
   int _index = 0;
-  ReviewMode _mode = ReviewMode.flashcard;
-  bool _flipped = false;
+  ReviewMode _mode = ReviewMode.dictation;
   bool _answered = false;
   bool _lastCorrect = false;
   String? _selectedChoice;
-  final _spellingCtrl = TextEditingController();
   List<String> _options = [];
   bool _saving = false;
   String? _saveError;
-  bool _spellingPlaying = false;
+  bool _dictationPlaying = false;
 
   @override
   void initState() {
     super.initState();
     _items =
         widget.items ?? widget.words.map(ReviewItem.fromWordEntry).toList();
-    _mode = widget.initialMode ?? ReviewMode.flashcard;
+    _mode = widget.initialMode ?? ReviewMode.dictation;
     if (_items.isNotEmpty) {
       _prepareChoice();
+      _autoPlayIfDictation();
     }
   }
 
   @override
   void dispose() {
-    _spellingCtrl.dispose();
     unawaited(_tts.stop());
     super.dispose();
   }
@@ -106,19 +102,28 @@ class _ReviewCardState extends State<ReviewCard> {
     _options = [current.text, ...candidates.take(2)]..shuffle();
   }
 
+  void _autoPlayIfDictation() {
+    if (_mode == ReviewMode.dictation && _current != null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted && _mode == ReviewMode.dictation) {
+          _playDictation();
+        }
+      });
+    }
+  }
+
   // ===== 状态推进 =====
 
   void _resetForCurrent() {
     setState(() {
-      _flipped = false;
       _answered = false;
       _lastCorrect = false;
       _selectedChoice = null;
-      _spellingCtrl.clear();
       _saveError = null;
-      _spellingPlaying = false;
+      _dictationPlaying = false;
     });
     _prepareChoice();
+    _autoPlayIfDictation();
   }
 
   void _next() {
@@ -140,15 +145,14 @@ class _ReviewCardState extends State<ReviewCard> {
     unawaited(_tts.stop());
     setState(() {
       _mode = mode;
-      _flipped = false;
       _answered = false;
       _lastCorrect = false;
       _selectedChoice = null;
-      _spellingCtrl.clear();
       _saveError = null;
-      _spellingPlaying = false;
+      _dictationPlaying = false;
     });
     _prepareChoice();
+    _autoPlayIfDictation();
   }
 
   // ===== 提交/保存 =====
@@ -221,31 +225,20 @@ class _ReviewCardState extends State<ReviewCard> {
     _submit(correct: correct);
   }
 
-  Future<void> _playSpelling() async {
+  Future<void> _playDictation() async {
     final current = _current;
-    if (current == null || _spellingPlaying) return;
-    setState(() => _spellingPlaying = true);
+    if (current == null || _dictationPlaying) return;
+    setState(() => _dictationPlaying = true);
     try {
       await _tts.speak(current.text);
     } catch (e) {
-      AppLog.e(_tag, '拼写 TTS 播放失败: $e');
+      AppLog.e(_tag, '听写 TTS 播放失败: $e');
       if (mounted) {
         TopToast.show(context, '语音播放失败，请检查 TTS 配置');
       }
     } finally {
-      if (mounted) setState(() => _spellingPlaying = false);
+      if (mounted) setState(() => _dictationPlaying = false);
     }
-  }
-
-  void _onSpellingSubmit() {
-    if (_answered || _saving || _current == null) return;
-    final input = _spellingCtrl.text.trim();
-    final correct = input.toLowerCase() == _current!.text.toLowerCase();
-    setState(() {
-      _answered = true;
-      _lastCorrect = correct;
-    });
-    _submit(correct: correct);
   }
 
   // ===== 构建 =====
@@ -342,125 +335,148 @@ class _ReviewCardState extends State<ReviewCard> {
 
   Widget _buildModeContent(ReviewItem item) {
     switch (_mode) {
-      case ReviewMode.flashcard:
-        return _buildFlashcard(item);
+      case ReviewMode.dictation:
+        return _buildDictation(item);
       case ReviewMode.choice:
         return _buildChoice(item);
-      case ReviewMode.spelling:
-        return _buildSpelling(item);
     }
   }
 
-  // ===== 卡片翻转模式 =====
+  // ===== 听写模式（参照练习中的听写：大字展示 + 小喇叭 + 已掌握/未掌握按钮） =====
 
-  Widget _buildFlashcard(ReviewItem item) {
+  Widget _buildDictation(ReviewItem item) {
     return SingleChildScrollView(
-      padding: const EdgeInsets.all(20),
+      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
       child: Column(
+        mainAxisSize: MainAxisSize.min,
         children: [
-          const SizedBox(height: 16),
-          GestureDetector(
-            onTap: () => setState(() => _flipped = !_flipped),
-            child: AnimatedSwitcher(
-              duration: const Duration(milliseconds: 300),
-              child:
-                  _flipped
-                      ? _buildFlashcardBack(item)
-                      : _buildFlashcardFront(item),
-            ),
-          ),
-          const SizedBox(height: 16),
-          TextButton.icon(
-            onPressed: () => setState(() => _flipped = !_flipped),
-            icon: const Icon(Icons.flip_outlined, size: 18),
-            label: Text(_flipped ? '看词语' : '看释义'),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildFlashcardFront(ReviewItem item) {
-    return Container(
-      key: const ValueKey('front'),
-      width: double.infinity,
-      constraints: const BoxConstraints(minHeight: 200),
-      padding: const EdgeInsets.all(24),
-      decoration: BoxDecoration(
-        color: StudyPalette.parchmentDeep,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: StudyPalette.linen, width: 1),
-      ),
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Icon(
-            Icons.psychology_outlined,
-            size: 36,
-            color: StudyPalette.inkSoft.withValues(alpha: 0.4),
-          ),
-          const SizedBox(height: 16),
-          Text(
-            item.text,
-            style: titleStyle(fontSize: 32),
-            textAlign: TextAlign.center,
-          ),
           const SizedBox(height: 8),
-          Text(
-            '轻触查看释义',
-            style: TextStyle(
-              fontSize: 13,
-              color: StudyPalette.inkSoft.withValues(alpha: 0.6),
+          // 1. 当前词语（大字显示，上移设计）
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 24),
+            decoration: BoxDecoration(
+              color: StudyPalette.parchmentDeep.withValues(alpha: 0.5),
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(
+                color: StudyPalette.ember.withValues(alpha: 0.35),
+                width: 2,
+              ),
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  item.text,
+                  style: const TextStyle(
+                    fontSize: 40,
+                    fontWeight: FontWeight.w700,
+                    color: StudyPalette.ink,
+                  ),
+                  textAlign: TextAlign.center,
+                ),
+                if (item.definition != null && item.definition!.isNotEmpty) ...[
+                  const SizedBox(height: 10),
+                  Text(
+                    item.definition!,
+                    style: const TextStyle(
+                      fontSize: 14,
+                      color: StudyPalette.inkSoft,
+                      height: 1.4,
+                    ),
+                    textAlign: TextAlign.center,
+                  ),
+                ],
+              ],
             ),
           ),
-        ],
-      ),
-    );
-  }
+          const SizedBox(height: 16),
 
-  Widget _buildFlashcardBack(ReviewItem item) {
-    return Container(
-      key: const ValueKey('back'),
-      width: double.infinity,
-      constraints: const BoxConstraints(minHeight: 200),
-      padding: const EdgeInsets.all(24),
-      decoration: BoxDecoration(
-        color: StudyPalette.moss.withValues(alpha: 0.08),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(
-          color: StudyPalette.moss.withValues(alpha: 0.3),
-          width: 1,
-        ),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(item.text, style: titleStyle(fontSize: 28)),
-          const SizedBox(height: 12),
-          if (item.definition != null && item.definition!.isNotEmpty)
-            Text(
-              item.definition!,
-              style: const TextStyle(fontSize: 15, height: 1.6),
+          // 2. 小喇叭（播放 / 再听一遍）
+          IconButton(
+            icon: Icon(
+              _dictationPlaying ? Icons.volume_up : Icons.volume_up_outlined,
+              size: 42,
+              color: StudyPalette.ember,
             ),
-          if (item.extra != null && item.extra!.isNotEmpty) ...[
-            const SizedBox(height: 8),
+            onPressed: _dictationPlaying ? null : _playDictation,
+            tooltip: '再听一遍',
+          ),
+          const SizedBox(height: 20),
+
+          // 3. 腾出一行2个按钮的位置：‘未掌握’‘已掌握’
+          Row(
+            children: [
+              Expanded(
+                child: OutlinedButton.icon(
+                  icon: const Icon(
+                    Icons.close,
+                    size: 20,
+                    color: StudyPalette.ember,
+                  ),
+                  label: const Text(
+                    '未掌握',
+                    style: TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w600,
+                      color: StudyPalette.ember,
+                    ),
+                  ),
+                  style: OutlinedButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                    side: const BorderSide(
+                      color: StudyPalette.ember,
+                      width: 1.5,
+                    ),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                  ),
+                  onPressed:
+                      _answered || _saving
+                          ? null
+                          : () => _submit(correct: false),
+                ),
+              ),
+              const SizedBox(width: 16),
+              Expanded(
+                child: FilledButton.icon(
+                  icon: const Icon(Icons.check, size: 20, color: Colors.white),
+                  label: const Text(
+                    '已掌握',
+                    style: TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w600,
+                      color: Colors.white,
+                    ),
+                  ),
+                  style: FilledButton.styleFrom(
+                    backgroundColor: StudyPalette.moss,
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                  ),
+                  onPressed:
+                      _answered || _saving
+                          ? null
+                          : () => _submit(correct: true),
+                ),
+              ),
+            ],
+          ),
+
+          if (_answered) ...[
+            const SizedBox(height: 16),
             Text(
-              '示例：${item.extra!}',
+              _lastCorrect ? '太棒了，已掌握！' : '已记录未掌握，稍后继续复习',
               style: TextStyle(
-                fontSize: 13,
-                color: StudyPalette.inkSoft.withValues(alpha: 0.7),
-                height: 1.5,
+                fontSize: 15,
+                fontWeight: FontWeight.w600,
+                color: _lastCorrect ? StudyPalette.moss : StudyPalette.ember,
               ),
             ),
           ],
-          const SizedBox(height: 12),
-          Text(
-            '掌握度 ${item.mastery}/5 · 已错 ${item.wrongCount} 次',
-            style: TextStyle(
-              fontSize: 12,
-              color: StudyPalette.inkSoft.withValues(alpha: 0.5),
-            ),
-          ),
         ],
       ),
     );
@@ -506,7 +522,7 @@ class _ReviewCardState extends State<ReviewCard> {
                     textAlign: TextAlign.center,
                   ),
                 ] else ...[
-                  Icon(
+                  const Icon(
                     Icons.volume_up_outlined,
                     size: 32,
                     color: StudyPalette.ember,
@@ -519,7 +535,7 @@ class _ReviewCardState extends State<ReviewCard> {
                   ),
                   const SizedBox(height: 8),
                   FilledButton.icon(
-                    onPressed: _spellingPlaying ? null : _playSpelling,
+                    onPressed: _dictationPlaying ? null : _playDictation,
                     icon: const Icon(Icons.volume_up, size: 18),
                     label: const Text('播放语音'),
                     style: FilledButton.styleFrom(
@@ -618,147 +634,36 @@ class _ReviewCardState extends State<ReviewCard> {
     );
   }
 
-  // ===== 拼写/听写模式 =====
-
-  Widget _buildSpelling(ReviewItem item) {
-    return SingleChildScrollView(
-      padding: const EdgeInsets.all(20),
-      child: Column(
-        children: [
-          const SizedBox(height: 16),
-          // 隐藏目标词，显示提示
-          Container(
-            width: double.infinity,
-            padding: const EdgeInsets.all(20),
-            decoration: BoxDecoration(
-              color: StudyPalette.parchmentDeep,
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: StudyPalette.linen),
-            ),
-            child: Column(
-              children: [
-                Icon(Icons.edit_outlined, size: 32, color: StudyPalette.ember),
-                const SizedBox(height: 12),
-                Text(
-                  '先听语音，再写出听到的词语',
-                  style: titleStyle(fontSize: 16),
-                  textAlign: TextAlign.center,
-                ),
-                const SizedBox(height: 12),
-                FilledButton.icon(
-                  onPressed: _spellingPlaying ? null : _playSpelling,
-                  icon: const Icon(Icons.volume_up, size: 18),
-                  label: const Text('播放语音'),
-                  style: FilledButton.styleFrom(
-                    backgroundColor: StudyPalette.ember,
-                  ),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(height: 20),
-          TextField(
-            controller: _spellingCtrl,
-            enabled: !_answered && !_saving,
-            textAlign: TextAlign.center,
-            style: const TextStyle(fontSize: 18),
-            decoration: InputDecoration(
-              hintText: '输入你听到的词语',
-              border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(12),
-              ),
-              contentPadding: const EdgeInsets.symmetric(
-                horizontal: 16,
-                vertical: 14,
-              ),
-            ),
-            onSubmitted: (_) => _onSpellingSubmit(),
-          ),
-          const SizedBox(height: 16),
-          FilledButton.icon(
-            onPressed:
-                (_answered || _saving || _spellingCtrl.text.trim().isEmpty)
-                    ? null
-                    : _onSpellingSubmit,
-            icon: const Icon(Icons.check),
-            label: const Text('确认'),
-            style: FilledButton.styleFrom(
-              backgroundColor: StudyPalette.moss,
-              padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 12),
-            ),
-          ),
-          if (_answered) ...[
-            const SizedBox(height: 16),
-            Text(
-              _lastCorrect ? '答对了！' : '答错了，正确答案是 ${item.text}',
-              style: TextStyle(
-                fontSize: 15,
-                fontWeight: FontWeight.w600,
-                color: _lastCorrect ? StudyPalette.moss : Colors.red,
-              ),
-            ),
-          ],
-        ],
-      ),
-    );
-  }
-
   // ===== 结果栏 =====
 
   Widget _buildResultBar() {
     final canAdvance = !_saving;
     return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
+      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+      decoration: const BoxDecoration(
         color: StudyPalette.parchmentDeep,
         border: Border(top: BorderSide(color: StudyPalette.linen, width: 1)),
       ),
-      child: Column(
+      child: Row(
         children: [
-          Row(
-            children: [
-              Icon(
-                _lastCorrect ? Icons.check_circle : Icons.cancel,
-                color: _lastCorrect ? StudyPalette.moss : Colors.red,
-                size: 24,
-              ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Text(
-                  _lastCorrect ? '太棒了，掌握了！' : '没关系，再复习一遍',
-                  style: TextStyle(
-                    fontSize: 15,
-                    fontWeight: FontWeight.w600,
-                    color:
-                        _lastCorrect ? StudyPalette.moss : StudyPalette.ember,
-                  ),
-                ),
-              ),
-            ],
+          Expanded(
+            child: OutlinedButton(
+              onPressed: canAdvance ? _skip : null,
+              child: const Text('跳过'),
+            ),
           ),
-          const SizedBox(height: 12),
-          Row(
-            children: [
-              Expanded(
-                child: OutlinedButton(
-                  onPressed: canAdvance ? _skip : null,
-                  child: const Text('跳过'),
-                ),
+          const SizedBox(width: 16),
+          Expanded(
+            flex: 2,
+            child: FilledButton.icon(
+              onPressed: canAdvance ? _next : null,
+              icon: const Icon(Icons.arrow_forward),
+              label: Text(_index + 1 >= _items.length ? '完成' : '下一题'),
+              style: FilledButton.styleFrom(
+                backgroundColor: StudyPalette.ember,
+                padding: const EdgeInsets.symmetric(vertical: 12),
               ),
-              const SizedBox(width: 12),
-              Expanded(
-                flex: 2,
-                child: FilledButton.icon(
-                  onPressed: canAdvance ? _next : null,
-                  icon: const Icon(Icons.arrow_forward),
-                  label: Text(_index + 1 >= _items.length ? '完成' : '下一题'),
-                  style: FilledButton.styleFrom(
-                    backgroundColor: StudyPalette.ember,
-                    padding: const EdgeInsets.symmetric(vertical: 12),
-                  ),
-                ),
-              ),
-            ],
+            ),
           ),
         ],
       ),
